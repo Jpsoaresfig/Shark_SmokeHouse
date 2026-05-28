@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin() {
+      return isAuth() && getRole() == 'admin';
+    }
+    function isSeller() {
+      return isAuth() && (getRole() == 'seller' || getRole() == 'admin');
+    }
+    function isMotoboy() {
+      return isAuth() && (getRole() == 'motoboy' || getRole() == 'admin');
+    }
+
+    // ── Users ─────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'loyaltyPoints'])
+                    || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ── Products ──────────────────────────────────────────────
+    match /products/{productId} {
+      allow read: if resource.data.active == true || isAdmin() || isSeller();
+      allow write: if isAdmin();
+    }
+
+    // ── Orders ────────────────────────────────────────────────
+    match /orders/{orderId} {
+      allow read: if isAuth() && (
+        resource.data.customerId == request.auth.uid ||
+        isAdmin() ||
+        isSeller() ||
+        (isMotoboy() && resource.data.motoboyId == request.auth.uid)
+      );
+      allow create: if isAuth() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isAdmin()
+        || isSeller()
+        || (isMotoboy() && resource.data.motoboyId == request.auth.uid)
+        || (isAuth() && resource.data.customerId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']));
+      allow delete: if isAdmin();
+    }
+
+    // ── Lounge Bookings ───────────────────────────────────────
+    match /lounge_bookings/{bookingId} {
+      allow create: if true; // público — sem login obrigatório
+      allow read, update, delete: if isAdmin();
+    }
+
+    // ── Banners / CMS ─────────────────────────────────────────
+    match /banners/{bannerId} {
+      allow read: if resource.data.active == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /events/{eventId} {
+      allow read: if resource.data.active == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Stock Movements ───────────────────────────────────────
+    match /stock_movements/{movId} {
+      allow read, write: if isAdmin() || isSeller();
+    }
+
+    // ── Commissions ───────────────────────────────────────────
+    match /commissions/{commId} {
+      allow read: if isAdmin() || (isAuth() && resource.data.sellerId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+  }
+}
