@@ -1,26 +1,44 @@
-import { Suspense } from "react";
+"use client";
+
+import { useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import { getEvents } from "@/lib/firebase/events";
 import { EventsGrid } from "@/components/events/EventsGrid";
 import { Badge } from "@/components/ui/badge";
-import type { Metadata } from "next";
+import type { Event } from "@/types";
 
-export const metadata: Metadata = {
-  title: "Eventos",
-  description: "Confira os próximos eventos premium da Shark SmokeHouse.",
-};
-
-export const revalidate = 60;
-
-async function EventsContent() {
-  const events = await getEvents(true);
-  const upcoming = events.filter((e) => new Date(e.date) >= new Date(new Date().setHours(0, 0, 0, 0)));
-  const past = events.filter((e) => new Date(e.date) < new Date(new Date().setHours(0, 0, 0, 0)));
-
-  return <EventsGrid upcoming={upcoming} past={past} />;
+function EventsSkeleton() {
+  return (
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-hidden">
+          <div className="skeleton aspect-video" />
+          <div className="p-5 space-y-3">
+            <div className="skeleton h-3 w-24 rounded" />
+            <div className="skeleton h-4 w-3/4 rounded" />
+            <div className="skeleton h-3 w-full rounded" />
+            <div className="skeleton h-3 w-2/3 rounded" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function EventsPage() {
+  const [upcoming, setUpcoming] = useState<Event[]>([]);
+  const [past, setPast] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getEvents(true).then((events) => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setUpcoming(events.filter((e) => new Date(e.date) >= today));
+      setPast(events.filter((e) => new Date(e.date) < today));
+    }).finally(() => setLoading(false));
+  }, []);
+
   return (
     <div className="min-h-screen pt-24 pb-20">
       {/* Hero */}
@@ -51,29 +69,9 @@ export default function EventsPage() {
       {/* Events */}
       <div className="px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <Suspense fallback={<EventsSkeleton />}>
-            <EventsContent />
-          </Suspense>
+          {loading ? <EventsSkeleton /> : <EventsGrid upcoming={upcoming} past={past} />}
         </div>
       </div>
-    </div>
-  );
-}
-
-function EventsSkeleton() {
-  return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-hidden">
-          <div className="skeleton aspect-video" />
-          <div className="p-5 space-y-3">
-            <div className="skeleton h-3 w-24 rounded" />
-            <div className="skeleton h-4 w-3/4 rounded" />
-            <div className="skeleton h-3 w-full rounded" />
-            <div className="skeleton h-3 w-2/3 rounded" />
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
