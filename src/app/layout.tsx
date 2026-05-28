@@ -1,23 +1,34 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Bodoni_Moda, Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { CartDrawer } from "@/components/shop/CartDrawer";
 import { AgeGate } from "@/components/AgeGate";
 import { FirebaseAnalytics } from "@/components/FirebaseAnalytics";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const bodoniModa = Bodoni_Moda({
+  variable: "--font-bodoni",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  style: ["normal", "italic"],
   display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const manrope = Manrope({
+  variable: "--font-manrope",
   subsets: ["latin"],
+  weight: ["200", "300", "400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains",
+  subsets: ["latin"],
+  weight: ["100", "200", "300", "400", "500", "600", "700", "800"],
   display: "swap",
 });
 
@@ -46,17 +57,18 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${bodoniModa.variable} ${manrope.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--color-bg-base)]">
         <FirebaseAnalytics />
         <AuthProvider>
-        <AgeGate />
-        <Header />
-        <main className="flex-1">{children}</main>
-        <Footer />
-        <CartDrawer />
-        <Toaster />
+          <AgeGate />
+          <Header />
+          <main className="flex-1 pb-16 md:pb-0">{children}</main>
+          <Footer />
+          <MobileNav />
+          <CartDrawer />
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

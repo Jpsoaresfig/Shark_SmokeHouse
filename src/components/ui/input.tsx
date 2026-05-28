@@ -26,7 +26,8 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             type={type}
             className={cn(
               "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)]",
-              "px-3 py-2.5 text-sm text-[var(--color-text-primary)]",
+              "px-3 py-3 text-sm text-[var(--color-text-primary)]",
+              /* py-3 ensures 44px min height; font-size override in CSS prevents iOS zoom */
               "placeholder:text-[var(--color-text-muted)]",
               "transition-all duration-200",
               "focus:outline-none focus:border-[var(--color-neon-blue)] focus:bg-[var(--color-bg-hover)] focus:shadow-[0_0_0_3px_var(--color-neon-blue-glow)]",

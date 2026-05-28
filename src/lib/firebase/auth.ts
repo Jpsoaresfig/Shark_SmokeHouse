@@ -11,6 +11,7 @@ import {
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { createUserProfile, getUserProfile } from "./users";
+import { processReferral } from "./loyalty";
 import type { UserProfile } from "@/types";
 
 const ADMIN_EMAIL = "admin@shark.com";
@@ -22,12 +23,16 @@ export async function registerWithEmail(
   email: string,
   password: string,
   displayName: string,
-  phone?: string
+  phone?: string,
+  referralCode?: string
 ): Promise<UserProfile> {
   const { user } = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(user, { displayName });
   const profile = await createUserProfile(user.uid, { email, displayName, phone });
   setSessionCookie(user.uid);
+  if (referralCode) {
+    processReferral(user.uid, referralCode).catch(() => {});
+  }
   return profile;
 }
 
@@ -82,7 +87,8 @@ export async function resolveUserProfile(firebaseUser: User): Promise<UserProfil
 
 function setSessionCookie(uid: string) {
   if (typeof document === "undefined") return;
-  const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toUTCString();
+  // 30-day session, renewed on every auth resolution
+  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toUTCString();
   document.cookie = `shark_session=${uid}; path=/; expires=${expires}; SameSite=Lax`;
 }
 

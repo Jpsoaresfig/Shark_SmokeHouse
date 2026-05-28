@@ -6,6 +6,7 @@ import { LayoutDashboard, Eye, EyeOff, Save, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Badge } from "@/components/ui/badge";
 import { getSiteSettings, updateSiteSettings } from "@/lib/firebase/settings";
 import { toast } from "@/stores/toastStore";
@@ -94,29 +95,11 @@ export default function AdminSections() {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-start justify-between mb-8"
-        >
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-[var(--color-neon-blue-glow)] border border-[var(--color-neon-blue)]/20 flex items-center justify-center">
-                <LayoutDashboard className="w-5 h-5 text-[var(--color-neon-blue)]" />
-              </div>
-              <h1 className="text-3xl font-black text-[var(--color-text-primary)]">
-                Seções da Página
-              </h1>
-            </div>
-            <p className="text-[var(--color-text-muted)] text-sm ml-[52px]">
-              Ative ou desative as seções exibidas na página principal.
-            </p>
-          </div>
-          <Badge variant="default" className="mt-1">
-            {activeCount}/{SECTION_META.length} ativas
-          </Badge>
-        </motion.div>
+        <AdminPageHeader
+          title="Seções da Página"
+          subtitle="Ative ou desative as seções exibidas na página principal."
+          action={<Badge variant="default">{activeCount}/{SECTION_META.length} ativas</Badge>}
+        />
 
         {/* Sections list */}
         <motion.div

@@ -7,7 +7,6 @@ import {
   MapPin, MessageCircle, Truck, Sparkles,
   Anchor, Waves, Star, Package, Flame,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 /* ── Animation helpers ───────────────────────────────────── */
@@ -89,48 +88,54 @@ export default function AboutPage() {
         </div>
 
         <div className="relative max-w-4xl mx-auto text-center">
-          {/* Coming soon badge */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.5, ease: "backOut" }}
-            className="flex justify-center mb-6"
+          {/* Eyebrow */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.1 }}
+            className="text-eyebrow text-[var(--color-neon-blue)] mb-6"
           >
-            <Badge variant="premium" className="gap-2 px-4 py-1.5 text-sm">
-              <Anchor className="w-3.5 h-3.5" />
-              Em breve — João Pessoa, PB
-            </Badge>
-          </motion.div>
+            <Anchor className="w-3 h-3 inline mr-1.5 align-middle" />
+            Em breve — João Pessoa, PB
+          </motion.p>
 
-          {/* Main headline */}
+          {/* Display headline — Bodoni Moda */}
           <motion.h1
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="text-5xl sm:text-6xl lg:text-7xl font-black text-[var(--color-text-primary)] leading-[1.05] mb-6"
+            transition={{ duration: 0.7, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            className="font-display text-display text-[var(--color-text-primary)] mb-6"
           >
             Mais que uma{" "}
-            <span className="text-neon-lg">tabacaria.</span>
+            <span
+              className="italic"
+              style={{
+                background: "linear-gradient(135deg, #0095ff, #c9bfff)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                backgroundClip: "text",
+              }}
+            >
+              tabacaria.
+            </span>
             <br />
             <span className="text-[var(--color-text-secondary)]">Um novo nível.</span>
           </motion.h1>
 
-          {/* Subtext */}
           <motion.p
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.25 }}
-            className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed mb-4"
+            className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed font-light mb-4"
           >
-            Um espaço pensado para você, com tudo que precisa em um só lugar.
-            💨🦈
+            Um espaço pensado para você, com tudo que precisa em um só lugar. 💨🦈
           </motion.p>
 
           <motion.p
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.35 }}
-            className="text-sm text-[var(--color-text-muted)] mb-10"
+            className="text-eyebrow text-[var(--color-text-muted)] mb-10"
           >
             Lifestyle&nbsp;•&nbsp;Exclusividade&nbsp;•&nbsp;Qualidade
           </motion.p>
@@ -177,10 +182,10 @@ export default function AboutPage() {
 
         <div className="max-w-4xl mx-auto">
           <FadeIn className="text-center mb-16">
-            <Badge variant="secondary" className="mb-4">🌊 Nossa história</Badge>
-            <h2 className="text-4xl sm:text-5xl font-black text-[var(--color-text-primary)] leading-tight">
+            <p className="text-eyebrow text-[var(--color-text-muted)] mb-4">🌊 Nossa história</p>
+            <h2 className="font-display text-headline text-[var(--color-text-primary)] leading-tight">
               A maré virou e o{" "}
-              <span className="text-neon">tubarão</span>
+              <span className="italic text-neon">tubarão</span>
               <br />chegou na área.
             </h2>
           </FadeIn>
@@ -229,11 +234,11 @@ export default function AboutPage() {
       <section className="py-24 px-4">
         <div className="max-w-5xl mx-auto">
           <FadeIn className="text-center mb-14">
-            <Badge variant="secondary" className="mb-4">
-              <Star className="w-3 h-3" />
+            <p className="text-eyebrow text-[var(--color-text-muted)] mb-4">
+              <Star className="w-3 h-3 inline mr-1 align-middle" />
               Nossos pilares
-            </Badge>
-            <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
+            </p>
+            <h2 className="font-display text-headline text-[var(--color-text-primary)]">
               O que nos define
             </h2>
           </FadeIn>
@@ -258,11 +263,11 @@ export default function AboutPage() {
       <section className="py-24 px-4 bg-[var(--color-bg-surface)]">
         <div className="max-w-5xl mx-auto">
           <FadeIn className="text-center mb-14">
-            <Badge variant="secondary" className="mb-4">💨 O que oferecemos</Badge>
-            <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
+            <p className="text-eyebrow text-[var(--color-text-muted)] mb-4">💨 O que oferecemos</p>
+            <h2 className="font-display text-headline text-[var(--color-text-primary)]">
               Tabacaria&nbsp;•&nbsp;Headshop&nbsp;•&nbsp;Acessórios
             </h2>
-            <p className="text-[var(--color-text-muted)] mt-3 max-w-xl mx-auto">
+            <p className="text-[var(--color-text-muted)] mt-3 max-w-xl mx-auto font-light">
               Tudo em um só lugar para você curtir com qualidade.
             </p>
           </FadeIn>
@@ -290,11 +295,11 @@ export default function AboutPage() {
       <section className="py-24 px-4">
         <div className="max-w-4xl mx-auto">
           <FadeIn className="text-center mb-12">
-            <Badge variant="secondary" className="mb-4">
-              <MapPin className="w-3 h-3" />
+            <p className="text-eyebrow text-[var(--color-text-muted)] mb-4">
+              <MapPin className="w-3 h-3 inline mr-1 align-middle" />
               Onde estamos
-            </Badge>
-            <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
+            </p>
+            <h2 className="font-display text-headline text-[var(--color-text-primary)]">
               João Pessoa, PB
             </h2>
           </FadeIn>
@@ -385,9 +390,19 @@ export default function AboutPage() {
               🦈
             </motion.div>
 
-            <h2 className="text-4xl sm:text-5xl font-black text-[var(--color-text-primary)] mb-4">
+            <h2 className="font-display text-headline text-[var(--color-text-primary)] mb-4">
               Algo novo está
-              <span className="text-neon-lg"> chegando…</span>
+              <span
+                className="italic"
+                style={{
+                  background: "linear-gradient(135deg, #0095ff, #c9bfff)",
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent",
+                  backgroundClip: "text",
+                }}
+              >
+                {" "}chegando…
+              </span>
             </h2>
 
             <p className="text-[var(--color-text-secondary)] text-lg mb-8 max-w-xl mx-auto leading-relaxed">

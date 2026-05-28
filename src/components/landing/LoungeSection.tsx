@@ -44,7 +44,7 @@ export function LoungeSection() {
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   <div
-                    className="text-8xl font-black tracking-tighter mb-2"
+                    className="text-5xl sm:text-8xl font-black tracking-tighter mb-2"
                     style={{
                       background: "linear-gradient(135deg, var(--color-electric-blue), var(--color-neon-blue), var(--color-neon-cyan))",
                       WebkitBackgroundClip: "text",
@@ -67,8 +67,8 @@ export function LoungeSection() {
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-neon-blue)] to-transparent opacity-60" />
             </div>
 
-            {/* Floating info cards — CSS-animated, no JS overhead */}
-            <div className="animate-float-card absolute -bottom-6 -right-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
+            {/* Floating info cards — hidden on mobile to avoid overflow */}
+            <div className="hidden sm:block animate-float-card absolute -bottom-6 -right-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-[var(--color-neon-blue-glow)] border border-[var(--color-neon-blue)]/30 flex items-center justify-center">
                   <Calendar className="w-5 h-5 text-[var(--color-neon-blue)]" />
@@ -80,7 +80,7 @@ export function LoungeSection() {
               </div>
             </div>
 
-            <div className="animate-float-card-alt absolute -top-4 -left-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
+            <div className="hidden sm:block animate-float-card-alt absolute -top-4 -left-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
                   <Users className="w-5 h-5 text-purple-400" />

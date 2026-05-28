@@ -11,6 +11,8 @@ export interface UserProfile {
   cpf?: string;
   addresses?: Address[];
   loyaltyPoints?: number;
+  referralCode?: string;
+  referredBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -56,6 +58,7 @@ export interface Product {
   weight?: number;
   featured?: boolean;
   active: boolean;
+  loyaltyPoints?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -145,6 +148,31 @@ export interface Event {
   description: string;
   imageUrl: string;
   date: string;
+  active: boolean;
+  createdAt: string;
+}
+
+/* ── Loyalty ─────────────────────────────────────────────── */
+export type LoyaltyTransactionType = "earned" | "referral" | "bonus" | "welcome" | "redeemed";
+
+export interface LoyaltyTransaction {
+  id: string;
+  userId: string;
+  type: LoyaltyTransactionType;
+  points: number;
+  reason: string;
+  referredUserId?: string;
+  rewardId?: string;
+  createdAt: string;
+}
+
+export interface LoyaltyReward {
+  id: string;
+  name: string;
+  description: string;
+  image?: string;
+  pointsCost: number;
+  stock: number;
   active: boolean;
   createdAt: string;
 }

@@ -1,88 +1,104 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, Star, Flame, Play } from "lucide-react";
+import { ArrowRight, Flame, Play } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/ui/Logo";
 
 const statsData = [
   { value: "500+", label: "Produtos Premium" },
-  { value: "5★", label: "Avaliação Média" },
-  { value: "2h", label: "Entrega Expressa" },
-  { value: "10k+", label: "Clientes Satisfeitos" },
+  { value: "5★",  label: "Avaliação Média" },
+  { value: "2h",  label: "Entrega Expressa" },
+  { value: "10k+",label: "Clientes Satisfeitos" },
 ];
 
 export function HeroSection() {
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-      {/* Background layers */}
+      {/* Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-[#08080f] via-[#0a0f1e] to-[#08080f]" />
-
-      {/* Radial glow */}
-      <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] rounded-full"
-        style={{ background: "radial-gradient(ellipse, rgba(37,99,255,0.08) 0%, transparent 70%)" }}
-      />
-      <div className="absolute bottom-0 right-0 w-[500px] h-[400px] rounded-full"
-        style={{ background: "radial-gradient(ellipse, rgba(0,212,255,0.05) 0%, transparent 70%)" }}
-      />
-
-      {/* Grid pattern */}
       <div
-        className="absolute inset-0 opacity-[0.03]"
+        className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] rounded-full"
+        style={{ background: "radial-gradient(ellipse, rgba(0,149,255,0.07) 0%, transparent 70%)" }}
+      />
+      <div
+        className="absolute bottom-0 right-0 w-[500px] h-[400px] rounded-full"
+        style={{ background: "radial-gradient(ellipse, rgba(201,191,255,0.04) 0%, transparent 70%)" }}
+      />
+
+      {/* Subtle grid */}
+      <div
+        className="absolute inset-0 opacity-[0.025]"
         style={{
           backgroundImage: `linear-gradient(var(--color-neon-blue) 1px, transparent 1px), linear-gradient(90deg, var(--color-neon-blue) 1px, transparent 1px)`,
-          backgroundSize: "60px 60px",
+          backgroundSize: "80px 80px",
         }}
       />
 
-      {/* Floating elements — CSS-animated, no JS overhead */}
-      <div className="animate-float absolute top-24 right-16 w-20 h-20 rounded-2xl border border-[var(--color-neon-blue)]/20 bg-[var(--color-neon-blue-glow)] hidden lg:flex items-center justify-center">
-        <Flame className="w-8 h-8 text-[var(--color-neon-blue)]/60" />
-      </div>
-
-      <div className="animate-float-alt absolute bottom-32 left-16 w-14 h-14 rounded-xl border border-[var(--color-accent-orange)]/20 bg-orange-500/5 hidden lg:flex items-center justify-center">
-        <Star className="w-6 h-6 text-orange-400/40" />
+      {/* Floating accent */}
+      <div className="animate-float absolute top-24 right-16 w-16 h-16 border border-[var(--color-neon-blue)]/15 bg-[var(--color-neon-blue)]/5 hidden lg:flex items-center justify-center">
+        <Flame className="w-6 h-6 text-[var(--color-neon-blue)]/40" />
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-20 text-center">
+      <div className="relative z-10 max-w-6xl mx-auto px-6 lg:px-8 pt-28 pb-20 text-center">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
+          transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
         >
-          <div className="flex justify-center mb-8">
+          <div className="flex justify-center mb-10">
             <Logo variant="black" size="xl" asLink={false} />
           </div>
 
-          <Badge variant="premium" className="mb-6 text-xs px-4 py-1.5">
-            <Flame className="w-3 h-3" />
-            Tabacaria Premium do Brasil
-          </Badge>
+          {/* Eyebrow */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-eyebrow text-[var(--color-neon-blue)] mb-6"
+          >
+            Tabacaria Premium — João Pessoa, PB
+          </motion.p>
 
-          <h1 className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black leading-none tracking-tight mb-6">
-            <span className="block text-[var(--color-text-primary)]">Eleve sua</span>
+          {/* Display headline — Bodoni Moda serif */}
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+            className="font-display text-display text-[var(--color-text-primary)] mb-4"
+          >
+            Eleve sua
             <span
-              className="block"
+              className="block italic"
               style={{
-                background: "linear-gradient(135deg, var(--color-electric-blue), var(--color-neon-blue), var(--color-neon-cyan))",
+                background: "linear-gradient(135deg, #0095ff, #c9bfff)",
                 WebkitBackgroundClip: "text",
                 WebkitTextFillColor: "transparent",
                 backgroundClip: "text",
               }}
             >
-              Experiência
+              Experiência.
             </span>
-          </h1>
+          </motion.h1>
 
-          <p className="text-lg sm:text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto mb-10 leading-relaxed">
+          <motion.p
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.3 }}
+            className="text-lg text-[var(--color-text-secondary)] max-w-xl mx-auto mb-10 leading-relaxed font-light"
+          >
             A seleção mais exclusiva de charutos, narguilés e acessórios premium.
-            Uma experiência que vai além do produto — é um lifestyle.
-          </p>
+            Uma experiência que vai além do produto.
+          </motion.p>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.4 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20"
+          >
             <Button variant="premium" size="xl" asChild>
               <Link href="/catalog">
                 Explorar Catálogo
@@ -95,33 +111,31 @@ export function HeroSection() {
                 Agendar Lounge
               </Link>
             </Button>
-          </div>
+          </motion.div>
 
-          {/* Stats */}
+          {/* Stats row */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.3 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.8, delay: 0.5 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-px border border-[var(--color-border)] bg-[var(--color-border)] max-w-2xl mx-auto overflow-hidden"
           >
-            {statsData.map((stat, i) => (
-              <motion.div
+            {statsData.map((stat) => (
+              <div
                 key={stat.label}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.4 + i * 0.1 }}
-                className="glass rounded-2xl p-5 text-center"
+                className="bg-[var(--color-bg-elevated)] px-6 py-5 text-center"
               >
-                <p className="text-2xl font-black text-neon mb-1">{stat.value}</p>
-                <p className="text-xs text-[var(--color-text-muted)]">{stat.label}</p>
-              </motion.div>
+                <p className="text-xl font-bold text-[var(--color-neon-blue)] mb-1 font-display">
+                  {stat.value}
+                </p>
+                <p className="text-eyebrow text-[var(--color-text-muted)]">{stat.label}</p>
+              </div>
             ))}
           </motion.div>
         </motion.div>
       </div>
 
-      {/* Bottom gradient fade */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-[var(--color-bg-base)] to-transparent" />
+      <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-[var(--color-bg-base)] to-transparent" />
     </section>
   );
 }

@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Plus, Search, X, Eye, EyeOff, Mail, Lock,
   User, Phone, Shield, Bike, ShoppingBag, Crown,
-  Pencil, Trash2, AlertCircle, CheckCircle,
+  Pencil, Trash2, AlertCircle, CheckCircle, Star,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Separator } from "@/components/ui/separator";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
@@ -114,7 +115,7 @@ function CreateUserModal({ onClose, onCreated }: {
             icon={<User className="w-4 h-4" />}
             value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input type="email" label="E-mail" placeholder="joao@email.com"
               icon={<Mail className="w-4 h-4" />}
               value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
@@ -335,17 +336,15 @@ export default function AdminUsersPage() {
       <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
 
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
-            <div>
-              <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Usuários</h1>
-              <p className="text-sm text-[var(--color-text-muted)] mt-1">{users.length} usuário{users.length !== 1 ? "s" : ""} cadastrado{users.length !== 1 ? "s" : ""}</p>
-            </div>
-            <Button variant="premium" onClick={() => setShowCreate(true)}>
-              <Plus className="w-4 h-4" />
-              Criar Usuário
-            </Button>
-          </div>
+          <AdminPageHeader
+            title="Usuários"
+            subtitle={`${users.length} usuário${users.length !== 1 ? "s" : ""} cadastrado${users.length !== 1 ? "s" : ""}`}
+            action={
+              <Button variant="premium" onClick={() => setShowCreate(true)}>
+                <Plus className="w-4 h-4" /> Criar Usuário
+              </Button>
+            }
+          />
 
           {/* Filter pills */}
           <div className="flex flex-wrap gap-2 mb-6">
@@ -394,6 +393,7 @@ export default function AdminUsersPage() {
                         <div className="skeleton h-3 w-52 rounded" />
                       </div>
                       <div className="skeleton h-6 w-20 rounded-full" />
+                      <div className="skeleton h-3 w-14 rounded hidden md:block" />
                       <div className="skeleton h-3 w-20 rounded hidden md:block" />
                       <div className="skeleton h-7 w-16 rounded" />
                     </div>
@@ -408,8 +408,8 @@ export default function AdminUsersPage() {
               ) : (
                 <div>
                   {/* Table head */}
-                  <div className="hidden md:grid grid-cols-[2fr_2fr_1fr_1fr_88px] gap-4 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-overlay)] rounded-t-xl">
-                    {["Usuário", "Contato", "Perfil", "Cadastro", "Ações"].map((h) => (
+                  <div className="hidden md:grid grid-cols-[2fr_2fr_1fr_1fr_1fr_88px] gap-4 px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-overlay)] rounded-t-xl">
+                    {["Usuário", "Contato", "Perfil", "Pontos", "Cadastro", "Ações"].map((h) => (
                       <span key={h} className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide">{h}</span>
                     ))}
                   </div>
@@ -423,10 +423,10 @@ export default function AdminUsersPage() {
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.03 }}
-                        className="grid grid-cols-1 md:grid-cols-[2fr_2fr_1fr_1fr_88px] gap-4 items-center px-6 py-4 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-bg-overlay)] transition-colors"
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:grid md:grid-cols-[2fr_2fr_1fr_1fr_1fr_88px] md:gap-4 md:px-6 md:py-4 border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-bg-overlay)] transition-colors"
                       >
                         {/* User */}
-                        <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex items-center gap-3 min-w-0 flex-1 md:flex-none">
                           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] flex items-center justify-center text-sm font-bold text-white shrink-0">
                             {u.displayName?.[0]?.toUpperCase() ?? "?"}
                           </div>
@@ -443,11 +443,25 @@ export default function AdminUsersPage() {
                         </div>
 
                         {/* Role badge */}
-                        <div>
+                        <div className="shrink-0">
                           <Badge variant={cfg.badge} className="text-xs">
                             <RoleIcon className="w-3 h-3" />
                             {cfg.label}
                           </Badge>
+                        </div>
+
+                        {/* Loyalty points */}
+                        <div className="hidden md:flex items-center gap-1.5">
+                          {u.role === "customer" ? (
+                            <>
+                              <Star className="w-3.5 h-3.5 text-[var(--color-warning)] shrink-0" />
+                              <span className="text-sm font-semibold text-[var(--color-warning)]">
+                                {(u.loyaltyPoints ?? 0).toLocaleString("pt-BR")}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs text-[var(--color-text-muted)]">—</span>
+                          )}
                         </div>
 
                         {/* Date */}
@@ -456,7 +470,7 @@ export default function AdminUsersPage() {
                         </p>
 
                         {/* Actions */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                           {u.role !== "admin" && (
                             <button onClick={() => setEditingUser(u)}
                               className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue-glow)] transition-all"

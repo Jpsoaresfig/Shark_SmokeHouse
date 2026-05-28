@@ -1,21 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, ShoppingBag, Users, Package, AlertTriangle,
-  ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck, LayoutDashboard, CalendarDays, Receipt
+  ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck, LayoutDashboard, CalendarDays, Receipt,
+  BarChart3, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
 import { getOrders } from "@/lib/firebase/orders";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
+import { getSales } from "@/lib/firebase/sales";
 import { toast } from "@/stores/toastStore";
-import type { Order, Product } from "@/types";
+import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
+import type { Order, Product, Sale } from "@/types";
+
+const MONTH_NAMES_SHORT = [
+  "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+  "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+];
+const MONTH_NAMES_FULL = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(value: any): Date {
@@ -47,8 +62,12 @@ const statusConfig = {
 
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [allSales, setAllSales] = useState<Sale[]>([]);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
+  const [revenueOpen, setRevenueOpen] = useState(false);
+  const [chartRange, setChartRange] = useState<"daily" | "monthly">("daily");
   const [dashStats, setDashStats] = useState({
     monthRevenue: 0,
     prevMonthRevenue: 0,
@@ -58,13 +77,15 @@ export default function AdminDashboard() {
     criticalStock: 0,
   });
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [orders, users, products] = await Promise.all([
-          getOrders(),
-          getAllUsers(),
-          getProducts(),
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+        // Dashboard only needs recent data — limit to avoid fetching entire collections
+        const [orders, sales, users, products] = await Promise.all([
+          getOrders(200),    // last 200 orders covers months of stats
+          getSales(),        // all PDV sales for revenue calculation
+          getAllUsers(500),   // last 500 users enough for customer count
+          getProducts(),     // all products needed for low-stock calculation
         ]);
 
 
@@ -84,6 +105,7 @@ export default function AdminDashboard() {
         let todayOrders = 0;
         let yesterdayOrders = 0;
 
+        // Online orders (excluindo cancelados — não geraram receita)
         for (const order of orders) {
           if (order.status === "cancelled") continue;
           const d = toDate(order.createdAt);
@@ -95,6 +117,20 @@ export default function AdminDashboard() {
             else if (d >= yesterdayStart) yesterdayOrders++;
           } else if (m === prevMonth && y === prevYear) {
             prevMonthRevenue += order.total ?? 0;
+          }
+        }
+
+        // PDV sales — todas as vendas presenciais
+        for (const sale of sales) {
+          const d = toDate(sale.createdAt);
+          const m = d.getMonth();
+          const y = d.getFullYear();
+          if (m === thisMonth && y === thisYear) {
+            monthRevenue += sale.total ?? 0;
+            if (d >= todayStart) todayOrders++;
+            else if (d >= yesterdayStart) yesterdayOrders++;
+          } else if (m === prevMonth && y === prevYear) {
+            prevMonthRevenue += sale.total ?? 0;
           }
         }
 
@@ -112,16 +148,85 @@ export default function AdminDashboard() {
           totalCustomers: customers.length,
           criticalStock: critical.length,
         });
+        setAllOrders(orders);
+        setAllSales(sales);
         setRecentOrders(orders.slice(0, 5));
         setLowStockItems(critical.slice(0, 5));
-      } catch {
+      } catch (err) {
+        console.error("[dashboard load]", err);
         toast.error("Não foi possível carregar os dados do dashboard.");
       } finally {
         setLoading(false);
       }
-    }
-    load();
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  /* ── Chart data — daily (last 30 days) or monthly (last 12 months) ── */
+  const dailyChart: ChartPoint[] = useMemo(() => {
+    const days = 30;
+    const buckets = new Map<string, number>();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      buckets.set(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`, 0);
+    }
+    const addToDay = (createdAt: unknown, amount: number) => {
+      const d = toDate(createdAt);
+      d.setHours(0, 0, 0, 0);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
+    };
+    for (const order of allOrders) {
+      if (order.status === "cancelled") continue;
+      addToDay(order.createdAt, order.total ?? 0);
+    }
+    for (const sale of allSales) {
+      addToDay(sale.createdAt, sale.total ?? 0);
+    }
+    return Array.from(buckets.entries()).map(([key, value]) => {
+      const [y, m, d] = key.split("-").map(Number);
+      return {
+        label: `${String(d).padStart(2, "0")}/${String(m + 1).padStart(2, "0")}`,
+        fullLabel: `${d} de ${MONTH_NAMES_FULL[m]}, ${y}`,
+        value,
+        sortKey: new Date(y, m, d).getTime(),
+      };
+    }).sort((a, b) => a.sortKey - b.sortKey).map(({ sortKey, ...rest }) => { void sortKey; return rest; });
+  }, [allOrders, allSales]);
+
+  const monthlyChart: ChartPoint[] = useMemo(() => {
+    const months = 12;
+    const buckets = new Map<string, number>();
+    const now = new Date();
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      buckets.set(`${d.getFullYear()}-${d.getMonth()}`, 0);
+    }
+    const addToMonth = (createdAt: unknown, amount: number) => {
+      const d = toDate(createdAt);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
+    };
+    for (const order of allOrders) {
+      if (order.status === "cancelled") continue;
+      addToMonth(order.createdAt, order.total ?? 0);
+    }
+    for (const sale of allSales) {
+      addToMonth(sale.createdAt, sale.total ?? 0);
+    }
+    return Array.from(buckets.entries()).map(([key, value]) => {
+      const [y, m] = key.split("-").map(Number);
+      return {
+        label: `${MONTH_NAMES_SHORT[m]}/${String(y).slice(-2)}`,
+        fullLabel: `${MONTH_NAMES_FULL[m]} de ${y}`,
+        value,
+        sortKey: new Date(y, m, 1).getTime(),
+      };
+    }).sort((a, b) => a.sortKey - b.sortKey).map(({ sortKey, ...rest }) => { void sortKey; return rest; });
+  }, [allOrders, allSales]);
 
   const revenueChange =
     dashStats.prevMonthRevenue > 0
@@ -142,6 +247,8 @@ export default function AdminDashboard() {
       color: "text-[var(--color-neon-blue)]",
       bg: "bg-[var(--color-neon-blue-glow)]",
       border: "border-[var(--color-neon-blue)]/20",
+      onClick: () => setRevenueOpen(true),
+      clickHint: "Ver gráfico",
     },
     {
       title: "Pedidos Hoje",
@@ -177,14 +284,24 @@ export default function AdminDashboard() {
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-10">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-8 sm:mb-10">
           <div>
-            <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Dashboard</h1>
+            <h1 className="text-2xl sm:text-3xl font-black text-[var(--color-text-primary)]">Dashboard</h1>
             <p className="text-[var(--color-text-muted)] text-sm mt-1">
               {new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
             </p>
           </div>
-          <Badge variant="premium">Admin Master</Badge>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => load()}
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/50 transition-all disabled:opacity-40"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+            <Badge variant="premium">Admin Master</Badge>
+          </div>
         </div>
 
         {/* Stats grid */}
@@ -192,6 +309,7 @@ export default function AdminDashboard() {
           {stats.map((stat, i) => {
             const Icon = stat.icon;
             const isPositive = (stat.change ?? 0) >= 0;
+            const isClickable = !!stat.onClick;
             return (
               <motion.div
                 key={stat.title}
@@ -199,7 +317,16 @@ export default function AdminDashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.1 }}
               >
-                <Card className={stat.isAlert ? "border-amber-500/30" : ""}>
+                <Card
+                  onClick={stat.onClick}
+                  className={`relative transition-all ${
+                    stat.isAlert ? "border-amber-500/30" : ""
+                  } ${
+                    isClickable
+                      ? "cursor-pointer hover:border-[var(--color-neon-blue)]/60 hover:shadow-[var(--shadow-neon-sm)] active:scale-[0.99] group"
+                      : ""
+                  }`}
+                >
                   <CardContent className="p-6">
                     <div className="flex items-start justify-between mb-4">
                       <div className={`w-10 h-10 rounded-xl ${stat.bg} border ${stat.border} flex items-center justify-center`}>
@@ -221,7 +348,15 @@ export default function AdminDashboard() {
                     ) : (
                       <p className="text-2xl font-black text-[var(--color-text-primary)] mb-1">{stat.value}</p>
                     )}
-                    <p className="text-xs text-[var(--color-text-muted)]">{stat.title}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-[var(--color-text-muted)]">{stat.title}</p>
+                      {isClickable && !loading && (
+                        <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--color-neon-blue)] opacity-70 group-hover:opacity-100 transition-opacity">
+                          <BarChart3 className="w-3 h-3" />
+                          {stat.clickHint}
+                        </span>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -262,7 +397,7 @@ export default function AdminDashboard() {
                       return (
                         <div key={order.id}>
                           <div className="flex items-center gap-3 py-3">
-                            <div className="w-8 h-8 rounded-lg bg-[var(--color-bg-overlay)] flex items-center justify-center">
+                            <div className="w-8 h-8 rounded-lg bg-[var(--color-bg-overlay)] flex items-center justify-center shrink-0">
                               <ShoppingBag className="w-4 h-4 text-[var(--color-text-muted)]" />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -271,10 +406,16 @@ export default function AdminDashboard() {
                                 <span className="text-xs text-[var(--color-text-muted)]">—</span>
                                 <span className="text-sm text-[var(--color-text-secondary)] truncate">{order.customerName}</span>
                               </div>
-                              <p className="text-xs text-[var(--color-text-muted)]">{timeAgo(toDate(order.createdAt))}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <p className="text-xs text-[var(--color-text-muted)]">{timeAgo(toDate(order.createdAt))}</p>
+                                <Badge variant={cfg.variant} className="text-xs sm:hidden">
+                                  <StatusIcon className="w-3 h-3" />
+                                  {cfg.label}
+                                </Badge>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <Badge variant={cfg.variant} className="text-xs">
+                            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                              <Badge variant={cfg.variant} className="text-xs hidden sm:flex">
                                 <StatusIcon className="w-3 h-3" />
                                 {cfg.label}
                               </Badge>
@@ -381,6 +522,54 @@ export default function AdminDashboard() {
           })}
         </motion.div>
       </div>
+
+      {/* ── Revenue chart dialog ── */}
+      <Dialog open={revenueOpen} onOpenChange={setRevenueOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-[var(--color-neon-blue)]" />
+              Evolução da Receita
+            </DialogTitle>
+            <DialogDescription>
+              {chartRange === "daily"
+                ? "Receita diária dos últimos 30 dias — pedidos online + vendas PDV (exclui pedidos cancelados)."
+                : "Receita mensal dos últimos 12 meses — pedidos online + vendas PDV (exclui pedidos cancelados)."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Range tabs */}
+          <div className="flex gap-1 p-1 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] w-fit mt-1">
+            <button
+              onClick={() => setChartRange("daily")}
+              className={`px-4 h-9 rounded-lg text-xs font-semibold transition-all ${
+                chartRange === "daily"
+                  ? "bg-[var(--color-neon-blue)] text-[var(--color-bg-base)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              30 dias
+            </button>
+            <button
+              onClick={() => setChartRange("monthly")}
+              className={`px-4 h-9 rounded-lg text-xs font-semibold transition-all ${
+                chartRange === "monthly"
+                  ? "bg-[var(--color-neon-blue)] text-[var(--color-bg-base)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              12 meses
+            </button>
+          </div>
+
+          <div className="mt-4">
+            <RevenueChart
+              data={chartRange === "daily" ? dailyChart : monthlyChart}
+              loading={loading}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

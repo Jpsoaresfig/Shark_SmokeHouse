@@ -10,6 +10,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -295,19 +296,15 @@ export default function AdminEventsPage() {
       <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
 
-          {/* Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
-            <div>
-              <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Eventos</h1>
-              <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                {upcoming.length} próximo{upcoming.length !== 1 ? "s" : ""} · {past.length} passado{past.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-            <Button variant="premium" onClick={() => setModalEvent("new")}>
-              <Plus className="w-4 h-4" />
-              Novo Evento
-            </Button>
-          </div>
+          <AdminPageHeader
+            title="Eventos"
+            subtitle={`${upcoming.length} próximo${upcoming.length !== 1 ? "s" : ""} · ${past.length} passado${past.length !== 1 ? "s" : ""}`}
+            action={
+              <Button variant="premium" onClick={() => setModalEvent("new")}>
+                <Plus className="w-4 h-4" /> Novo Evento
+              </Button>
+            }
+          />
 
           {loading ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">

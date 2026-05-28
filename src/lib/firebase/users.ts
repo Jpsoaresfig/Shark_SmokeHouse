@@ -1,8 +1,9 @@
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp,
-  collection, getDocs, query, orderBy,
+  collection, getDocs, query, orderBy, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { generateReferralCode } from "./loyalty";
 import type { UserProfile, UserRole } from "@/types";
 
 const COLLECTION = "users";
@@ -21,6 +22,7 @@ export async function createUserProfile(
     phone: data.phone ?? "",
     role: (isAdmin ? "admin" : "customer") as UserRole,
     loyaltyPoints: isAdmin ? 0 : 100,
+    referralCode: isAdmin ? undefined : generateReferralCode(),
     addresses: [],
     createdAt: serverTimestamp() as unknown as string,
     updatedAt: serverTimestamp() as unknown as string,
@@ -45,8 +47,11 @@ export async function updateUserProfile(
   });
 }
 
-export async function getAllUsers(): Promise<UserProfile[]> {
-  const snap = await getDocs(query(collection(db, COLLECTION), orderBy("createdAt", "desc")));
+export async function getAllUsers(limitCount?: number): Promise<UserProfile[]> {
+  const q = limitCount
+    ? query(collection(db, COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+    : query(collection(db, COLLECTION), orderBy("createdAt", "desc"));
+  const snap = await getDocs(q);
   return snap.docs.map(d => d.data() as UserProfile);
 }
 
@@ -92,6 +97,7 @@ export async function createUserWithRole(
     phone,
     role,
     loyaltyPoints: role === "customer" ? 100 : 0,
+    referralCode: role === "customer" ? generateReferralCode() : undefined,
     addresses: [],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),

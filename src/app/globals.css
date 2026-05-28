@@ -2,8 +2,9 @@
 
 @theme inline {
   /* Typography */
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), monospace;
+  --font-sans: var(--font-manrope), 'Manrope', system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), 'JetBrains Mono', monospace;
+  --font-display: var(--font-bodoni), 'Bodoni Moda', Georgia, serif;
 
   /* Background scale */
   --color-bg-base: #08080f;
@@ -50,11 +51,17 @@
 }
 
 /* ── Base reset ─────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  /* Prevent flex/grid children from overflowing their container */
+  min-width: 0;
+}
 
 html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* clip doesn't break position:fixed unlike hidden */
+  overflow-x: clip;
 }
 
 body {
@@ -63,6 +70,126 @@ body {
   font-family: var(--font-sans);
   min-height: 100dvh;
   overflow-x: hidden;
+  /* Safe area for iPhone notch / home indicator */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Prevent media from overflowing their containers */
+img, picture, video, canvas, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Remove tap highlight and 300ms delay on all interactive elements */
+a, button, [role="button"], input, textarea, select, label {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* iOS: prevent auto-zoom when focusing inputs (requires font-size >= 16px) */
+@media (max-width: 768px) {
+  input:not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Safe-area bottom padding utility */
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+}
+
+/* Hide scrollbar but keep scroll behavior — for horizontal pill scrollers */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Editorial typography scale ─────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+}
+.font-mono-label {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Eyebrow / category label — JetBrains Mono, tiny, spaced */
+.text-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* Display heading — Bodoni Moda serif */
+.text-display {
+  font-family: var(--font-display);
+  font-size: clamp(40px, 6vw, 64px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+/* Section headline — Bodoni Moda */
+.text-headline {
+  font-family: var(--font-display);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+/* Sub-headline */
+.text-subheadline {
+  font-family: var(--font-display);
+  font-size: clamp(18px, 2.5vw, 24px);
+  line-height: 1.3;
+  font-weight: 500;
+}
+
+/* ── Luxury card — minimal radius, editorial feel ────────── */
+.card-luxury {
+  border-radius: 2px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  transition: border-color 0.3s ease;
+}
+.card-luxury:hover {
+  border-color: var(--color-neon-blue);
+}
+
+/* ── Humidifier gradient bar ─────────────────────────────── */
+.gradient-bar {
+  background: linear-gradient(90deg, var(--color-neon-blue), #c9bfff);
+}
+
+/* ── Image grayscale hover reveal ───────────────────────── */
+.img-reveal {
+  filter: grayscale(100%);
+  transition: filter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.group:hover .img-reveal,
+.img-reveal:hover {
+  filter: grayscale(0%);
+}
+
+/* ── Quick-add hover reveal panel ───────────────────────── */
+.quick-add-reveal {
+  transform: translateY(100%);
+  opacity: 0;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+}
+.group:hover .quick-add-reveal {
+  transform: translateY(0);
+  opacity: 1;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */

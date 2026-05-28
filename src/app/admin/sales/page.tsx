@@ -10,6 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
@@ -156,7 +157,7 @@ export default function AdminSales() {
     try {
       const id = await createSale({
         sellerId: user.uid,
-        sellerName: user.displayName,
+        sellerName: user.displayName ?? "Vendedor",
         items,
         total,
         paymentMethod: payment,
@@ -168,8 +169,10 @@ export default function AdminSales() {
       setNotes("");
       setPayment("cash");
       await loadProducts();
-    } catch {
-      toast.error("Erro ao registrar venda. Tente novamente.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[createSale]", err);
+      toast.error(`Erro ao registrar venda: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -191,13 +194,10 @@ export default function AdminSales() {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Vendas</h1>
-            <p className="text-sm text-[var(--color-text-muted)] mt-1">Registre vendas e exporte relatórios</p>
-          </div>
-        </div>
+        <AdminPageHeader
+          title="Vendas"
+          subtitle="Registre vendas e exporte relatórios"
+        />
 
         {/* Tabs */}
         <div className="flex gap-2 mb-8 border-b border-[var(--color-border)] pb-0">
@@ -284,7 +284,7 @@ export default function AdminSales() {
 
             {/* Cart / sale summary */}
             <div className="lg:col-span-2 space-y-4">
-              <Card className="sticky top-28">
+              <Card className="lg:sticky lg:top-28">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <Receipt className="w-4 h-4" />

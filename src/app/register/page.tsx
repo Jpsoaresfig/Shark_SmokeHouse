@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { Mail, Lock, User, Phone, Eye, EyeOff, Flame, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Mail, Lock, User, Phone, Eye, EyeOff,
+  ArrowRight, CheckCircle, AlertCircle, Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/ui/Logo";
@@ -28,9 +32,18 @@ const benefits = [
   "Agendamento rápido do Narguilé Lounge",
 ];
 
-export default function RegisterPage() {
+function RegisterForm() {
+  const searchParams = useSearchParams();
+  const emailFromLogin = searchParams.get("email") ?? "";
+  const refCode = searchParams.get("ref") ?? "";
+
   const { register, loginGoogle } = useAuth();
-  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
+  const [form, setForm] = useState({
+    name: "",
+    email: emailFromLogin,
+    phone: "",
+    password: "",
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -41,7 +54,7 @@ export default function RegisterPage() {
     setError("");
     setLoading(true);
     try {
-      await register(form.email, form.password, form.name, form.phone);
+      await register(form.email, form.password, form.name, form.phone, refCode || undefined);
     } catch (err) {
       setError((err as AuthError).message);
     } finally {
@@ -61,6 +74,164 @@ export default function RegisterPage() {
     }
   };
 
+  return (
+    <div className="glass rounded-2xl border border-[var(--color-border)] p-8">
+      <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-5 hidden lg:block">
+        Criar sua conta
+      </h2>
+
+      {/* Referral banner */}
+      <AnimatePresence>
+        {refCode && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-start gap-3 rounded-lg border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-4 py-3 mb-5"
+          >
+            <Sparkles className="w-4 h-4 text-[var(--color-success)] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                Você foi convidado!
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                Ganhe <strong>100 pontos</strong> de boas-vindas ao criar sua conta.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Contextual banner when coming from login redirect */}
+      <AnimatePresence>
+        {emailFromLogin && !refCode && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-start gap-3 rounded-lg border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)] px-4 py-3 mb-5"
+          >
+            <Sparkles className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                Nenhuma conta encontrada
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                Crie uma conta gratuita com <strong>{emailFromLogin}</strong> agora mesmo.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Google */}
+      <Button
+        type="button"
+        variant="secondary"
+        size="lg"
+        className="w-full mb-5"
+        onClick={handleGoogle}
+        disabled={googleLoading || loading}
+      >
+        {googleLoading
+          ? <div className="w-4 h-4 border-2 border-[var(--color-text-muted)] border-t-[var(--color-text-primary)] rounded-full animate-spin" />
+          : <GoogleIcon />}
+        Cadastrar com Google
+      </Button>
+
+      <div className="relative flex items-center gap-3 mb-5">
+        <div className="flex-1 h-px bg-[var(--color-border)]" />
+        <span className="text-xs text-[var(--color-text-muted)]">ou com e-mail</span>
+        <div className="flex-1 h-px bg-[var(--color-border)]" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <Input
+          type="text"
+          label="Nome completo"
+          placeholder="João Silva"
+          icon={<User className="w-4 h-4" />}
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          required
+        />
+        <Input
+          type="email"
+          label="E-mail"
+          placeholder="seu@email.com"
+          icon={<Mail className="w-4 h-4" />}
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          required
+        />
+        <Input
+          type="tel"
+          label="WhatsApp"
+          placeholder="(11) 99999-9999"
+          icon={<Phone className="w-4 h-4" />}
+          value={form.phone}
+          onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          required
+        />
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-[var(--color-text-secondary)]">Senha</label>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Mínimo 6 caracteres"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 pl-10 pr-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] focus:shadow-[0_0_0_3px_var(--color-neon-blue-glow)] transition-all"
+              minLength={6}
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
+              <p className="text-sm text-[var(--color-error)]">{error}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Ao criar uma conta, você confirma ter 18+ anos e concorda com os{" "}
+          <Link href="/terms" className="text-[var(--color-neon-blue)] hover:underline">Termos</Link>{" "}
+          e{" "}
+          <Link href="/privacy" className="text-[var(--color-neon-blue)] hover:underline">Privacidade</Link>.
+        </p>
+
+        <Button
+          type="submit"
+          variant="premium"
+          size="lg"
+          className="w-full"
+          disabled={loading || googleLoading}
+        >
+          {loading
+            ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            : <><span>Criar Conta Grátis</span><ArrowRight className="w-4 h-4" /></>}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+export default function RegisterPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-20">
       <div className="absolute inset-0 bg-gradient-to-br from-[#08080f] via-[#0a0f1e] to-[#08080f]" />
@@ -116,119 +287,11 @@ export default function RegisterPage() {
             <h1 className="text-2xl font-black text-[var(--color-text-primary)]">Criar conta</h1>
           </div>
 
-          <div className="glass rounded-2xl border border-[var(--color-border)] p-8">
-            <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-5 hidden lg:block">Criar sua conta</h2>
-
-            {/* Google */}
-            <Button
-              type="button"
-              variant="secondary"
-              size="lg"
-              className="w-full mb-5"
-              onClick={handleGoogle}
-              disabled={googleLoading || loading}
-            >
-              {googleLoading ? (
-                <div className="w-4 h-4 border-2 border-[var(--color-text-muted)] border-t-[var(--color-text-primary)] rounded-full animate-spin" />
-              ) : (
-                <GoogleIcon />
-              )}
-              Cadastrar com Google
-            </Button>
-
-            <div className="relative flex items-center gap-3 mb-5">
-              <div className="flex-1 h-px bg-[var(--color-border)]" />
-              <span className="text-xs text-[var(--color-text-muted)]">ou com e-mail</span>
-              <div className="flex-1 h-px bg-[var(--color-border)]" />
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <Input
-                type="text"
-                label="Nome completo"
-                placeholder="João Silva"
-                icon={<User className="w-4 h-4" />}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-              <Input
-                type="email"
-                label="E-mail"
-                placeholder="seu@email.com"
-                icon={<Mail className="w-4 h-4" />}
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                required
-              />
-              <Input
-                type="tel"
-                label="WhatsApp"
-                placeholder="(11) 99999-9999"
-                icon={<Phone className="w-4 h-4" />}
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                required
-              />
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-medium text-[var(--color-text-secondary)]">Senha</label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Mínimo 6 caracteres"
-                    value={form.password}
-                    onChange={(e) => setForm({ ...form, password: e.target.value })}
-                    className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 pl-10 pr-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] focus:shadow-[0_0_0_3px_var(--color-neon-blue-glow)] transition-all"
-                    minLength={6}
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5"
-                >
-                  <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
-                  <p className="text-sm text-[var(--color-error)]">{error}</p>
-                </motion.div>
-              )}
-
-              <p className="text-xs text-[var(--color-text-muted)]">
-                Ao criar uma conta, você confirma ter 18+ anos e concorda com os{" "}
-                <Link href="/terms" className="text-[var(--color-neon-blue)] hover:underline">Termos</Link>{" "}
-                e{" "}
-                <Link href="/privacy" className="text-[var(--color-neon-blue)] hover:underline">Privacidade</Link>.
-              </p>
-
-              <Button
-                type="submit"
-                variant="premium"
-                size="lg"
-                className="w-full"
-                disabled={loading || googleLoading}
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <>
-                    Criar Conta Grátis
-                    <ArrowRight className="w-4 h-4" />
-                  </>
-                )}
-              </Button>
-            </form>
-          </div>
+          <Suspense fallback={
+            <div className="glass rounded-2xl border border-[var(--color-border)] p-8 animate-pulse h-[520px]" />
+          }>
+            <RegisterForm />
+          </Suspense>
 
           <p className="text-center text-sm text-[var(--color-text-muted)] mt-6">
             Já tem uma conta?{" "}

@@ -1,14 +1,16 @@
 import {
   collection, getDocs, addDoc, updateDoc,
-  doc, serverTimestamp, query, orderBy, increment,
+  doc, serverTimestamp, query, orderBy, increment, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { StockMovement, MovementType } from "@/types";
 
 const COL = "stockMovements";
 
-export async function getStockMovements(): Promise<StockMovement[]> {
-  const snap = await getDocs(query(collection(db, COL), orderBy("createdAt", "desc")));
+export async function getStockMovements(limitCount = 100): Promise<StockMovement[]> {
+  const snap = await getDocs(
+    query(collection(db, COL), orderBy("createdAt", "desc"), limit(limitCount))
+  );
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as StockMovement));
 }
 

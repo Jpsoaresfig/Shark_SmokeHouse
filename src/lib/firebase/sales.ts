@@ -23,7 +23,7 @@ function toDate(value: any): Date {
 }
 
 export async function getSales(startDate?: Date, endDate?: Date): Promise<Sale[]> {
-  const constraints: QueryConstraint[] = [orderBy("createdAt", "desc")];
+  const constraints: QueryConstraint[] = [];
   if (startDate) {
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
@@ -34,6 +34,7 @@ export async function getSales(startDate?: Date, endDate?: Date): Promise<Sale[]
     end.setHours(23, 59, 59, 999);
     constraints.push(where("createdAt", "<=", Timestamp.fromDate(end)));
   }
+  constraints.push(orderBy("createdAt", "desc"));
   const snap = await getDocs(query(collection(db, COL), ...constraints));
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
 }
@@ -41,10 +42,25 @@ export async function getSales(startDate?: Date, endDate?: Date): Promise<Sale[]
 export async function createSale(
   data: Omit<Sale, "id" | "createdAt">,
 ): Promise<string> {
-  const ref = await addDoc(collection(db, COL), {
-    ...data,
-    createdAt: serverTimestamp(),
+  // Firestore rejects `undefined` — sanitize optional fields
+  const cleanItems = data.items.map(item => {
+    const { sku, ...rest } = item;
+    return sku !== undefined && sku !== "" ? { ...rest, sku } : rest;
   });
+
+  const payload: Record<string, unknown> = {
+    sellerId: data.sellerId,
+    sellerName: data.sellerName,
+    items: cleanItems,
+    total: data.total,
+    paymentMethod: data.paymentMethod,
+    createdAt: serverTimestamp(),
+  };
+  if (data.notes !== undefined && data.notes !== "") {
+    payload.notes = data.notes;
+  }
+
+  const ref = await addDoc(collection(db, COL), payload);
   await Promise.all(
     data.items.map(item =>
       updateDoc(doc(db, "products", item.productId), {

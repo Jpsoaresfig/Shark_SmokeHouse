@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Wrench, Package } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { formatDateTime } from "@/lib/utils";
@@ -83,12 +84,10 @@ export default function AdminInventory() {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Estoque</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">
-            {products.length} produtos · {lowStock.length} abaixo do mínimo
-          </p>
-        </div>
+        <AdminPageHeader
+          title="Estoque"
+          subtitle={`${products.length} produtos · ${lowStock.length} abaixo do mínimo`}
+        />
 
         {loading ? (
           <div className="flex justify-center py-20">
@@ -219,7 +218,7 @@ export default function AdminInventory() {
 
             {/* Right column — movement form */}
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-              <Card className="sticky top-28">
+              <Card className="lg:sticky lg:top-28">
                 <CardHeader className="pb-0">
                   <CardTitle className="text-base">Registrar Movimentação</CardTitle>
                 </CardHeader>

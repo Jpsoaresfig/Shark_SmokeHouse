@@ -2,12 +2,14 @@
 
 import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { motion } from "framer-motion";
-import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle, UserPlus, Loader2 } from "lucide-react";
+import { fetchSignInMethodsForEmail } from "firebase/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/ui/Logo";
+import { auth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import type { AuthError } from "@/hooks/useAuth";
 
@@ -25,6 +27,7 @@ function GoogleIcon() {
 function LoginForm() {
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect");
+  const router = useRouter();
 
   const { login, loginGoogle } = useAuth();
   const [email, setEmail] = useState("");
@@ -33,6 +36,16 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
+  const [redirecting, setRedirecting] = useState(false);
+
+  async function checkEmailExists(emailToCheck: string): Promise<boolean> {
+    try {
+      const methods = await fetchSignInMethodsForEmail(auth, emailToCheck);
+      return methods.length > 0;
+    } catch {
+      return true; // on error, assume exists to avoid false redirects
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +55,27 @@ function LoginForm() {
       await login(email, password);
       if (redirect) window.location.href = redirect;
     } catch (err) {
-      setError((err as AuthError).message);
+      const authErr = err as AuthError;
+
+      // "user-not-found" is explicit — go to register
+      if (authErr.code === "auth/user-not-found") {
+        setRedirecting(true);
+        router.push(`/register?email=${encodeURIComponent(email)}`);
+        return;
+      }
+
+      // "invalid-credential" can mean wrong password OR non-existent email
+      // Check with Firebase whether the email actually has an account
+      if (authErr.code === "auth/invalid-credential") {
+        const exists = await checkEmailExists(email);
+        if (!exists) {
+          setRedirecting(true);
+          router.push(`/register?email=${encodeURIComponent(email)}`);
+          return;
+        }
+      }
+
+      setError(authErr.message);
     } finally {
       setLoading(false);
     }
@@ -61,6 +94,27 @@ function LoginForm() {
     }
   };
 
+  if (redirecting) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="glass rounded-2xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)] p-10 text-center"
+      >
+        <div className="w-14 h-14 rounded-full bg-[var(--color-neon-blue-glow)] border border-[var(--color-neon-blue)]/30 flex items-center justify-center mx-auto mb-4">
+          <UserPlus className="w-7 h-7 text-[var(--color-neon-blue)]" />
+        </div>
+        <p className="text-base font-semibold text-[var(--color-text-primary)] mb-1">
+          E-mail não encontrado
+        </p>
+        <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+          Redirecionando para o cadastro…
+        </p>
+        <Loader2 className="w-5 h-5 animate-spin text-[var(--color-neon-blue)] mx-auto" />
+      </motion.div>
+    );
+  }
+
   return (
     <div className="glass rounded-2xl border border-[var(--color-border)] p-8">
       {/* Google */}
@@ -72,11 +126,9 @@ function LoginForm() {
         onClick={handleGoogle}
         disabled={googleLoading || loading}
       >
-        {googleLoading ? (
-          <div className="w-4 h-4 border-2 border-[var(--color-text-muted)] border-t-[var(--color-text-primary)] rounded-full animate-spin" />
-        ) : (
-          <GoogleIcon />
-        )}
+        {googleLoading
+          ? <div className="w-4 h-4 border-2 border-[var(--color-text-muted)] border-t-[var(--color-text-primary)] rounded-full animate-spin" />
+          : <GoogleIcon />}
         Continuar com Google
       </Button>
 
@@ -124,16 +176,19 @@ function LoginForm() {
           </div>
         </div>
 
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5"
-          >
-            <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
-            <p className="text-sm text-[var(--color-error)]">{error}</p>
-          </motion.div>
-        )}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5"
+            >
+              <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
+              <p className="text-sm text-[var(--color-error)]">{error}</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <Button
           type="submit"
@@ -142,14 +197,9 @@ function LoginForm() {
           className="w-full"
           disabled={loading || googleLoading}
         >
-          {loading ? (
-            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-          ) : (
-            <>
-              Entrar
-              <ArrowRight className="w-4 h-4" />
-            </>
-          )}
+          {loading
+            ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            : <><span>Entrar</span><ArrowRight className="w-4 h-4" /></>}
         </Button>
       </form>
     </div>
@@ -179,7 +229,9 @@ export default function LoginPage() {
           <p className="text-sm text-[var(--color-text-muted)] mt-1">Entre na sua conta</p>
         </div>
 
-        <Suspense fallback={<div className="glass rounded-2xl border border-[var(--color-border)] p-8 animate-pulse h-80" />}>
+        <Suspense fallback={
+          <div className="glass rounded-2xl border border-[var(--color-border)] p-8 animate-pulse h-80" />
+        }>
           <LoginForm />
         </Suspense>
 

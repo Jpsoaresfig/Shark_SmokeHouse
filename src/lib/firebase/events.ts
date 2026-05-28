@@ -1,6 +1,6 @@
 import {
   collection, doc, getDocs, getDoc, addDoc, updateDoc,
-  deleteDoc, serverTimestamp, query, orderBy, where,
+  deleteDoc, serverTimestamp, query, orderBy,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -9,11 +9,13 @@ import type { Event } from "@/types";
 const COLLECTION = "events";
 
 export async function getEvents(onlyActive = false): Promise<Event[]> {
-  const q = onlyActive
-    ? query(collection(db, COLLECTION), where("active", "==", true), orderBy("date", "desc"))
-    : query(collection(db, COLLECTION), orderBy("date", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+  // Single orderBy avoids needing a composite index in Firestore.
+  // Events is a small collection, so filtering "active" in-memory is fine.
+  const snap = await getDocs(
+    query(collection(db, COLLECTION), orderBy("date", "desc"))
+  );
+  const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+  return onlyActive ? all.filter((e) => e.active) : all;
 }
 
 export async function getEvent(id: string): Promise<Event | null> {

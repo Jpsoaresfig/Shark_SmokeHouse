@@ -8,6 +8,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Separator } from "@/components/ui/separator";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -92,10 +93,10 @@ export default function AdminOrders() {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Pedidos</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">{orders.length} pedidos no total</p>
-        </div>
+        <AdminPageHeader
+          title="Pedidos"
+          subtitle={`${orders.length} pedido${orders.length !== 1 ? "s" : ""} no total`}
+        />
 
         {/* Filter tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
@@ -159,17 +160,23 @@ export default function AdminOrders() {
                           <span className="text-xs text-[var(--color-text-muted)]">—</span>
                           <span className="text-sm text-[var(--color-text-secondary)] truncate">{order.customerName}</span>
                         </div>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          {order.createdAt ? formatDateTime(order.createdAt) : "—"}
-                          {" · "}{order.items.length} item{order.items.length !== 1 ? "s" : ""}
-                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <p className="text-xs text-[var(--color-text-muted)]">
+                            {order.createdAt ? formatDateTime(order.createdAt) : "—"}
+                            {" · "}{order.items.length} item{order.items.length !== 1 ? "s" : ""}
+                          </p>
+                          <Badge variant={cfg.badge} className="sm:hidden text-xs">
+                            <Icon className="w-3 h-3" />
+                            {cfg.label}
+                          </Badge>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <Badge variant={cfg.badge}>
+                      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                        <Badge variant={cfg.badge} className="hidden sm:flex">
                           <Icon className="w-3 h-3" />
                           {cfg.label}
                         </Badge>
-                        <span className="text-sm font-bold text-[var(--color-neon-blue)]">
+                        <span className="text-sm font-bold text-[var(--color-neon-blue)] whitespace-nowrap">
                           {formatCurrency(order.total)}
                         </span>
                       </div>

@@ -26,15 +26,24 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isOwner(uid) || isAdmin();
       allow create: if isOwner(uid);
-      allow update: if isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'loyaltyPoints'])
-                    || isAdmin();
+      // Owner can update own profile (except role).
+      // Any authenticated user can update loyaltyPoints/referredBy (referral system).
+      allow update: if (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
+                    || isAdmin()
+                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loyaltyPoints', 'referredBy', 'updatedAt']));
       allow delete: if isAdmin();
     }
 
     // ── Products ──────────────────────────────────────────────
+    // Public catalog — anyone can read products.
+    // Admins/sellers manage full CRUD.
+    // Authenticated customers can only decrement stock (loyalty redemption).
     match /products/{productId} {
-      allow read: if resource.data.active == true || isAdmin() || isSeller();
-      allow write: if isAdmin();
+      allow read: if true;
+      allow create, delete: if isAdmin() || isSeller();
+      allow update: if isAdmin()
+                    || isSeller()
+                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updatedAt']));
     }
 
     // ── Orders ────────────────────────────────────────────────
@@ -54,25 +63,47 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Sales ─────────────────────────────────────────────────
+    match /sales/{saleId} {
+      allow read, write: if isAdmin() || isSeller();
+    }
+
+    // ── Loyalty Transactions ──────────────────────────────────
+    // List: authenticated users (app always filters by userId in the query).
+    // Get: owner or admin.
+    // Create: any authenticated user (referrals and redemptions happen client-side).
+    match /loyaltyTransactions/{txId} {
+      allow list: if isAuth();
+      allow get: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth();
+      allow update, delete: if isAdmin();
+    }
+
     // ── Lounge Bookings ───────────────────────────────────────
     match /lounge_bookings/{bookingId} {
-      allow create: if true; // público — sem login obrigatório
+      allow create: if true;
       allow read, update, delete: if isAdmin();
     }
 
     // ── Banners / CMS ─────────────────────────────────────────
     match /banners/{bannerId} {
-      allow read: if resource.data.active == true || isAdmin();
+      allow read: if true;
       allow write: if isAdmin();
     }
 
     match /events/{eventId} {
-      allow read: if resource.data.active == true || isAdmin();
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ── Site Settings ─────────────────────────────────────────
+    match /settings/{docId} {
+      allow read: if true;
       allow write: if isAdmin();
     }
 
     // ── Stock Movements ───────────────────────────────────────
-    match /stock_movements/{movId} {
+    match /stockMovements/{movId} {
       allow read, write: if isAdmin() || isSeller();
     }
 

@@ -1,32 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PROTECTED_ROUTES = ["/checkout", "/orders", "/profile"];
+const PROTECTED_ROUTES = ["/checkout", "/orders", "/profile", "/account"];
 const ADMIN_ROUTES = ["/admin"];
 const MOTOBOY_ROUTES = ["/motoboy"];
 const AUTH_ROUTES = ["/login", "/register"];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = request.cookies.get("shark_session")?.value;
 
-  // Redireciona usuário já logado para fora das páginas de auth
+  // Redirect already-logged-in users away from auth pages
   if (AUTH_ROUTES.some((r) => pathname.startsWith(r)) && session) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // Protege rotas que exigem login
+  // Protect routes that require login
   if (PROTECTED_ROUTES.some((r) => pathname.startsWith(r)) && !session) {
     const url = new URL("/login", request.url);
     url.searchParams.set("redirect", pathname);
     return NextResponse.redirect(url);
   }
 
-  // Protege rotas de admin (verificação de role é feita no client)
+  // Protect admin routes (role check done client-side)
   if (ADMIN_ROUTES.some((r) => pathname.startsWith(r)) && !session) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Protege rotas de motoboy
+  // Protect motoboy routes
   if (MOTOBOY_ROUTES.some((r) => pathname.startsWith(r)) && !session) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
@@ -39,6 +39,7 @@ export const config = {
     "/checkout/:path*",
     "/orders/:path*",
     "/profile/:path*",
+    "/account/:path*",
     "/admin/:path*",
     "/motoboy/:path*",
     "/login",

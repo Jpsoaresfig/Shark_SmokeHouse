@@ -34,7 +34,7 @@ export function CartDrawer() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md flex flex-col glass-strong border-l border-[var(--color-border)]"
+            className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md flex flex-col glass-strong border-l border-[var(--color-border)] safe-area-right"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--color-border)]">
@@ -51,9 +51,10 @@ export function CartDrawer() {
               </div>
               <button
                 onClick={closeCart}
-                className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                className="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                aria-label="Fechar carrinho"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -113,30 +114,33 @@ export function CartDrawer() {
                               {formatCurrency(item.price)}
                             </p>
 
-                            {/* Quantity controls */}
+                            {/* Quantity controls — 44px touch targets */}
                             <div className="flex items-center gap-2 mt-2">
                               <div className="flex items-center rounded-lg border border-[var(--color-border)] overflow-hidden">
                                 <button
                                   onClick={() => updateQuantity(item.productId, item.quantity - 1)}
-                                  className="w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                                  className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors active:bg-[var(--color-bg-hover)]"
+                                  aria-label="Diminuir"
                                 >
-                                  <Minus className="w-3 h-3" />
+                                  <Minus className="w-3.5 h-3.5" />
                                 </button>
-                                <span className="w-8 text-center text-sm font-medium text-[var(--color-text-primary)]">
+                                <span className="w-9 text-center text-sm font-semibold text-[var(--color-text-primary)]">
                                   {item.quantity}
                                 </span>
                                 <button
                                   onClick={() => updateQuantity(item.productId, item.quantity + 1)}
-                                  className="w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                                  className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors active:bg-[var(--color-bg-hover)]"
+                                  aria-label="Aumentar"
                                 >
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                               <button
                                 onClick={() => removeItem(item.productId)}
-                                className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 rounded-lg transition-colors"
+                                className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 rounded-lg transition-colors active:bg-red-500/10"
+                                aria-label="Remover item"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-4 h-4" />
                               </button>
                               <span className="ml-auto text-sm font-semibold text-[var(--color-text-primary)]">
                                 {formatCurrency(item.price * item.quantity)}

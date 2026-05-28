@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -13,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatCurrency, slugify } from "@/lib/utils";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/firebase/products";
+import { CloudinaryUpload } from "@/components/ui/CloudinaryUpload";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Product, ProductCategory } from "@/types";
@@ -36,7 +38,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
   price: 0, compareAtPrice: undefined, category: "accessories",
   tags: [], images: [], stock: 0, minStock: 5,
-  sku: "", featured: false, active: true,
+  sku: "", featured: false, active: true, loyaltyPoints: undefined,
 };
 
 const inputCls =
@@ -52,6 +54,7 @@ export default function AdminProducts() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(EMPTY);
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,11 +72,13 @@ export default function AdminProducts() {
   function openAdd() {
     setEditing(null);
     setForm(EMPTY);
+    setLoyaltyEnabled(false);
     setOpen(true);
   }
 
   function openEdit(p: Product) {
     setEditing(p);
+    setLoyaltyEnabled(!!p.loyaltyPoints);
     setForm({
       name: p.name, slug: p.slug, description: p.description,
       shortDescription: p.shortDescription ?? "",
@@ -81,6 +86,7 @@ export default function AdminProducts() {
       category: p.category, tags: p.tags ?? [],
       images: p.images, stock: p.stock, minStock: p.minStock,
       sku: p.sku ?? "", featured: p.featured ?? false, active: p.active,
+      loyaltyPoints: p.loyaltyPoints,
     });
     setOpen(true);
   }
@@ -103,6 +109,7 @@ export default function AdminProducts() {
         compareAtPrice: form.compareAtPrice ? Number(form.compareAtPrice) : undefined,
         stock: Number(form.stock),
         minStock: Number(form.minStock),
+        loyaltyPoints: loyaltyEnabled && form.loyaltyPoints ? Number(form.loyaltyPoints) : undefined,
       };
       if (editing) {
         await updateProduct(editing.id, payload);
@@ -152,15 +159,15 @@ export default function AdminProducts() {
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Produtos</h1>
-            <p className="text-sm text-[var(--color-text-muted)] mt-1">{products.length} cadastrados</p>
-          </div>
-          <Button variant="premium" onClick={openAdd}>
-            <Plus className="w-4 h-4" /> Adicionar Produto
-          </Button>
-        </div>
+        <AdminPageHeader
+          title="Produtos"
+          subtitle={`${products.length} cadastrado${products.length !== 1 ? "s" : ""}`}
+          action={
+            <Button variant="premium" onClick={openAdd}>
+              <Plus className="w-4 h-4" /> Adicionar Produto
+            </Button>
+          }
+        />
 
         <div className="mb-6">
           <Input
@@ -203,56 +210,67 @@ export default function AdminProducts() {
                 transition={{ delay: i * 0.03 }}
               >
                 <Card className={!p.active ? "opacity-60" : ""}>
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
-                      {p.images?.[0]
-                        ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
-                        : <Package className="w-5 h-5 text-[var(--color-text-muted)]" />
-                      }
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-[var(--color-text-primary)] truncate">{p.name}</span>
-                        <Badge variant="secondary">{CATEGORY_LABEL[p.category]}</Badge>
-                        {p.featured && <Badge variant="premium">Destaque</Badge>}
-                        {!p.active && <Badge variant="destructive">Inativo</Badge>}
-                      </div>
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                        SKU: {p.sku || "—"} · Estoque: {p.stock} un. · Mín: {p.minStock}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-4 shrink-0">
-                      <div className="text-right">
-                        <p className="font-bold text-[var(--color-neon-blue)]">{formatCurrency(p.price)}</p>
-                        {p.compareAtPrice && (
-                          <p className="text-xs text-[var(--color-text-muted)] line-through">{formatCurrency(p.compareAtPrice)}</p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => toggleActive(p)}
-                          className="p-2 rounded-lg hover:bg-[var(--color-bg-overlay)] transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                          title={p.active ? "Desativar" : "Ativar"}
-                        >
-                          {p.active
-                            ? <ToggleRight className="w-5 h-5 text-emerald-400" />
-                            : <ToggleLeft className="w-5 h-5" />
+                  <CardContent className="p-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      {/* Image + info */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
+                          {p.images?.[0]
+                            ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
+                            : <Package className="w-5 h-5 text-[var(--color-text-muted)]" />
                           }
-                        </button>
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="p-2 rounded-lg hover:bg-[var(--color-bg-overlay)] transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(p)}
-                          className="p-2 rounded-lg hover:bg-red-500/10 transition-colors text-[var(--color-text-muted)] hover:text-red-400"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-[var(--color-text-primary)]">{p.name}</span>
+                            <Badge variant="secondary">{CATEGORY_LABEL[p.category]}</Badge>
+                            {p.featured && <Badge variant="premium">Destaque</Badge>}
+                            {!p.active && <Badge variant="destructive">Inativo</Badge>}
+                            {p.loyaltyPoints && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
+                                <Star className="w-3 h-3" />
+                                {p.loyaltyPoints.toLocaleString("pt-BR")} pts
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            SKU: {p.sku || "—"} · Estoque: {p.stock} un. · Mín: {p.minStock}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Price + actions (below on mobile, inline on desktop) */}
+                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                        <div className="text-right">
+                          <p className="font-bold text-[var(--color-neon-blue)]">{formatCurrency(p.price)}</p>
+                          {p.compareAtPrice && (
+                            <p className="text-xs text-[var(--color-text-muted)] line-through">{formatCurrency(p.compareAtPrice)}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => toggleActive(p)}
+                            className="p-2 rounded-lg hover:bg-[var(--color-bg-overlay)] transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                            title={p.active ? "Desativar" : "Ativar"}
+                          >
+                            {p.active
+                              ? <ToggleRight className="w-5 h-5 text-emerald-400" />
+                              : <ToggleLeft className="w-5 h-5" />
+                            }
+                          </button>
+                          <button
+                            onClick={() => openEdit(p)}
+                            className="p-2 rounded-lg hover:bg-[var(--color-bg-overlay)] transition-colors text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(p)}
+                            className="p-2 rounded-lg hover:bg-red-500/10 transition-colors text-[var(--color-text-muted)] hover:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -271,8 +289,8 @@ export default function AdminProducts() {
             <DialogDescription>Preencha os dados do produto.</DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
               <Input
                 label="Nome *"
                 value={form.name}
@@ -324,7 +342,67 @@ export default function AdminProducts() {
               value={form.minStock}
               onChange={e => set("minStock", e.target.value)}
             />
-            <div className="col-span-2">
+
+            {/* Loyalty toggle */}
+            <div className="sm:col-span-2 pt-1">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex-1 h-px bg-[var(--color-border)]" />
+                <div className="flex items-center gap-1.5 px-2">
+                  <Star className="w-3.5 h-3.5 text-[var(--color-warning)]" />
+                  <span className="text-xs font-semibold text-[var(--color-warning)] uppercase tracking-wide">Clube Fidelidade</span>
+                </div>
+                <div className="flex-1 h-px bg-[var(--color-border)]" />
+              </div>
+
+              <div className={`rounded-xl border p-4 transition-all ${loyaltyEnabled ? "border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5" : "border-[var(--color-border)] bg-[var(--color-bg-overlay)]"}`}>
+                {/* Toggle row */}
+                <label className="flex items-center justify-between cursor-pointer mb-0">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${loyaltyEnabled ? "bg-[var(--color-warning)]/15" : "bg-[var(--color-bg-elevated)]"}`}>
+                      <Star className={`w-4 h-4 transition-colors ${loyaltyEnabled ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-semibold transition-colors ${loyaltyEnabled ? "text-[var(--color-warning)]" : "text-[var(--color-text-secondary)]"}`}>
+                        Disponível para resgate por pontos
+                      </p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        {loyaltyEnabled ? "Aparece em Minha Conta dos clientes" : "Produto vendido normalmente, sem resgate"}
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    onClick={() => {
+                      const next = !loyaltyEnabled;
+                      setLoyaltyEnabled(next);
+                      if (!next) set("loyaltyPoints", undefined);
+                    }}
+                    className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer shrink-0 ${loyaltyEnabled ? "bg-[var(--color-warning)]" : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-strong)]"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${loyaltyEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </div>
+                </label>
+
+                {/* Points field — shown only when enabled */}
+                {loyaltyEnabled && (
+                  <div className="mt-4 pt-4 border-t border-[var(--color-warning)]/20">
+                    <Input
+                      label="Pontos necessários para resgate *"
+                      type="number"
+                      min="1"
+                      step="50"
+                      value={form.loyaltyPoints ?? ""}
+                      onChange={e => set("loyaltyPoints", e.target.value || undefined)}
+                      placeholder="Ex: 500"
+                    />
+                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                      O estoque do produto é decrementado automaticamente a cada resgate.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="sm:col-span-2">
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Descrição curta</label>
               <input
                 value={form.shortDescription}
@@ -333,7 +411,7 @@ export default function AdminProducts() {
                 className={inputCls}
               />
             </div>
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Descrição</label>
               <textarea
                 rows={3}
@@ -343,17 +421,14 @@ export default function AdminProducts() {
                 className={inputCls + " resize-none"}
               />
             </div>
-            <div className="col-span-2">
-              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">URLs das imagens (uma por linha)</label>
-              <textarea
-                rows={3}
-                value={form.images.join("\n")}
-                onChange={e => set("images", e.target.value.split("\n").filter(Boolean))}
-                placeholder="https://..."
-                className={inputCls + " resize-none"}
+            <div className="sm:col-span-2">
+              <CloudinaryUpload
+                value={form.images}
+                onChange={(urls) => set("images", urls)}
+                maxImages={5}
               />
             </div>
-            <div className="flex items-center gap-4 col-span-2">
+            <div className="flex items-center gap-4 sm:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"

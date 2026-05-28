@@ -6,6 +6,8 @@ import { Calendar, Clock, Users, MessageSquare, CheckCircle, Flame, ArrowRight }
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { createLoungeBooking } from "@/lib/firebase/lounge";
+import { toast } from "@/stores/toastStore";
 
 const timeSlots = [
   "14:00", "15:00", "16:00", "17:00", "18:00",
@@ -31,9 +33,22 @@ export default function LoungePage() {
     e.preventDefault();
     if (!selectedTime) return;
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1500));
-    setLoading(false);
-    setSubmitted(true);
+    try {
+      await createLoungeBooking({
+        name: form.name.trim(),
+        whatsapp: form.whatsapp.trim(),
+        email: form.email.trim() || undefined,
+        date: form.date,
+        time: selectedTime,
+        guestCount: Number(form.guests),
+        notes: form.notes.trim() || undefined,
+      });
+      setSubmitted(true);
+    } catch {
+      toast.error("Não foi possível enviar sua reserva. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (submitted) {
@@ -146,13 +161,13 @@ export default function LoungePage() {
                   <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">
                     Horário
                   </label>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
                     {timeSlots.map((t) => (
                       <button
                         key={t}
                         type="button"
                         onClick={() => setSelectedTime(t)}
-                        className={`py-2 rounded-lg text-sm font-medium transition-all ${
+                        className={`h-11 rounded-lg text-sm font-medium transition-all ${
                           selectedTime === t
                             ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/40 shadow-[var(--shadow-neon-sm)]"
                             : "border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)] hover:text-[var(--color-neon-blue)] bg-[var(--color-bg-overlay)]"

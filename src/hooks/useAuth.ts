@@ -62,10 +62,11 @@ export function useAuth() {
     email: string,
     password: string,
     displayName: string,
-    phone?: string
+    phone?: string,
+    referralCode?: string
   ) {
     try {
-      const profile = await registerWithEmail(email, password, displayName, phone);
+      const profile = await registerWithEmail(email, password, displayName, phone, referralCode);
       setUser(profile);
       router.push("/");
     } catch (err) {
