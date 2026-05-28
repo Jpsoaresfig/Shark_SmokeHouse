@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, updateDoc,
+  collection, getDocs, addDoc, updateDoc,
   doc, serverTimestamp, query, orderBy, where, arrayUnion, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -24,6 +24,17 @@ export async function getOrdersByCustomer(customerId: string): Promise<Order[]> 
     )
   );
   return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+}
+
+export async function createOrder(
+  data: Omit<Order, "id" | "createdAt" | "updatedAt">
+): Promise<string> {
+  const ref = await addDoc(collection(db, COL), {
+    ...data,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
 }
 
 export async function updateOrderStatus(
