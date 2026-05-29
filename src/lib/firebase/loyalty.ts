@@ -1,11 +1,14 @@
 import {
-  doc, updateDoc, addDoc, getDocs, collection,
+  doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection,
   query, where, orderBy, serverTimestamp, increment,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
+/** Points the referrer earns for each friend who signs up with their link. */
 const POINTS_PER_REFERRAL = 200;
+/** Bonus the newly-referred user earns (on top of the welcome points). */
+const POINTS_REFERRED_BONUS = 100;
 
 export function generateReferralCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -16,20 +19,27 @@ export function generateReferralCode(): string {
   return `SHARK-${suffix}`;
 }
 
+/**
+ * Public lookup so a brand-new user can resolve a referral code → referrer uid
+ * without querying the (private) users collection. Each user registers their own
+ * mapping at signup. Doc id = the referral code itself.
+ */
+export async function registerReferralCode(uid: string, referralCode: string): Promise<void> {
+  await setDoc(doc(db, "referralCodes", referralCode), { uid });
+}
+
 export async function processReferral(newUserId: string, referralCode: string): Promise<void> {
-  const q = query(collection(db, "users"), where("referralCode", "==", referralCode));
-  const snap = await getDocs(q);
-  if (snap.empty) return;
+  const codeSnap = await getDoc(doc(db, "referralCodes", referralCode));
+  if (!codeSnap.exists()) return;
 
-  const referrerDoc = snap.docs[0];
-  const referrerId = referrerDoc.id;
-  if (referrerId === newUserId) return;
+  const referrerId = codeSnap.data().uid as string | undefined;
+  if (!referrerId || referrerId === newUserId) return;
 
+  // Referrer earns points for the indication.
   await updateDoc(doc(db, "users", referrerId), {
     loyaltyPoints: increment(POINTS_PER_REFERRAL),
     updatedAt: serverTimestamp(),
   });
-
   await addDoc(collection(db, "loyaltyTransactions"), {
     userId: referrerId,
     type: "referral",
@@ -39,10 +49,29 @@ export async function processReferral(newUserId: string, referralCode: string): 
     createdAt: serverTimestamp(),
   });
 
+  // The new user also earns a bonus and records who referred them.
   await updateDoc(doc(db, "users", newUserId), {
     referredBy: referrerId,
+    loyaltyPoints: increment(POINTS_REFERRED_BONUS),
     updatedAt: serverTimestamp(),
   });
+  await addDoc(collection(db, "loyaltyTransactions"), {
+    userId: newUserId,
+    type: "referral",
+    points: POINTS_REFERRED_BONUS,
+    reason: "Bônus por indicação",
+    createdAt: serverTimestamp(),
+  });
+}
+
+/** Credits a customer the loyalty points earned from a delivered order. */
+export async function awardPurchasePoints(
+  userId: string,
+  points: number,
+  orderId: string,
+): Promise<void> {
+  if (!points || points <= 0) return;
+  await addLoyaltyPoints(userId, points, `Compra #${orderId.slice(-6).toUpperCase()}`, "earned");
 }
 
 export async function addLoyaltyPoints(

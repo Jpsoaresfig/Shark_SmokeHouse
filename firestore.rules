@@ -79,6 +79,17 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── Referral Codes ────────────────────────────────────────
+    // Public lookup (code → uid) so a new user can resolve who referred them
+    // without reading the private users collection. The mapping holds no PII.
+    // Each user creates only their own mapping (uid must match); admins may seed.
+    match /referralCodes/{code} {
+      allow read: if isAuth();
+      allow create, update: if isAdmin()
+                            || (isAuth() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
     // ── Lounge Bookings ───────────────────────────────────────
     match /lounge_bookings/{bookingId} {
       allow create: if true;

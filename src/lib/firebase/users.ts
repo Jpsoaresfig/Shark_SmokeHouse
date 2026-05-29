@@ -3,7 +3,7 @@ import {
   collection, getDocs, query, orderBy, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { generateReferralCode } from "./loyalty";
+import { generateReferralCode, registerReferralCode } from "./loyalty";
 import type { UserProfile, UserRole } from "@/types";
 
 const COLLECTION = "users";
@@ -15,6 +15,8 @@ export async function createUserProfile(
 ): Promise<UserProfile> {
   const ref = doc(db, COLLECTION, uid);
   const isAdmin = data.email === ADMIN_EMAIL;
+  // Every account gets a referral link, regardless of role.
+  const referralCode = generateReferralCode();
   const profile: Omit<UserProfile, "updatedAt"> & { createdAt: unknown; updatedAt: unknown } = {
     uid,
     email: data.email,
@@ -22,12 +24,13 @@ export async function createUserProfile(
     phone: data.phone ?? "",
     role: (isAdmin ? "admin" : "customer") as UserRole,
     loyaltyPoints: isAdmin ? 0 : 100,
-    referralCode: isAdmin ? undefined : generateReferralCode(),
+    referralCode,
     addresses: [],
     createdAt: serverTimestamp() as unknown as string,
     updatedAt: serverTimestamp() as unknown as string,
   };
   await setDoc(ref, profile);
+  if (referralCode) await registerReferralCode(uid, referralCode);
   return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 
@@ -35,6 +38,31 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const snap = await getDoc(doc(db, COLLECTION, uid));
   if (!snap.exists()) return null;
   return snap.data() as UserProfile;
+}
+
+/**
+ * Backfills the referral setup for older accounts:
+ *  - generates a referral code if the profile has none;
+ *  - ALWAYS makes sure the public `referralCodes/{code}` lookup exists, since an
+ *    earlier write may have failed (e.g. before the rules were deployed).
+ * Wrapped in try/catch so a transient permission error never breaks login.
+ */
+export async function ensureReferralCode(profile: UserProfile): Promise<UserProfile> {
+  let referralCode = profile.referralCode;
+  try {
+    if (!referralCode) {
+      referralCode = generateReferralCode();
+      await updateDoc(doc(db, COLLECTION, profile.uid), { referralCode, updatedAt: serverTimestamp() });
+    }
+    const mapRef = doc(db, "referralCodes", referralCode);
+    const mapSnap = await getDoc(mapRef);
+    if (!mapSnap.exists()) {
+      await setDoc(mapRef, { uid: profile.uid });
+    }
+  } catch (err) {
+    console.error("Falha ao garantir código de indicação:", err);
+  }
+  return { ...profile, referralCode };
 }
 
 export async function updateUserProfile(
@@ -90,6 +118,8 @@ export async function createUserWithRole(
   }
   const { localId: uid } = await res.json();
   const ref = doc(db, COLLECTION, uid);
+  // Every account gets a referral link, regardless of role.
+  const referralCode = generateReferralCode();
   const profile = {
     uid,
     email,
@@ -97,11 +127,12 @@ export async function createUserWithRole(
     phone,
     role,
     loyaltyPoints: role === "customer" ? 100 : 0,
-    referralCode: role === "customer" ? generateReferralCode() : undefined,
+    referralCode,
     addresses: [],
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
   await setDoc(ref, profile);
+  if (referralCode) await registerReferralCode(uid, referralCode);
   return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as UserProfile;
 }

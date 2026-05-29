@@ -39,6 +39,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   price: 0, compareAtPrice: undefined, category: "accessories",
   tags: [], images: [], stock: 0, minStock: 5,
   sku: "", featured: false, active: true, loyaltyPoints: undefined,
+  pointsEarned: undefined,
 };
 
 const inputCls =
@@ -55,6 +56,7 @@ export default function AdminProducts() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
+  const [earnEnabled, setEarnEnabled] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,12 +75,14 @@ export default function AdminProducts() {
     setEditing(null);
     setForm(EMPTY);
     setLoyaltyEnabled(false);
+    setEarnEnabled(false);
     setOpen(true);
   }
 
   function openEdit(p: Product) {
     setEditing(p);
     setLoyaltyEnabled(!!p.loyaltyPoints);
+    setEarnEnabled(!!p.pointsEarned);
     setForm({
       name: p.name, slug: p.slug, description: p.description,
       shortDescription: p.shortDescription ?? "",
@@ -87,6 +91,7 @@ export default function AdminProducts() {
       images: p.images, stock: p.stock, minStock: p.minStock,
       sku: p.sku ?? "", featured: p.featured ?? false, active: p.active,
       loyaltyPoints: p.loyaltyPoints,
+      pointsEarned: p.pointsEarned,
     });
     setOpen(true);
   }
@@ -110,6 +115,7 @@ export default function AdminProducts() {
         stock: Number(form.stock),
         minStock: Number(form.minStock),
         loyaltyPoints: loyaltyEnabled && form.loyaltyPoints ? Number(form.loyaltyPoints) : undefined,
+        pointsEarned: earnEnabled && form.pointsEarned ? Number(form.pointsEarned) : undefined,
       };
       if (editing) {
         await updateProduct(editing.id, payload);
@@ -229,9 +235,15 @@ export default function AdminProducts() {
                             {p.loyaltyPoints && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
                                 <Star className="w-3 h-3" />
-                                {p.loyaltyPoints.toLocaleString("pt-BR")} pts
+                                resgate: {p.loyaltyPoints.toLocaleString("pt-BR")} pts
                               </span>
                             )}
+                            {p.pointsEarned ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/30">
+                                <Star className="w-3 h-3" />
+                                +{p.pointsEarned.toLocaleString("pt-BR")} pts/compra
+                              </span>
+                            ) : null}
                           </div>
                           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                             SKU: {p.sku || "—"} · Estoque: {p.stock} un. · Mín: {p.minStock}
@@ -396,6 +408,54 @@ export default function AdminProducts() {
                     />
                     <p className="text-xs text-[var(--color-text-muted)] mt-2">
                       O estoque do produto é decrementado automaticamente a cada resgate.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Points earned on purchase */}
+            <div className="sm:col-span-2">
+              <div className={`rounded-xl border p-4 transition-all ${earnEnabled ? "border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]/30" : "border-[var(--color-border)] bg-[var(--color-bg-overlay)]"}`}>
+                <label className="flex items-center justify-between cursor-pointer mb-0">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${earnEnabled ? "bg-[var(--color-neon-blue-glow)]" : "bg-[var(--color-bg-elevated)]"}`}>
+                      <Star className={`w-4 h-4 transition-colors ${earnEnabled ? "text-[var(--color-neon-blue)]" : "text-[var(--color-text-muted)]"}`} />
+                    </div>
+                    <div>
+                      <p className={`text-sm font-semibold transition-colors ${earnEnabled ? "text-[var(--color-neon-blue)]" : "text-[var(--color-text-secondary)]"}`}>
+                        Gera pontos na compra
+                      </p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        {earnEnabled ? "Cliente ganha pontos ao receber o pedido" : "Este produto não concede pontos ao comprar"}
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    onClick={() => {
+                      const next = !earnEnabled;
+                      setEarnEnabled(next);
+                      if (!next) set("pointsEarned", undefined);
+                    }}
+                    className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer shrink-0 ${earnEnabled ? "bg-[var(--color-neon-blue)]" : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-strong)]"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${earnEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                  </div>
+                </label>
+
+                {earnEnabled && (
+                  <div className="mt-4 pt-4 border-t border-[var(--color-neon-blue)]/20">
+                    <Input
+                      label="Pontos ganhos por unidade *"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={form.pointsEarned ?? ""}
+                      onChange={e => set("pointsEarned", e.target.value || undefined)}
+                      placeholder="Ex: 50"
+                    />
+                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
+                      Os pontos são creditados ao cliente quando o pedido é marcado como <strong>entregue</strong>.
                     </p>
                   </div>
                 )}

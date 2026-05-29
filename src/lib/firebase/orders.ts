@@ -52,3 +52,11 @@ export async function updateOrderStatus(
     updatedAt: serverTimestamp(),
   });
 }
+
+/** Marks an order's purchase points as credited so they're never awarded twice. */
+export async function markOrderPointsAwarded(id: string): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    pointsAwarded: true,
+    updatedAt: serverTimestamp(),
+  });
+}

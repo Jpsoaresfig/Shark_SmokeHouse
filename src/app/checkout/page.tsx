@@ -162,6 +162,7 @@ export default function CheckoutPage() {
   const [orderId, setOrderId] = useState<string | null>(null);
 
   const savedAddresses = user?.addresses ?? [];
+  const pointsToEarn = items.reduce((acc, i) => acc + (i.pointsEarned ?? 0) * i.quantity, 0);
 
   /* fill form from saved address */
   const applySaved = useCallback((addr: Address) => {
@@ -261,6 +262,7 @@ export default function CheckoutPage() {
         deliveryAddress: address,
         notes: notes.trim() || undefined,
         statusHistory: [{ status: "received", timestamp: new Date().toISOString() }],
+        pointsEarned: pointsToEarn,
       });
 
       /* save address to profile if requested */
@@ -618,6 +620,12 @@ export default function CheckoutPage() {
                     <span className="text-[var(--color-text-primary)]">Total</span>
                     <span className="text-[var(--color-neon-blue)] text-lg">{formatCurrency(total)}</span>
                   </div>
+                  {pointsToEarn > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs text-[var(--color-warning)] bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/20 rounded-lg px-3 py-2 mt-1">
+                      <Star className="w-3.5 h-3.5 shrink-0" />
+                      Você ganhará <strong>{pointsToEarn.toLocaleString("pt-BR")} pontos</strong> quando o pedido for entregue
+                    </div>
+                  )}
                 </div>
 
                 {/* CTA desktop */}

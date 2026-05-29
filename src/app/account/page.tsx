@@ -195,20 +195,30 @@ export default function AccountPage() {
     setLoadingTx(true);
     setLoadingRewards(true);
 
-    const [fresh, txs, rws] = await Promise.all([
-      getUserProfile(storeUser.uid),
-      getLoyaltyTransactions(storeUser.uid),
-      getLoyaltyRewards(),
-    ]);
+    // Each fetch is isolated so a single failure (e.g. a missing Firestore
+    // index on rewards) can't blank out the whole page, and the `finally`
+    // blocks guarantee the loading skeletons always resolve.
+    getUserProfile(storeUser.uid)
+      .then((fresh) => {
+        if (fresh) {
+          setPoints(fresh.loyaltyPoints ?? 0);
+          setUser({ ...storeUser, ...fresh });
+        }
+      })
+      .catch((err) => console.error("Falha ao carregar perfil:", err));
 
-    if (fresh) {
-      setPoints(fresh.loyaltyPoints ?? 0);
-      setUser({ ...storeUser, ...fresh });
-    }
-    setTransactions(txs);
-    setRewards(rws);
-    setLoadingTx(false);
-    setLoadingRewards(false);
+    getLoyaltyTransactions(storeUser.uid)
+      .then(setTransactions)
+      .catch((err) => {
+        console.error("Falha ao carregar histórico de pontos:", err);
+        toast.error("Não foi possível carregar o histórico de pontos.");
+      })
+      .finally(() => setLoadingTx(false));
+
+    getLoyaltyRewards()
+      .then(setRewards)
+      .catch((err) => console.error("Falha ao carregar recompensas:", err))
+      .finally(() => setLoadingRewards(false));
   }, [storeUser, setUser]);
 
   // Wait for Firebase Auth to be confirmed before querying Firestore

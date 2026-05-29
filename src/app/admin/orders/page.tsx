@@ -15,7 +15,8 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { getOrders, updateOrderStatus } from "@/lib/firebase/orders";
+import { getOrders, updateOrderStatus, markOrderPointsAwarded } from "@/lib/firebase/orders";
+import { awardPurchasePoints } from "@/lib/firebase/loyalty";
 import { toast } from "@/stores/toastStore";
 import type { Order, OrderStatus } from "@/types";
 
@@ -71,7 +72,20 @@ export default function AdminOrders() {
     setUpdating(true);
     try {
       await updateOrderStatus(selected.id, newStatus, note || undefined);
-      toast.success("Status do pedido atualizado!");
+
+      // Credit loyalty points once the order is delivered (guarded against double-award).
+      if (
+        newStatus === "delivered" &&
+        !selected.pointsAwarded &&
+        (selected.pointsEarned ?? 0) > 0
+      ) {
+        await awardPurchasePoints(selected.customerId, selected.pointsEarned!, selected.id);
+        await markOrderPointsAwarded(selected.id);
+        toast.success(`Pedido entregue! ${selected.pointsEarned!.toLocaleString("pt-BR")} pontos creditados ao cliente.`);
+      } else {
+        toast.success("Status do pedido atualizado!");
+      }
+
       setSelected(null);
       await load();
     } catch {

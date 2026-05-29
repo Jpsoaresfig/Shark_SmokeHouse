@@ -50,6 +50,7 @@ export const useCartStore = create<CartStore>()(
                 image: product.images[0] ?? "",
                 quantity,
                 notes,
+                pointsEarned: product.pointsEarned ?? 0,
               },
             ],
           };

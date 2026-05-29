@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { HeroSection } from "@/components/landing/HeroSection";
+import { StoreProducts } from "@/components/landing/StoreProducts";
 import { FeaturedProducts } from "@/components/landing/FeaturedProducts";
 import { LoungeSection } from "@/components/landing/LoungeSection";
 import { LoyaltySection } from "@/components/landing/LoyaltySection";
@@ -27,6 +28,7 @@ export function PageSections() {
   return (
     <>
       {sections.hero && <HeroSection />}
+      <StoreProducts />
       {sections.featuredProducts && <FeaturedProducts />}
       {sections.lounge && <LoungeSection />}
       {sections.events && <EventsSection />}

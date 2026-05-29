@@ -94,7 +94,7 @@ function RegisterForm() {
                 Você foi convidado!
               </p>
               <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                Ganhe <strong>100 pontos</strong> de boas-vindas ao criar sua conta.
+                Ganhe <strong>100 pontos</strong> de boas-vindas <strong>+ 100 pontos</strong> de bônus por indicação ao criar sua conta.
               </p>
             </div>
           </motion.div>

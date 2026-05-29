@@ -58,7 +58,10 @@ export interface Product {
   weight?: number;
   featured?: boolean;
   active: boolean;
+  /** Points required to redeem this product as a loyalty reward. */
   loyaltyPoints?: number;
+  /** Points the customer earns (per unit) when buying this product. */
+  pointsEarned?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -71,6 +74,8 @@ export interface CartItem {
   image: string;
   quantity: number;
   notes?: string;
+  /** Loyalty points earned per unit, snapshotted from the product at add-to-cart. */
+  pointsEarned?: number;
 }
 
 /* ── Order ───────────────────────────────────────────────── */
@@ -104,6 +109,10 @@ export interface Order {
   motoboyName?: string;
   notes?: string;
   statusHistory: StatusEvent[];
+  /** Total loyalty points this order grants the customer once delivered. */
+  pointsEarned?: number;
+  /** Guard so purchase points are credited only once (on delivery). */
+  pointsAwarded?: boolean;
   createdAt: string;
   updatedAt: string;
 }

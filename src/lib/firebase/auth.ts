@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
-import { createUserProfile, getUserProfile } from "./users";
+import { createUserProfile, getUserProfile, ensureReferralCode } from "./users";
 import { processReferral } from "./loyalty";
 import type { UserProfile } from "@/types";
 
@@ -31,7 +31,11 @@ export async function registerWithEmail(
   const profile = await createUserProfile(user.uid, { email, displayName, phone });
   setSessionCookie(user.uid);
   if (referralCode) {
-    processReferral(user.uid, referralCode).catch(() => {});
+    // Don't block/fail registration if the referral can't be processed,
+    // but surface the reason instead of swallowing it silently.
+    processReferral(user.uid, referralCode).catch((err) => {
+      console.error("Falha ao processar indicação:", err);
+    });
   }
   return profile;
 }
@@ -51,6 +55,7 @@ export async function loginWithEmail(
     await updateDoc(doc(db, "users", user.uid), { role: "admin", updatedAt: serverTimestamp() });
     profile = { ...profile, role: "admin" };
   }
+  profile = await ensureReferralCode(profile);
   setSessionCookie(user.uid);
   return profile;
 }
@@ -63,6 +68,8 @@ export async function loginWithGoogle(): Promise<UserProfile> {
       email: user.email!,
       displayName: user.displayName ?? "Usuário",
     });
+  } else {
+    profile = await ensureReferralCode(profile);
   }
   setSessionCookie(user.uid);
   return profile;
@@ -80,8 +87,11 @@ export async function sendResetEmail(email: string): Promise<void> {
 }
 
 export async function resolveUserProfile(firebaseUser: User): Promise<UserProfile | null> {
-  const profile = await getUserProfile(firebaseUser.uid);
-  if (profile) setSessionCookie(firebaseUser.uid);
+  let profile = await getUserProfile(firebaseUser.uid);
+  if (profile) {
+    profile = await ensureReferralCode(profile);
+    setSessionCookie(firebaseUser.uid);
+  }
   return profile;
 }
 
