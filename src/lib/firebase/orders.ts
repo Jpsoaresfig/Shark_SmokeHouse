@@ -3,6 +3,7 @@ import {
   doc, serverTimestamp, query, orderBy, where, arrayUnion, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { toDate } from "@/lib/utils";
 import type { Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
 
 const COL = "orders";
@@ -33,14 +34,14 @@ export async function getOrders(limitCount?: number): Promise<Order[]> {
 }
 
 export async function getOrdersByCustomer(customerId: string): Promise<Order[]> {
+  // Filtra apenas por customerId (sem orderBy) para dispensar o índice composto;
+  // a lista de um cliente é pequena, então ordenamos por data no cliente.
   const snap = await getDocs(
-    query(
-      collection(db, COL),
-      where("customerId", "==", customerId),
-      orderBy("createdAt", "desc")
-    )
+    query(collection(db, COL), where("customerId", "==", customerId))
   );
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Order))
+    .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
 }
 
 export async function createOrder(
