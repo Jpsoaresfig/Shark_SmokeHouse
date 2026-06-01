@@ -309,6 +309,8 @@ export default function CheckoutPage() {
   const [placing, setPlacing] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [waLink, setWaLink] = useState("");
+  /* total congelado no momento do pedido (o carrinho é limpo antes da tela de sucesso) */
+  const [paidTotal, setPaidTotal] = useState(0);
 
   const savedAddresses = user?.addresses ?? [];
   const pointsToEarn = items.reduce((acc, i) => acc + (i.pointsEarned ?? 0) * i.quantity, 0);
@@ -374,7 +376,7 @@ export default function CheckoutPage() {
   }
 
   if (orderId) {
-    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={total} />;
+    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} />;
   }
 
   const canSubmit =
@@ -434,8 +436,9 @@ export default function CheckoutPage() {
         await updateUserProfile(user.uid, { phone: phone.trim() });
       }
 
-      /* monta o link do WhatsApp antes de limpar o carrinho */
+      /* monta o link do WhatsApp e congela o total antes de limpar o carrinho */
       setWaLink(buildWaLink(id, items, total));
+      setPaidTotal(total);
 
       closeCart();
       clearCart();

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { AdminMobileNav } from "@/components/admin/AdminMobileNav";
 
@@ -10,6 +10,7 @@ const ADMIN_EMAIL = "admin@shark.com";
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
   const router = useRouter();
+  const pathname = usePathname();
 
   const isAdmin = user?.role === "admin" && user?.email === ADMIN_EMAIL;
   const isSeller = user?.role === "seller";
@@ -18,8 +19,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   useEffect(() => {
     if (loading) return;
     if (!user) { router.replace("/login"); return; }
-    if (!isAllowed) { router.replace("/"); }
-  }, [user, loading, isAllowed, router]);
+    if (!isAllowed) { router.replace("/"); return; }
+    // Vendedor não acessa o dashboard do admin — leva ao próprio painel.
+    if (isSeller && pathname === "/admin") { router.replace("/admin/seller"); }
+  }, [user, loading, isAllowed, isSeller, pathname, router]);
 
   if (loading && !user) {
     return (

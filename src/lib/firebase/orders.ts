@@ -1,11 +1,35 @@
 import {
-  collection, getDocs, addDoc, updateDoc,
-  doc, serverTimestamp, query, orderBy, where, arrayUnion, limit,
+  collection, getDocs, getDoc, addDoc, updateDoc,
+  doc, serverTimestamp, query, orderBy, where, arrayUnion, increment, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import type { Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
+import { toDate } from "@/lib/utils";
+import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
 
 const COL = "orders";
+
+/**
+ * Baixa (`out`) ou estorna (`in`) o estoque dos itens de um pedido, atualizando
+ * `products.stock` diretamente. Isso roda no contexto do cliente (checkout), por
+ * isso NÃO grava em `stockMovements` (coleção restrita a admin/seller nas regras).
+ * As regras do Firestore permitem ao cliente alterar apenas `stock`/`updatedAt`
+ * do produto — exatamente o que fazemos aqui. A baixa reflete na quantidade real
+ * e dispara o alerta de estoque mínimo.
+ */
+async function applyOrderStock(
+  order: { id: string; items: CartItem[] },
+  type: "out" | "in",
+): Promise<void> {
+  const sign = type === "out" ? -1 : 1;
+  await Promise.all(
+    order.items.map((item) =>
+      updateDoc(doc(db, "products", item.productId), {
+        stock: increment(sign * item.quantity),
+        updatedAt: serverTimestamp(),
+      }),
+    ),
+  );
+}
 
 /* Firestore rejeita qualquer valor `undefined`, inclusive aninhado em objetos
    ou arrays (ex: deliveryAddress.complement, notes, item.notes). Remove esses
@@ -33,24 +57,31 @@ export async function getOrders(limitCount?: number): Promise<Order[]> {
 }
 
 export async function getOrdersByCustomer(customerId: string): Promise<Order[]> {
+  // Filtra apenas por customerId (sem orderBy) para dispensar o índice composto;
+  // a lista de um cliente é pequena, então ordenamos por data no cliente.
   const snap = await getDocs(
-    query(
-      collection(db, COL),
-      where("customerId", "==", customerId),
-      orderBy("createdAt", "desc")
-    )
+    query(collection(db, COL), where("customerId", "==", customerId))
   );
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Order))
+    .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
 }
 
 export async function createOrder(
   data: Omit<Order, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
+  // Baixa o estoque já na compra, exceto quando o pedido WhatsApp ainda aguarda
+  // a confirmação do cliente (nesse caso a baixa ocorre em confirmWhatsappOrder).
+  const applyStock = !data.awaitingConfirmation;
   const ref = await addDoc(collection(db, COL), {
     ...stripUndefined(data),
+    stockApplied: applyStock,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  if (applyStock) {
+    await applyOrderStock({ id: ref.id, items: data.items }, "out");
+  }
   return ref.id;
 }
 
@@ -59,7 +90,8 @@ export async function updateOrderStatus(
   status: OrderStatus,
   note?: string,
 ): Promise<void> {
-  await updateDoc(doc(db, COL, id), {
+  const ref = doc(db, COL, id);
+  await updateDoc(ref, {
     status,
     statusHistory: arrayUnion({
       status,
@@ -68,6 +100,16 @@ export async function updateOrderStatus(
     }),
     updatedAt: serverTimestamp(),
   });
+
+  // Ao cancelar, estorna o estoque se ele já havia sido baixado por este pedido.
+  if (status === "cancelled") {
+    const snap = await getDoc(ref);
+    const order = snap.data() as Order | undefined;
+    if (order?.stockApplied) {
+      await applyOrderStock({ id, items: order.items }, "in");
+      await updateDoc(ref, { stockApplied: false, updatedAt: serverTimestamp() });
+    }
+  }
 }
 
 /**
@@ -101,7 +143,11 @@ export async function updatePaymentStatus(
 
 /** Cliente confirmou que efetuou a compra combinada pelo WhatsApp. */
 export async function confirmWhatsappOrder(id: string): Promise<void> {
-  await updateDoc(doc(db, COL, id), {
+  const ref = doc(db, COL, id);
+  const snap = await getDoc(ref);
+  const order = snap.data() as Order | undefined;
+
+  await updateDoc(ref, {
     awaitingConfirmation: false,
     statusHistory: arrayUnion({
       status: "received",
@@ -115,6 +161,12 @@ export async function confirmWhatsappOrder(id: string): Promise<void> {
     } satisfies PaymentEvent),
     updatedAt: serverTimestamp(),
   });
+
+  // Agora que a compra foi confirmada, baixa o estoque (se ainda não baixou).
+  if (order && !order.stockApplied) {
+    await applyOrderStock({ id, items: order.items }, "out");
+    await updateDoc(ref, { stockApplied: true, updatedAt: serverTimestamp() });
+  }
 }
 
 /** Marks an order's purchase points as credited so they're never awarded twice. */

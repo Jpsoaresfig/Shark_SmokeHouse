@@ -13,6 +13,8 @@ export interface UserProfile {
   loyaltyPoints?: number;
   referralCode?: string;
   referredBy?: string;
+  /** % de comissão sobre vendas (apenas vendedores). Ex.: 5 = 5%. */
+  commissionRate?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,6 +176,8 @@ export interface Order {
   pointsAwarded?: boolean;
   /** Pedido WhatsApp aguardando o cliente confirmar que efetuou a compra. */
   awaitingConfirmation?: boolean;
+  /** Guard: estoque já foi baixado por este pedido (evita baixa/estorno em dobro). */
+  stockApplied?: boolean;
   createdAt: string;
   updatedAt: string;
 }

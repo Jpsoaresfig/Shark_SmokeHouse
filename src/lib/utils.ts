@@ -12,7 +12,7 @@ export function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function toDate(value: unknown): Date {
+export function toDate(value: unknown): Date {
   if (value instanceof Date) return value;
   if (value && typeof value === "object" && "toDate" in value) return (value as { toDate(): Date }).toDate();
   return new Date(value as string | number);

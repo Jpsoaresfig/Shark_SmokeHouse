@@ -1,9 +1,10 @@
 import {
   collection, getDocs, addDoc, query, orderBy,
-  where, serverTimestamp, Timestamp, doc, updateDoc, increment,
+  where, serverTimestamp, Timestamp,
   QueryConstraint,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { addStockMovement } from "@/lib/firebase/inventory";
 import type { Sale, SalePaymentMethod } from "@/types";
 
 const COL = "sales";
@@ -61,11 +62,18 @@ export async function createSale(
   }
 
   const ref = await addDoc(collection(db, COL), payload);
+  // Baixa o estoque registrando uma movimentação por item (aparece no histórico
+  // de estoque e alimenta o alerta de estoque mínimo).
+  const saleRef = `#${ref.id.slice(-6).toUpperCase()}`;
   await Promise.all(
     data.items.map(item =>
-      updateDoc(doc(db, "products", item.productId), {
-        stock: increment(-item.quantity),
-        updatedAt: serverTimestamp(),
+      addStockMovement({
+        productId: item.productId,
+        productName: item.productName,
+        type: "out",
+        quantity: item.quantity,
+        reason: `Venda PDV ${saleRef}`,
+        userId: data.sellerId,
       })
     )
   );
