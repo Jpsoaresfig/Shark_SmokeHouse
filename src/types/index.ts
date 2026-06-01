@@ -98,6 +98,7 @@ export type PaymentMethod =
   | "pix_manual"   // PIX com validação externa (comprovante via WhatsApp)
   | "on_delivery"  // pagamento na entrega (cobrança pelo motoboy)
   | "whatsapp"     // tratativa direta via WhatsApp
+  | "loyalty"      // resgate pago com pontos de fidelidade
   /* legados — mantidos para pedidos antigos */
   | "online"
   | "on_arrival"
@@ -178,6 +179,10 @@ export interface Order {
   awaitingConfirmation?: boolean;
   /** Guard: estoque já foi baixado por este pedido (evita baixa/estorno em dobro). */
   stockApplied?: boolean;
+  /** Pedido gerado por resgate de pontos (não baixa estoque — o resgate já baixa). */
+  isRedemption?: boolean;
+  /** Pontos gastos no resgate (quando isRedemption). */
+  pointsRedeemed?: number;
   createdAt: string;
   updatedAt: string;
 }

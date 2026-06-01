@@ -48,7 +48,8 @@ export default function LoungePage() {
         notes: form.notes.trim() || undefined,
       });
       setSubmitted(true);
-    } catch {
+    } catch (err) {
+      console.error("[lounge] createLoungeBooking", err);
       toast.error("Não foi possível enviar sua reserva. Tente novamente.");
     } finally {
       setLoading(false);

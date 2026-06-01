@@ -3,6 +3,7 @@ import {
   query, where, orderBy, serverTimestamp, increment,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { createOrder } from "@/lib/firebase/orders";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
 /** Points the referrer earns for each friend who signs up with their link. */
@@ -129,7 +130,8 @@ export async function getLoyaltyRewards(): Promise<LoyaltyReward[]> {
 export async function redeemReward(
   uid: string,
   reward: LoyaltyReward,
-  currentPoints: number
+  currentPoints: number,
+  customer?: { name?: string; phone?: string },
 ): Promise<void> {
   if (currentPoints < reward.pointsCost) throw new Error("Pontos insuficientes");
   if (reward.stock <= 0) throw new Error("Recompensa indisponível");
@@ -149,5 +151,51 @@ export async function redeemReward(
     reason: `Resgate: ${reward.name}`,
     rewardId: reward.id,
     createdAt: serverTimestamp(),
+  });
+
+  // Gera um pedido para o admin acompanhar/entregar o resgate — como se fosse uma
+  // compra, mas paga com pontos. Não baixa estoque de novo (isRedemption: true).
+  const rewardImage =
+    reward.image && /^https?:\/\//.test(reward.image) ? reward.image : "";
+  const now = new Date().toISOString();
+  await createOrder({
+    customerId: uid,
+    customerName: customer?.name?.trim() || "Cliente",
+    customerPhone: customer?.phone?.trim() || "",
+    items: [{
+      productId: reward.id,
+      name: reward.name,
+      price: 0,
+      image: rewardImage,
+      quantity: 1,
+    }],
+    subtotal: 0,
+    deliveryFee: 0,
+    total: 0,
+    status: "received",
+    paymentMethod: "loyalty",
+    paymentStatus: "paid",
+    payment: {
+      method: "loyalty",
+      provider: "manual",
+      status: "paid",
+      amount: 0,
+      paidAt: now,
+      history: [{ status: "paid", timestamp: now, note: "Resgate por pontos de fidelidade" }],
+    },
+    deliveryAddress: {
+      id: "pickup",
+      label: "Retirada na loja",
+      street: "", number: "", neighborhood: "", city: "", state: "", zipCode: "",
+    },
+    notes: `Resgate de recompensa — ${reward.pointsCost} pontos`,
+    statusHistory: [{
+      status: "received",
+      timestamp: new Date().toISOString(),
+      note: "Pedido gerado por resgate de pontos",
+    }],
+    pointsEarned: 0,
+    isRedemption: true,
+    pointsRedeemed: reward.pointsCost,
   });
 }

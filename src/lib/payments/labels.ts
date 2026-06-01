@@ -4,6 +4,7 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   pix_manual: "PIX",
   on_delivery: "Na Entrega",
   whatsapp: "Via WhatsApp",
+  loyalty: "Pontos (Fidelidade)",
   /* legados */
   online: "PIX",
   on_arrival: "Na Entrega",

@@ -19,8 +19,13 @@ export async function getLoungeBookings(): Promise<LoungeBooking[]> {
 export async function createLoungeBooking(
   data: Omit<LoungeBooking, "id" | "status" | "createdAt">
 ): Promise<string> {
+  // Firestore rejeita `undefined` — remove campos opcionais vazios (ex.: email,
+  // notes) antes de gravar, senão a reserva falha quando não são preenchidos.
+  const clean = Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined && v !== "")
+  );
   const ref = await addDoc(collection(db, COL), {
-    ...data,
+    ...clean,
     status: "pending" as BookingStatus,
     createdAt: serverTimestamp(),
   });

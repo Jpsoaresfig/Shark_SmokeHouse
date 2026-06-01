@@ -71,8 +71,9 @@ export async function createOrder(
   data: Omit<Order, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
   // Baixa o estoque já na compra, exceto quando o pedido WhatsApp ainda aguarda
-  // a confirmação do cliente (nesse caso a baixa ocorre em confirmWhatsappOrder).
-  const applyStock = !data.awaitingConfirmation;
+  // a confirmação do cliente (baixa em confirmWhatsappOrder) ou quando é um
+  // resgate de pontos (o redeemReward já baixou o estoque do produto/recompensa).
+  const applyStock = !data.awaitingConfirmation && !data.isRedemption;
   const ref = await addDoc(collection(db, COL), {
     ...stripUndefined(data),
     stockApplied: applyStock,
