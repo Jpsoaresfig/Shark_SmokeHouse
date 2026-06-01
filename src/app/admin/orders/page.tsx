@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
-  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard,
+  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -223,6 +223,12 @@ export default function AdminOrders() {
                               Aguardando confirmação
                             </Badge>
                           )}
+                          {order.isRedemption && (
+                            <Badge variant="purple" className="text-xs">
+                              <Star className="w-3 h-3" />
+                              Resgate · {order.pointsRedeemed ?? 0} pts
+                            </Badge>
+                          )}
                           <Badge variant={cfg.badge} className="sm:hidden text-xs">
                             <Icon className="w-3 h-3" />
                             {cfg.label}
@@ -264,6 +270,12 @@ export default function AdminOrders() {
                   Aguardando o cliente confirmar a compra pelo WhatsApp.
                 </div>
               )}
+              {selected.isRedemption && (
+                <div className="flex items-center gap-2 rounded-lg bg-purple-500/10 border border-purple-500/30 px-3 py-2.5 text-sm text-purple-300">
+                  <Star className="w-4 h-4 shrink-0" />
+                  Pedido resgatado com <strong>{selected.pointsRedeemed ?? 0} pontos</strong> de fidelidade (sem cobrança em dinheiro).
+                </div>
+              )}
               {/* Items */}
               <div>
                 <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Itens</p>
@@ -289,6 +301,31 @@ export default function AdminOrders() {
                   <span className="text-[var(--color-neon-blue)]">{formatCurrency(selected.total)}</span>
                 </div>
               </div>
+
+              {/* Entrega ou retirada */}
+              {(() => {
+                const addr = selected.deliveryAddress;
+                const pickup = !addr || addr.id === "pickup" || addr.label === "Retirada na loja" || !addr.street;
+                return (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      {pickup ? <Package className="w-3.5 h-3.5" /> : <Truck className="w-3.5 h-3.5" />}
+                      {pickup ? "Retirada na loja" : "Entrega"}
+                    </p>
+                    {pickup ? (
+                      <p className="text-sm text-[var(--color-text-secondary)]">
+                        Cliente vai retirar o pedido no balcão da loja.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                        {addr.street}, {addr.number}{addr.complement ? `, ${addr.complement}` : ""}<br />
+                        {addr.neighborhood} — {addr.city}/{addr.state}
+                        {addr.zipCode ? <> · {addr.zipCode}</> : null}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Pagamento — gestão financeira manual */}
               {(() => {

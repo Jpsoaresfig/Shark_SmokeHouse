@@ -301,6 +301,7 @@ export default function CheckoutPage() {
   const [state, setState] = useState("");
   const [saveAddress, setSaveAddress] = useState(false);
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
+  const [fulfillment, setFulfillment] = useState<"delivery" | "pickup">("delivery");
   const [payment, setPayment] = useState<PaymentMethod>("pix_manual");
   const [notes, setNotes] = useState("");
 
@@ -379,29 +380,41 @@ export default function CheckoutPage() {
     return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} />;
   }
 
+  const isPickup = fulfillment === "pickup";
+  // Na retirada não há frete; o total é apenas o subtotal.
+  const effectiveDeliveryFee = isPickup ? 0 : deliveryFee;
+  const effectiveTotal = isPickup ? subtotal : total;
+
   const canSubmit =
-    street.trim() && number.trim() && neighborhood.trim() && city.trim() && state.trim() && zip.trim() &&
-    (phone.trim() || user.phone);
+    (phone.trim() || user.phone) &&
+    (isPickup ||
+      (street.trim() && number.trim() && neighborhood.trim() && city.trim() && state.trim() && zip.trim()));
 
   async function handlePlaceOrder() {
     if (!canSubmit || !user) return;
     setPlacing(true);
     try {
-      const address: Address = {
-        id: selectedSavedId ?? `addr_${Date.now()}`,
-        label: "Entrega",
-        street: street.trim(),
-        number: number.trim(),
-        complement: complement.trim() || undefined,
-        neighborhood: neighborhood.trim(),
-        city: city.trim(),
-        state: state.trim(),
-        zipCode: zip.trim(),
-      };
+      const address: Address = isPickup
+        ? {
+            id: "pickup",
+            label: "Retirada na loja",
+            street: "", number: "", neighborhood: "", city: "", state: "", zipCode: "",
+          }
+        : {
+            id: selectedSavedId ?? `addr_${Date.now()}`,
+            label: "Entrega",
+            street: street.trim(),
+            number: number.trim(),
+            complement: complement.trim() || undefined,
+            neighborhood: neighborhood.trim(),
+            city: city.trim(),
+            state: state.trim(),
+            zipCode: zip.trim(),
+          };
 
       const paymentInfo = manualGateway.createPayment({
         method: payment,
-        amount: total,
+        amount: effectiveTotal,
         pixKey,
         pixName,
       });
@@ -412,21 +425,21 @@ export default function CheckoutPage() {
         customerPhone: phone.trim() || user.phone || "",
         items,
         subtotal,
-        deliveryFee,
-        total,
+        deliveryFee: effectiveDeliveryFee,
+        total: effectiveTotal,
         status: "received",
         payment: paymentInfo,
         paymentMethod: payment,            // espelho legado
         paymentStatus: paymentInfo.status, // espelho legado
         deliveryAddress: address,
-        notes: notes.trim() || undefined,
+        notes: [isPickup ? "Retirada na loja" : "", notes.trim()].filter(Boolean).join(" — ") || undefined,
         statusHistory: [{ status: "received", timestamp: new Date().toISOString() }],
         pointsEarned: pointsToEarn,
         ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
       });
 
-      /* save address to profile if requested */
-      if (saveAddress && !selectedSavedId) {
+      /* save address to profile if requested (apenas entrega) */
+      if (!isPickup && saveAddress && !selectedSavedId) {
         const existing = user.addresses ?? [];
         const newAddr = { ...address, id: `addr_${Date.now()}`, label: "Casa", isDefault: existing.length === 0 };
         await updateUserProfile(user.uid, { addresses: [...existing, newAddr] });
@@ -437,8 +450,8 @@ export default function CheckoutPage() {
       }
 
       /* monta o link do WhatsApp e congela o total antes de limpar o carrinho */
-      setWaLink(buildWaLink(id, items, total));
-      setPaidTotal(total);
+      setWaLink(buildWaLink(id, items, effectiveTotal));
+      setPaidTotal(effectiveTotal);
 
       closeCart();
       clearCart();
@@ -499,7 +512,41 @@ export default function CheckoutPage() {
               </CardContent>
             </Card>
 
-            {/* Delivery address */}
+            {/* Forma de recebimento */}
+            <Card>
+              <CardContent className="p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-7 h-7 rounded-lg bg-[var(--color-neon-blue-glow)] flex items-center justify-center">
+                    <Truck className="w-3.5 h-3.5 text-[var(--color-neon-blue)]" />
+                  </div>
+                  <h2 className="text-sm font-bold text-[var(--color-text-primary)]">Forma de Recebimento</h2>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  {([
+                    { value: "delivery", label: "Entrega",          desc: "Receba no seu endereço", icon: Truck },
+                    { value: "pickup",   label: "Retirada na loja", desc: "Buscar no balcão",       icon: Package },
+                  ] as const).map(({ value, label, desc, icon: Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setFulfillment(value)}
+                      className={`text-left p-4 rounded-xl border transition-all ${
+                        fulfillment === value
+                          ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)]"
+                          : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] hover:border-[var(--color-neon-blue)]/40"
+                      }`}
+                    >
+                      <Icon className={`w-5 h-5 mb-2 ${fulfillment === value ? "text-[var(--color-neon-blue)]" : "text-[var(--color-text-muted)]"}`} />
+                      <p className={`text-sm font-semibold ${fulfillment === value ? "text-[var(--color-neon-blue)]" : "text-[var(--color-text-primary)]"}`}>{label}</p>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Delivery address — apenas para entrega */}
+            {!isPickup && (
             <Card>
               <CardContent className="p-5">
                 <div className="flex items-center gap-2 mb-4">
@@ -630,6 +677,7 @@ export default function CheckoutPage() {
                 </div>
               </CardContent>
             </Card>
+            )}
 
             {/* Payment */}
             <Card>
@@ -729,12 +777,12 @@ export default function CheckoutPage() {
               >
                 {placing
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Processando...</>
-                  : <><ShoppingBag className="w-4 h-4" /> Confirmar Pedido — {formatCurrency(total)}</>
+                  : <><ShoppingBag className="w-4 h-4" /> Confirmar Pedido — {formatCurrency(effectiveTotal)}</>
                 }
               </Button>
               {!canSubmit && (
                 <p className="text-xs text-[var(--color-text-muted)] text-center mt-2">
-                  Preencha o endereço completo para continuar
+                  {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                 </p>
               )}
             </div>
@@ -780,12 +828,17 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-[var(--color-text-secondary)]">Entrega</span>
-                    <span className={deliveryFee === 0 ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
-                      {deliveryFee === 0 ? "Grátis" : formatCurrency(deliveryFee)}
+                    <span className="text-[var(--color-text-secondary)]">{isPickup ? "Retirada" : "Entrega"}</span>
+                    <span className={effectiveDeliveryFee === 0 ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
+                      {effectiveDeliveryFee === 0 ? "Grátis" : formatCurrency(effectiveDeliveryFee)}
                     </span>
                   </div>
-                  {deliveryFee > 0 && (
+                  {isPickup ? (
+                    <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] rounded-lg px-3 py-2">
+                      <Package className="w-3 h-3 shrink-0" />
+                      Retire seu pedido no balcão da loja
+                    </div>
+                  ) : deliveryFee > 0 && (
                     <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] rounded-lg px-3 py-2">
                       <Truck className="w-3 h-3 shrink-0" />
                       Frete grátis acima de {formatCurrency(150)}
@@ -794,7 +847,7 @@ export default function CheckoutPage() {
                   <Separator />
                   <div className="flex justify-between font-bold">
                     <span className="text-[var(--color-text-primary)]">Total</span>
-                    <span className="text-[var(--color-neon-blue)] text-lg">{formatCurrency(total)}</span>
+                    <span className="text-[var(--color-neon-blue)] text-lg">{formatCurrency(effectiveTotal)}</span>
                   </div>
                   {pointsToEarn > 0 && (
                     <div className="flex items-center gap-1.5 text-xs text-[var(--color-warning)] bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/20 rounded-lg px-3 py-2 mt-1">
@@ -820,7 +873,7 @@ export default function CheckoutPage() {
                   </Button>
                   {!canSubmit && (
                     <p className="text-xs text-[var(--color-text-muted)] text-center">
-                      Preencha o endereço completo para continuar
+                      {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                     </p>
                   )}
                 </div>

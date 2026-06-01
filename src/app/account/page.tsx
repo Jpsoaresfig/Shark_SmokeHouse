@@ -152,8 +152,13 @@ function RewardCard({
       }`}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="w-10 h-10 rounded-xl bg-[var(--color-bg-overlay)] flex items-center justify-center text-2xl shrink-0">
-          {reward.image ?? "🎁"}
+        <div className="w-10 h-10 rounded-xl bg-[var(--color-bg-overlay)] flex items-center justify-center text-2xl shrink-0 overflow-hidden">
+          {reward.image && /^https?:\/\//.test(reward.image) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={reward.image} alt={reward.name} className="w-full h-full object-cover" />
+          ) : (
+            reward.image ?? "🎁"
+          )}
         </div>
         <Badge variant={reward.stock > 0 ? "default" : "orange"} className="text-xs shrink-0">
           {reward.stock > 0 ? `${reward.stock} disp.` : "Esgotado"}
@@ -190,24 +195,30 @@ export default function AccountPage() {
   const [loadingRewards, setLoadingRewards] = useState(true);
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
 
+  // Depende só do `uid` (não do objeto storeUser inteiro): senão setUser → muda
+  // storeUser → recria load → re-roda o efeito → loop infinito de carregamento
+  // ("piscando" sem parar). getUserProfile retorna o perfil completo, então
+  // substituímos o usuário direto.
+  const uid = storeUser?.uid;
+
   const load = useCallback(async () => {
-    if (!storeUser) return;
+    if (!uid) return;
     setLoadingTx(true);
     setLoadingRewards(true);
 
     // Each fetch is isolated so a single failure (e.g. a missing Firestore
     // index on rewards) can't blank out the whole page, and the `finally`
     // blocks guarantee the loading skeletons always resolve.
-    getUserProfile(storeUser.uid)
+    getUserProfile(uid)
       .then((fresh) => {
         if (fresh) {
           setPoints(fresh.loyaltyPoints ?? 0);
-          setUser({ ...storeUser, ...fresh });
+          setUser(fresh);
         }
       })
       .catch((err) => console.error("Falha ao carregar perfil:", err));
 
-    getLoyaltyTransactions(storeUser.uid)
+    getLoyaltyTransactions(uid)
       .then(setTransactions)
       .catch((err) => {
         console.error("Falha ao carregar histórico de pontos:", err);
@@ -219,7 +230,7 @@ export default function AccountPage() {
       .then(setRewards)
       .catch((err) => console.error("Falha ao carregar recompensas:", err))
       .finally(() => setLoadingRewards(false));
-  }, [storeUser, setUser]);
+  }, [uid, setUser]);
 
   // Wait for Firebase Auth to be confirmed before querying Firestore
   useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
@@ -248,7 +259,10 @@ export default function AccountPage() {
   const handleRedeem = async (reward: LoyaltyReward) => {
     setRedeemingId(reward.id);
     try {
-      await redeemReward(storeUser.uid, reward, points);
+      await redeemReward(storeUser.uid, reward, points, {
+        name: storeUser.displayName,
+        phone: storeUser.phone,
+      });
       setPoints((p) => p - reward.pointsCost);
       setRewards((prev) => prev.map((r) => r.id === reward.id ? { ...r, stock: r.stock - 1 } : r));
       setTransactions((prev) => [{
