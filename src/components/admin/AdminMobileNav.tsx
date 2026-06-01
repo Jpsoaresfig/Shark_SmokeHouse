@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingBag,
-  Warehouse, Receipt, Users, MoreHorizontal,
+  Warehouse, Receipt, Users, MoreHorizontal, QrCode,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useState } from "react";
@@ -19,9 +19,10 @@ const ADMIN_LINKS = [
 ];
 
 const ADMIN_MORE_LINKS = [
-  { href: "/admin/users",    label: "Usuários", icon: Users          },
-  { href: "/admin/sections", label: "Seções",   icon: LayoutDashboard },
-  { href: "/admin/lounge",   label: "Lounge",   icon: ShoppingBag    },
+  { href: "/admin/users",    label: "Usuários",    icon: Users          },
+  { href: "/admin/sections", label: "Seções",      icon: LayoutDashboard },
+  { href: "/admin/payments", label: "Pagamentos",  icon: QrCode         },
+  { href: "/admin/lounge",   label: "Lounge",      icon: ShoppingBag    },
 ];
 
 const SELLER_LINKS = [

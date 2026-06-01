@@ -30,7 +30,7 @@ const SECTION_META: {
   {
     key: "lounge",
     label: "Lounge / Agendamento",
-    description: "Seção de reserva de espaço no lounge premium.",
+    description: "Reserva do lounge premium. Ao desativar, some de todo o site (menu, rodapé, página inicial e a página de agendamento).",
   },
   {
     key: "events",

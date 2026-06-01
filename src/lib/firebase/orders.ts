@@ -53,6 +53,19 @@ export async function updateOrderStatus(
   });
 }
 
+/** Cliente confirmou que efetuou a compra combinada pelo WhatsApp. */
+export async function confirmWhatsappOrder(id: string): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    awaitingConfirmation: false,
+    statusHistory: arrayUnion({
+      status: "received",
+      timestamp: new Date().toISOString(),
+      note: "Compra confirmada pelo cliente (WhatsApp)",
+    }),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 /** Marks an order's purchase points as credited so they're never awarded twice. */
 export async function markOrderPointsAwarded(id: string): Promise<void> {
   await updateDoc(doc(db, COL, id), {

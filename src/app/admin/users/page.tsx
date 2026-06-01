@@ -119,7 +119,7 @@ function CreateUserModal({ onClose, onCreated }: {
             <Input type="email" label="E-mail" placeholder="joao@email.com"
               icon={<Mail className="w-4 h-4" />}
               value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-            <Input type="tel" label="WhatsApp" placeholder="(11) 99999-9999"
+            <Input type="tel" label="WhatsApp" placeholder="(83) 99999-9999"
               icon={<Phone className="w-4 h-4" />}
               value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </div>

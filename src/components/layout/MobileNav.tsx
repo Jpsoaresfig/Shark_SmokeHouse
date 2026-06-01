@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, Package, CalendarDays, MessageCircle, User } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useSiteSections } from "@/stores/siteSettingsStore";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
 export function MobileNav() {
   const pathname = usePathname();
   const { user } = useAuth();
+  const sections = useSiteSections();
 
   // Hide on admin routes
   if (pathname.startsWith("/admin")) return null;
@@ -26,7 +28,11 @@ export function MobileNav() {
     icon: User,
   };
 
-  const items = [...NAV_ITEMS, accountItem];
+  const navItems = NAV_ITEMS.filter(
+    (item) => item.href !== "/lounge" || sections.lounge
+  );
+
+  const items = [...navItems, accountItem];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-40 md:hidden">

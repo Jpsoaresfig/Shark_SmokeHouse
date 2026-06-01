@@ -35,6 +35,9 @@ const statusConfig: Record<OrderStatus, {
 };
 
 const paymentLabels: Record<string, string> = {
+  online: "Pagamento Online",
+  on_arrival: "Na Chegada",
+  whatsapp: "Via WhatsApp",
   pix: "PIX",
   card: "Cartão",
   cash: "Dinheiro",
@@ -149,10 +152,17 @@ function OrderCard({ order, index }: { order: Order; index: number }) {
 
           {/* Status + total + chevron */}
           <div className="flex items-center gap-3 sm:gap-4 justify-between sm:justify-end">
-            <Badge variant={cfg.badge} className="text-xs shrink-0">
-              <StatusIcon className="w-3 h-3" />
-              {cfg.label}
-            </Badge>
+            {order.awaitingConfirmation ? (
+              <Badge variant="warning" className="text-xs shrink-0">
+                <Clock className="w-3 h-3" />
+                Aguardando sua confirmação
+              </Badge>
+            ) : (
+              <Badge variant={cfg.badge} className="text-xs shrink-0">
+                <StatusIcon className="w-3 h-3" />
+                {cfg.label}
+              </Badge>
+            )}
             <span className="text-base font-bold text-[var(--color-neon-blue)] whitespace-nowrap">
               {formatCurrency(order.total)}
             </span>

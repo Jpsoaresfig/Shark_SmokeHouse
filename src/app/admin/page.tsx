@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   TrendingUp, ShoppingBag, Users, Package, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck, LayoutDashboard, CalendarDays, Receipt,
-  BarChart3, RefreshCw,
+  BarChart3, RefreshCw, QrCode,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -107,7 +107,7 @@ export default function AdminDashboard() {
 
         // Online orders (excluindo cancelados — não geraram receita)
         for (const order of orders) {
-          if (order.status === "cancelled") continue;
+          if (order.status === "cancelled" || order.awaitingConfirmation) continue;
           const d = toDate(order.createdAt);
           const m = d.getMonth();
           const y = d.getFullYear();
@@ -180,7 +180,7 @@ export default function AdminDashboard() {
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
-      if (order.status === "cancelled") continue;
+      if (order.status === "cancelled" || order.awaitingConfirmation) continue;
       addToDay(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
@@ -211,7 +211,7 @@ export default function AdminDashboard() {
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
-      if (order.status === "cancelled") continue;
+      if (order.status === "cancelled" || order.awaitingConfirmation) continue;
       addToMonth(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
@@ -502,6 +502,7 @@ export default function AdminDashboard() {
             { label: "Estoque", href: "/admin/inventory", icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" },
             { label: "Vendas", href: "/admin/sales", icon: Receipt, color: "text-emerald-400", bg: "bg-emerald-500/10" },
             { label: "Seções", href: "/admin/sections", icon: LayoutDashboard, color: "text-pink-400", bg: "bg-pink-500/10" },
+            { label: "Pagamentos", href: "/admin/payments", icon: QrCode, color: "text-[var(--color-neon-blue)]", bg: "bg-[var(--color-neon-blue-glow)]" },
             { label: "Agenda Lounge", href: "/admin/lounge", icon: CalendarDays, color: "text-[var(--color-neon-cyan)]", bg: "bg-[var(--color-neon-cyan)]/10" },
           ].map((action) => {
             const Icon = action.icon;

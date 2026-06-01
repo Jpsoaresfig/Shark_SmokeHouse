@@ -1,32 +1,39 @@
+"use client";
+
 import Link from "next/link";
 import { MessageCircle, MapPin, Phone, Mail, Clock } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/ui/Logo";
-
-const footerLinks = {
-  loja: [
-    { href: "/catalog", label: "Catálogo" },
-    { href: "/catalog?category=cigars", label: "Charutos" },
-    { href: "/catalog?category=hookah", label: "Narguilé" },
-    { href: "/catalog?category=accessories", label: "Acessórios" },
-    { href: "/catalog?category=beverages", label: "Bebidas" },
-  ],
-  empresa: [
-    { href: "/about", label: "Sobre Nós" },
-    { href: "/lounge", label: "Lounge Agendamento" },
-    { href: "/events", label: "Eventos" },
-    { href: "/loyalty", label: "Clube Fidelidade" },
-  ],
-  suporte: [
-    { href: "/faq", label: "Perguntas Frequentes" },
-    { href: "/orders", label: "Acompanhar Pedido" },
-    { href: "/contact", label: "Fale Conosco" },
-    { href: "/privacy", label: "Privacidade" },
-    { href: "/terms", label: "Termos de Uso" },
-  ],
-};
+import { useSiteSections } from "@/stores/siteSettingsStore";
 
 export function Footer() {
+  const sections = useSiteSections();
+
+  const footerLinks = {
+    loja: [
+      { href: "/catalog", label: "Catálogo" },
+      { href: "/catalog?category=cigars", label: "Charutos" },
+      { href: "/catalog?category=hookah", label: "Narguilé" },
+      { href: "/catalog?category=accessories", label: "Acessórios" },
+      { href: "/catalog?category=beverages", label: "Bebidas" },
+    ],
+    empresa: [
+      { href: "/about", label: "Sobre Nós" },
+      ...(sections.lounge
+        ? [{ href: "/lounge", label: "Lounge Agendamento" }]
+        : []),
+      { href: "/events", label: "Eventos" },
+      { href: "/loyalty", label: "Clube Fidelidade" },
+    ],
+    suporte: [
+      { href: "/faq", label: "Perguntas Frequentes" },
+      { href: "/orders", label: "Acompanhar Pedido" },
+      { href: "/contact", label: "Fale Conosco" },
+      { href: "/privacy", label: "Privacidade" },
+      { href: "/terms", label: "Termos de Uso" },
+    ],
+  };
+
   return (
     <footer className="bg-[var(--color-bg-surface)] border-t border-[var(--color-border)] mt-auto">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-8">
@@ -47,7 +54,7 @@ export function Footer() {
               </div>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>(11) 99999-9999</span>
+                <span>(83) 99902-0606</span>
               </div>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Mail className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
@@ -69,7 +76,7 @@ export function Footer() {
                 <span className="text-xs font-bold">IG</span>
               </a>
               <a
-                href="https://wa.me/5511999999999"
+                href="https://wa.me/5583999020606"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-9 h-9 rounded-lg border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-success)] hover:border-[var(--color-success)] hover:bg-emerald-500/10 transition-all"

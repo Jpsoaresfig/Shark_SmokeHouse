@@ -88,7 +88,15 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-export type PaymentMethod = "pix" | "card" | "cash" | "pending";
+export type PaymentMethod =
+  | "online"      // plataforma de pagamento (PIX na hora)
+  | "on_arrival"  // pagamento na chegada (dinheiro/cartão ao receber)
+  | "whatsapp"    // cliente combina o pagamento com a equipe
+  /* legados — mantidos para pedidos antigos */
+  | "pix"
+  | "card"
+  | "cash"
+  | "pending";
 export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 
 export interface Order {
@@ -113,6 +121,8 @@ export interface Order {
   pointsEarned?: number;
   /** Guard so purchase points are credited only once (on delivery). */
   pointsAwarded?: boolean;
+  /** Pedido WhatsApp aguardando o cliente confirmar que efetuou a compra. */
+  awaitingConfirmation?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -208,6 +218,13 @@ export interface SiteSettings {
     lounge: boolean;
     events: boolean;
     loyalty: boolean;
+  };
+  /** Dados de pagamento configuráveis pelo admin. */
+  payment: {
+    /** Chave PIX usada quando o cliente escolhe pagar online. */
+    pixKey: string;
+    /** Nome do titular da chave (exibido ao cliente). */
+    pixName: string;
   };
   updatedAt?: string;
 }

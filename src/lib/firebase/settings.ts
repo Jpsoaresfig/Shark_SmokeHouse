@@ -12,6 +12,10 @@ const DEFAULT_SETTINGS: SiteSettings = {
     events: true,
     loyalty: true,
   },
+  payment: {
+    pixKey: "contato@sharksmokehou.se",
+    pixName: "Shark Smokehouse",
+  },
 };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
@@ -26,9 +30,13 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       events: data.sections?.events ?? true,
       loyalty: data.sections?.loyalty ?? true,
     },
+    payment: {
+      pixKey: data.payment?.pixKey ?? DEFAULT_SETTINGS.payment.pixKey,
+      pixName: data.payment?.pixName ?? DEFAULT_SETTINGS.payment.pixName,
+    },
   };
 }
 
-export async function updateSiteSettings(settings: SiteSettings): Promise<void> {
+export async function updateSiteSettings(settings: Partial<SiteSettings>): Promise<void> {
   await setDoc(DOC, { ...settings, updatedAt: serverTimestamp() }, { merge: true });
 }

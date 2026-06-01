@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
-import { Calendar, Clock, Users, MessageSquare, CheckCircle, Flame, ArrowRight } from "lucide-react";
+import { Calendar, Clock, Users, MessageSquare, CheckCircle, Flame, ArrowRight, CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { createLoungeBooking } from "@/lib/firebase/lounge";
+import { useSiteSettingsStore, useSiteSections } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 
 const timeSlots = [
@@ -22,6 +24,8 @@ const features = [
 ];
 
 export default function LoungePage() {
+  const sections = useSiteSections();
+  const settingsLoaded = useSiteSettingsStore((s) => s.loaded);
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");
@@ -50,6 +54,37 @@ export default function LoungePage() {
       setLoading(false);
     }
   };
+
+  if (!settingsLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4 pt-20">
+        <div className="w-8 h-8 border-2 border-[var(--color-neon-blue)]/30 border-t-[var(--color-neon-blue)] rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!sections.lounge) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4 pt-20">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="text-center max-w-md"
+        >
+          <div className="w-20 h-20 rounded-full bg-[var(--color-bg-overlay)] border-2 border-[var(--color-border)] flex items-center justify-center mx-auto mb-6">
+            <CalendarOff className="w-10 h-10 text-[var(--color-text-muted)]" />
+          </div>
+          <h2 className="text-3xl font-black text-[var(--color-text-primary)] mb-3">Agendamento indisponível</h2>
+          <p className="text-[var(--color-text-secondary)] mb-8">
+            As reservas do Lounge estão temporariamente desativadas. Volte em breve ou fale com a gente para mais informações.
+          </p>
+          <Button variant="outline" asChild>
+            <Link href="/">Voltar ao início</Link>
+          </Button>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (submitted) {
     return (
@@ -130,7 +165,7 @@ export default function LoungePage() {
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Input label="Nome completo" placeholder="João Silva" required
                     value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-                  <Input label="WhatsApp" placeholder="(11) 99999-9999" required
+                  <Input label="WhatsApp" placeholder="(83) 99999-9999" required
                     value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} />
                 </div>
                 <Input label="E-mail (opcional)" type="email" placeholder="seu@email.com"

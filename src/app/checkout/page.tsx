@@ -9,7 +9,7 @@ import {
   MapPin, ChevronRight, Package, CheckCircle,
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, CreditCard, Banknote, Plus, Star,
-  Copy, Check, User, LogIn,
+  Copy, Check, User, LogIn, MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +18,9 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
 import { useAuthStore } from "@/stores/authStore";
+import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
-import { createOrder } from "@/lib/firebase/orders";
+import { createOrder, confirmWhatsappOrder, updateOrderStatus } from "@/lib/firebase/orders";
 import { updateUserProfile } from "@/lib/firebase/users";
 import { formatCurrency } from "@/lib/utils";
 import type { Address, PaymentMethod } from "@/types";
@@ -45,22 +46,58 @@ function maskPhone(v: string) {
   return v.replace(/\D/g, "").replace(/^(\d{2})(\d{5})(\d)/, "($1) $2-$3").slice(0, 15);
 }
 
+/* ── Store contact ───────────────────────────────────────── */
+const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente dígitos, com DDI)
+
 /* ── Payment options ─────────────────────────────────────── */
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
-  { value: "pix",  label: "PIX",     desc: "Aprovação instantânea",          icon: QrCode    },
-  { value: "card", label: "Cartão",  desc: "Débito ou crédito na entrega",   icon: CreditCard },
-  { value: "cash", label: "Dinheiro",desc: "Pague na entrega",               icon: Banknote   },
+  { value: "online",     label: "Pagar Online", desc: "PIX pela plataforma, na hora",  icon: CreditCard    },
+  { value: "on_arrival", label: "Na Chegada",   desc: "Dinheiro ou cartão ao receber", icon: Banknote      },
+  { value: "whatsapp",   label: "Via WhatsApp", desc: "Combine com a nossa equipe",    icon: MessageCircle },
 ];
 
+/* Monta o link do WhatsApp com o resumo do pedido. */
+function buildWaLink(orderId: string, items: { name: string; quantity: number; price: number }[], total: number) {
+  const lines = [
+    "Olá! Acabei de fazer um pedido na Shark Smokehouse 🦈",
+    `Pedido #${orderId.slice(-8).toUpperCase()}`,
+    "",
+    ...items.map((i) => `• ${i.quantity}x ${i.name} — ${formatCurrency(i.price * i.quantity)}`),
+    "",
+    `Total: ${formatCurrency(total)}`,
+    "Gostaria de combinar o pagamento. 🙏",
+  ];
+  return `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(lines.join("\n"))}`;
+}
+
 /* ── Success screen ──────────────────────────────────────── */
-function SuccessScreen({ orderId, payment }: { orderId: string; payment: PaymentMethod }) {
+function SuccessScreen({ orderId, payment, waLink }: { orderId: string; payment: PaymentMethod; waLink: string }) {
   const [copied, setCopied] = useState(false);
-  const PIX_KEY = "contato@sharksmokehou.se";
+  const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
+  const { pixKey, pixName } = useSitePayment();
 
   const copy = async () => {
-    await navigator.clipboard.writeText(PIX_KEY);
+    await navigator.clipboard.writeText(pixKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  /* Cliente responde se efetuou ou não a compra combinada pelo WhatsApp. */
+  const handlePurchaseAnswer = async (purchased: boolean) => {
+    setConfirmState("saving");
+    try {
+      if (purchased) {
+        await confirmWhatsappOrder(orderId);
+        setConfirmState("confirmed");
+      } else {
+        await updateOrderStatus(orderId, "cancelled", "Cliente não concluiu a compra pelo WhatsApp");
+        setConfirmState("cancelled");
+      }
+    } catch (err) {
+      console.error("[checkout] confirm whatsapp", err);
+      toast.error("Não foi possível registrar sua resposta. Tente novamente.");
+      setConfirmState("idle");
+    }
   };
 
   return (
@@ -87,7 +124,69 @@ function SuccessScreen({ orderId, payment }: { orderId: string; payment: Payment
           #{orderId.slice(-8).toUpperCase()}
         </p>
 
-        {payment === "pix" && (
+        {payment === "whatsapp" && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="rounded-2xl border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 p-5 mb-6 text-left"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <MessageCircle className="w-4 h-4 text-[var(--color-success)]" />
+              <span className="text-sm font-bold text-[var(--color-success)]">Combine o pagamento</span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mb-3">
+              Fale com a nossa equipe pelo WhatsApp para combinar o pagamento e a entrega do seu pedido.
+            </p>
+            <Button variant="premium" className="w-full" asChild>
+              <a href={waLink} target="_blank" rel="noopener noreferrer">
+                <MessageCircle className="w-4 h-4" />
+                Falar com a equipe
+              </a>
+            </Button>
+
+            {/* Confirmação: o cliente efetuou a compra? */}
+            <Separator className="my-4" />
+            {confirmState === "confirmed" ? (
+              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--color-success)]">
+                <CheckCircle className="w-4 h-4" />
+                Compra confirmada! Seu pedido está registrado.
+              </div>
+            ) : confirmState === "cancelled" ? (
+              <div className="text-sm text-[var(--color-text-muted)]">
+                Tudo bem, o pedido foi cancelado. Quando quiser, é só refazer. 🙂
+              </div>
+            ) : (
+              <>
+                <p className="text-xs font-semibold text-[var(--color-text-primary)] mb-2">
+                  A compra foi efetuada pelo WhatsApp?
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="premium"
+                    className="w-full"
+                    disabled={confirmState === "saving"}
+                    onClick={() => handlePurchaseAnswer(true)}
+                  >
+                    {confirmState === "saving"
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <><Check className="w-4 h-4" /> Sim, concluí</>}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    disabled={confirmState === "saving"}
+                    onClick={() => handlePurchaseAnswer(false)}
+                  >
+                    Não concluí
+                  </Button>
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+
+        {payment === "online" && (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -98,9 +197,11 @@ function SuccessScreen({ orderId, payment }: { orderId: string; payment: Payment
               <QrCode className="w-4 h-4 text-[var(--color-neon-blue)]" />
               <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pague via PIX</span>
             </div>
-            <p className="text-xs text-[var(--color-text-muted)] mb-2">Chave PIX (e-mail):</p>
+            <p className="text-xs text-[var(--color-text-muted)] mb-2">
+              Chave PIX{pixName ? ` — ${pixName}` : ""}:
+            </p>
             <div className="flex items-center gap-2 p-3 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
-              <span className="flex-1 text-sm font-mono text-[var(--color-text-primary)]">{PIX_KEY}</span>
+              <span className="flex-1 text-sm font-mono text-[var(--color-text-primary)] break-all">{pixKey}</span>
               <button
                 onClick={copy}
                 className="shrink-0 p-1.5 rounded-lg bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue)] hover:text-[var(--color-bg-base)] transition-all"
@@ -153,13 +254,14 @@ export default function CheckoutPage() {
   const [state, setState] = useState("");
   const [saveAddress, setSaveAddress] = useState(false);
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
-  const [payment, setPayment] = useState<PaymentMethod>("pix");
+  const [payment, setPayment] = useState<PaymentMethod>("online");
   const [notes, setNotes] = useState("");
 
   /* ui state */
   const [cepLoading, setCepLoading] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [waLink, setWaLink] = useState("");
 
   const savedAddresses = user?.addresses ?? [];
   const pointsToEarn = items.reduce((acc, i) => acc + (i.pointsEarned ?? 0) * i.quantity, 0);
@@ -225,7 +327,7 @@ export default function CheckoutPage() {
   }
 
   if (orderId) {
-    return <SuccessScreen orderId={orderId} payment={payment} />;
+    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} />;
   }
 
   const canSubmit =
@@ -263,6 +365,7 @@ export default function CheckoutPage() {
         notes: notes.trim() || undefined,
         statusHistory: [{ status: "received", timestamp: new Date().toISOString() }],
         pointsEarned: pointsToEarn,
+        ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
       });
 
       /* save address to profile if requested */
@@ -275,6 +378,9 @@ export default function CheckoutPage() {
       if (phone.trim() && phone.trim() !== user.phone) {
         await updateUserProfile(user.uid, { phone: phone.trim() });
       }
+
+      /* monta o link do WhatsApp antes de limpar o carrinho */
+      setWaLink(buildWaLink(id, items, total));
 
       closeCart();
       clearCart();
@@ -498,7 +604,7 @@ export default function CheckoutPage() {
                   ))}
                 </div>
 
-                {payment === "pix" && (
+                {payment === "online" && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -510,7 +616,7 @@ export default function CheckoutPage() {
                     </div>
                   </motion.div>
                 )}
-                {payment === "cash" && (
+                {payment === "on_arrival" && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -524,6 +630,18 @@ export default function CheckoutPage() {
                     />
                   </motion.div>
                 )}
+                {payment === "whatsapp" && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    className="mt-3 overflow-hidden"
+                  >
+                    <div className="p-3 rounded-xl bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 text-xs text-[var(--color-text-muted)]">
+                      <span className="font-medium text-[var(--color-success)]">WhatsApp: </span>
+                      Ao confirmar, você poderá abrir uma conversa com a nossa equipe para combinar o pagamento.
+                    </div>
+                  </motion.div>
+                )}
               </CardContent>
             </Card>
 
@@ -533,9 +651,9 @@ export default function CheckoutPage() {
                 <h2 className="text-sm font-bold text-[var(--color-text-primary)] mb-3">Observações do Pedido</h2>
                 <textarea
                   rows={3}
-                  value={payment === "cash" ? "" : notes}
+                  value={payment === "on_arrival" ? "" : notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  disabled={payment === "cash"}
+                  disabled={payment === "on_arrival"}
                   placeholder="Alguma instrução especial para o entregador? (opcional)"
                   className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none disabled:opacity-40"
                 />

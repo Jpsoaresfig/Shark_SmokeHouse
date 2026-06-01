@@ -5,6 +5,7 @@ import { ArrowRight, Flame, Play } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
+import { useSiteSections } from "@/stores/siteSettingsStore";
 
 const statsData = [
   { value: "500+", label: "Produtos Premium" },
@@ -14,6 +15,7 @@ const statsData = [
 ];
 
 export function HeroSection() {
+  const sections = useSiteSections();
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
       {/* Background */}
@@ -105,12 +107,14 @@ export function HeroSection() {
                 <ArrowRight className="w-5 h-5" />
               </Link>
             </Button>
-            <Button variant="outline" size="xl" asChild>
-              <Link href="/lounge">
-                <Play className="w-4 h-4" />
-                Agendar Lounge
-              </Link>
-            </Button>
+            {sections.lounge && (
+              <Button variant="outline" size="xl" asChild>
+                <Link href="/lounge">
+                  <Play className="w-4 h-4" />
+                  Agendar Lounge
+                </Link>
+              </Button>
+            )}
           </motion.div>
 
           {/* Stats row */}

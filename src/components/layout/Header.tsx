@@ -11,10 +11,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
 import { useCartStore } from "@/stores/cartStore";
+import { useSiteSections } from "@/stores/siteSettingsStore";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
-const navLinks = [
+const allNavLinks = [
   { href: "/catalog", label: "Catálogo" },
   { href: "/lounge",  label: "Lounge"   },
   { href: "/events",  label: "Eventos"  },
@@ -29,7 +30,12 @@ export function Header() {
 
   const itemCount = useCartStore((s) => s.itemCount);
   const openCart = useCartStore((s) => s.openCart);
+  const sections = useSiteSections();
   const { user, logout } = useAuth();
+
+  const navLinks = allNavLinks.filter(
+    (link) => link.href !== "/lounge" || sections.lounge
+  );
 
   /* Scroll listener */
   useEffect(() => {

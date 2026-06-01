@@ -174,11 +174,17 @@ export default function AdminOrders() {
                           <span className="text-xs text-[var(--color-text-muted)]">—</span>
                           <span className="text-sm text-[var(--color-text-secondary)] truncate">{order.customerName}</span>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <p className="text-xs text-[var(--color-text-muted)]">
                             {order.createdAt ? formatDateTime(order.createdAt) : "—"}
                             {" · "}{order.items.length} item{order.items.length !== 1 ? "s" : ""}
                           </p>
+                          {order.awaitingConfirmation && (
+                            <Badge variant="warning" className="text-xs">
+                              <Clock className="w-3 h-3" />
+                              Aguardando confirmação
+                            </Badge>
+                          )}
                           <Badge variant={cfg.badge} className="sm:hidden text-xs">
                             <Icon className="w-3 h-3" />
                             {cfg.label}
@@ -214,6 +220,12 @@ export default function AdminOrders() {
 
           {selected && (
             <div className="space-y-5">
+              {selected.awaitingConfirmation && (
+                <div className="flex items-center gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5 text-sm text-[var(--color-warning)]">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  Aguardando o cliente confirmar a compra pelo WhatsApp.
+                </div>
+              )}
               {/* Items */}
               <div>
                 <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Itens</p>

@@ -149,7 +149,7 @@ export default function AboutPage() {
           >
             <Button variant="premium" size="lg" asChild>
               <a
-                href="https://wa.me/5511999999999?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -361,7 +361,7 @@ export default function AboutPage() {
 
               <Button variant="premium" size="lg" className="w-full" asChild>
                 <a
-                  href="https://wa.me/5511999999999?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                  href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -432,7 +432,7 @@ export default function AboutPage() {
                 Seguir no Instagram
               </a>
               <a
-                href="https://wa.me/5511999999999?text=Ol%C3%A1%2C+quero+saber+mais+sobre+a+Shark+Smokehouse!"
+                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+quero+saber+mais+sobre+a+Shark+Smokehouse!"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-success)]/30 bg-emerald-500/10 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 hover:border-[var(--color-success)] transition-all"

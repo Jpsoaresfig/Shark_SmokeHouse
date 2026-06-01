@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Calendar, Clock, Users, ArrowRight, CheckCircle } from "lucide-react";
+import { Clock, ArrowRight, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,31 +65,6 @@ export function LoungeSection() {
                 style={{ background: "radial-gradient(circle at 50% 60%, rgba(37,99,255,0.1) 0%, transparent 60%)" }}
               />
               <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[var(--color-neon-blue)] to-transparent opacity-60" />
-            </div>
-
-            {/* Floating info cards — hidden on mobile to avoid overflow */}
-            <div className="hidden sm:block animate-float-card absolute -bottom-6 -right-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[var(--color-neon-blue-glow)] border border-[var(--color-neon-blue)]/30 flex items-center justify-center">
-                  <Calendar className="w-5 h-5 text-[var(--color-neon-blue)]" />
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">Próxima disponibilidade</p>
-                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">Hoje, 19h</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="hidden sm:block animate-float-card-alt absolute -top-4 -left-4 glass rounded-2xl border border-[var(--color-border)] p-4 shadow-[var(--shadow-elevated)]">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--color-text-muted)]">Reservas hoje</p>
-                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">8 mesas</p>
-                </div>
-              </div>
             </div>
           </motion.div>
 
