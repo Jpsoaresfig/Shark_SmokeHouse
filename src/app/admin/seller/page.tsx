@@ -114,8 +114,8 @@ export default function SellerDashboard() {
           </div>
         </div>
 
-        {/* Navegação */}
-        <div className="mb-8">
+        {/* Navegação — apenas desktop; no mobile usa a barra inferior */}
+        <div className="mb-8 hidden md:block">
           <AdminTopNav />
         </div>
 

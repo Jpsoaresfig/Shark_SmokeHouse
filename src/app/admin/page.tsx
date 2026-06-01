@@ -319,11 +319,11 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Navegação do painel — atalhos no topo */}
+        {/* Navegação do painel — atalhos no topo (apenas desktop; no mobile usa a barra inferior) */}
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-8 hidden md:block"
         >
           <AdminTopNav />
         </motion.div>

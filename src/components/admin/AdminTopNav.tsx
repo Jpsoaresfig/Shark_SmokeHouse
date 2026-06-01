@@ -43,6 +43,7 @@ export function AdminTopNav() {
     item.exact ? pathname === item.href : pathname.startsWith(item.href);
 
   return (
+    // Só no desktop — no mobile a navegação fica na barra inferior (AdminMobileNav).
     <nav className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-2 flex flex-wrap gap-1.5">
       {links.map((item) => {
         const Icon = item.icon;
