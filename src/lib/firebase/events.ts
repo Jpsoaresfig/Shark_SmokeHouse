@@ -4,17 +4,20 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { Event } from "@/types";
 
 const COLLECTION = "events";
 
-export async function getEvents(onlyActive = false): Promise<Event[]> {
+export async function getEvents(onlyActive = false, force = false): Promise<Event[]> {
   // Single orderBy avoids needing a composite index in Firestore.
   // Events is a small collection, so filtering "active" in-memory is fine.
-  const snap = await getDocs(
-    query(collection(db, COLLECTION), orderBy("date", "desc"))
-  );
-  const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+  const all = await cached("events", async () => {
+    const snap = await getDocs(
+      query(collection(db, COLLECTION), orderBy("date", "desc"))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Event));
+  }, force);
   return onlyActive ? all.filter((e) => e.active) : all;
 }
 
@@ -37,6 +40,7 @@ export async function createEvent(
     imageUrl,
     createdAt: serverTimestamp(),
   });
+  invalidate("events");
   return { id: ref_.id, ...data, imageUrl, createdAt: new Date().toISOString() };
 }
 
@@ -51,6 +55,7 @@ export async function updateEvent(
     update = { ...update, imageUrl };
   }
   await updateDoc(doc(db, COLLECTION, id), update);
+  invalidate("events");
 }
 
 export async function deleteEvent(id: string, imageUrl?: string): Promise<void> {
@@ -62,10 +67,12 @@ export async function deleteEvent(id: string, imageUrl?: string): Promise<void> 
     }
   }
   await deleteDoc(doc(db, COLLECTION, id));
+  invalidate("events");
 }
 
 export async function toggleEventActive(id: string, active: boolean): Promise<void> {
   await updateDoc(doc(db, COLLECTION, id), { active, updatedAt: serverTimestamp() });
+  invalidate("events");
 }
 
 async function uploadEventImage(file: File, eventId?: string): Promise<string> {

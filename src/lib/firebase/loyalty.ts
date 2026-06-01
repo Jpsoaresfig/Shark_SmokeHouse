@@ -4,6 +4,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { createOrder } from "@/lib/firebase/orders";
+import { invalidate } from "@/lib/firebase/cache";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
 /** Points the referrer earns for each friend who signs up with their link. */
@@ -152,6 +153,8 @@ export async function redeemReward(
     rewardId: reward.id,
     createdAt: serverTimestamp(),
   });
+  invalidate("products"); // estoque da recompensa baixou
+  invalidate("users");    // pontos do cliente mudaram
 
   // Gera um pedido para o admin acompanhar/entregar o resgate — como se fosse uma
   // compra, mas paga com pontos. Não baixa estoque de novo (isRedemption: true).

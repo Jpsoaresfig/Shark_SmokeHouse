@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   images: {
+    // Loader custom: imagens carregam direto do CDN (sem /_next/image, lento no dev).
+    loader: "custom",
+    loaderFile: "./src/lib/imageLoader.ts",
     formats: ["image/avif", "image/webp"],
     remotePatterns: [
       { protocol: "https", hostname: "firebasestorage.googleapis.com" },

@@ -57,7 +57,7 @@ export default function AdminOrders() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setOrders(await getOrders());
+      setOrders(await getOrders(300));
     } catch {
       toast.error("Não foi possível carregar os pedidos.");
     } finally {
