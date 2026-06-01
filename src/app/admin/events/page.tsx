@@ -70,7 +70,7 @@ function ImagePicker({
       >
         {preview ? (
           <>
-            <Image src={preview} alt="Preview" fill className="object-cover" />
+            <Image src={preview} alt="Preview" fill sizes="(max-width: 640px) 100vw, 480px" className="object-cover" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
               <Upload className="w-6 h-6 text-white" />
               <span className="text-white text-sm ml-2">Trocar imagem</span>
@@ -435,7 +435,7 @@ function EventAdminCard({ event, index, toggling, onEdit, onDelete, onToggle }: 
       {/* Image */}
       <div className="relative aspect-video bg-[var(--color-bg-overlay)]">
         {event.imageUrl ? (
-          <Image src={event.imageUrl} alt={event.title} fill className="object-cover" />
+          <Image src={event.imageUrl} alt={event.title} fill sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" className="object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <ImageIcon className="w-10 h-10 text-[var(--color-text-muted)]" />

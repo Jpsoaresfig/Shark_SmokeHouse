@@ -3,6 +3,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { Review } from "@/types";
 
 const COL = "reviews";
@@ -22,23 +23,28 @@ export async function createReview(
     payload.comment = data.comment.trim();
   }
   const ref = await addDoc(collection(db, COL), payload);
+  invalidate("reviews");
   return ref.id;
 }
 
 /** Avaliações do próprio cliente (ordenadas por data no cliente — sem índice composto). */
-export async function getReviewsByCustomer(customerId: string): Promise<Review[]> {
-  const snap = await getDocs(
-    query(collection(db, COL), where("customerId", "==", customerId))
-  );
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() } as Review))
-    .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+export async function getReviewsByCustomer(customerId: string, force = false): Promise<Review[]> {
+  return cached(`reviews:customer:${customerId}`, async () => {
+    const snap = await getDocs(
+      query(collection(db, COL), where("customerId", "==", customerId))
+    );
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as Review))
+      .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+  }, force);
 }
 
 /** Todas as avaliações (admin). */
-export async function getReviews(): Promise<Review[]> {
-  const snap = await getDocs(
-    query(collection(db, COL), orderBy("createdAt", "desc"))
-  );
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Review));
+export async function getReviews(force = false): Promise<Review[]> {
+  return cached("reviews:all", async () => {
+    const snap = await getDocs(
+      query(collection(db, COL), orderBy("createdAt", "desc"))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Review));
+  }, force);
 }

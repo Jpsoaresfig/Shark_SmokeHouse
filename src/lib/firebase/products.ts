@@ -3,6 +3,7 @@ import {
   doc, serverTimestamp, query, orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { Product } from "@/types";
 
 const COL = "products";
@@ -14,22 +15,19 @@ function clean<T extends object>(obj: T): Partial<T> {
   ) as Partial<T>;
 }
 
-export async function getProducts(): Promise<Product[]> {
-  const snap = await getDocs(query(collection(db, COL), orderBy("createdAt", "desc")));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+export async function getProducts(force = false): Promise<Product[]> {
+  return cached("products", async () => {
+    const snap = await getDocs(query(collection(db, COL), orderBy("createdAt", "desc")));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+  }, force);
 }
 
-export async function getActiveProducts(): Promise<Product[]> {
-  const snap = await getDocs(query(collection(db, COL), orderBy("createdAt", "desc")));
-  return snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as Product))
-    .filter(p => p.active === true);
+export async function getActiveProducts(force = false): Promise<Product[]> {
+  return (await getProducts(force)).filter(p => p.active === true);
 }
 
 export async function getFeaturedProducts(maxCount = 4): Promise<Product[]> {
-  const snap = await getDocs(query(collection(db, COL), orderBy("createdAt", "desc")));
-  return snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as Product))
+  return (await getProducts())
     .filter(p => p.active === true && p.featured === true)
     .slice(0, maxCount);
 }
@@ -42,6 +40,7 @@ export async function createProduct(
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  invalidate("products");
   return ref.id;
 }
 
@@ -50,8 +49,10 @@ export async function updateProduct(
   data: Partial<Omit<Product, "id" | "createdAt">>,
 ): Promise<void> {
   await updateDoc(doc(db, COL, id), { ...clean(data), updatedAt: serverTimestamp() });
+  invalidate("products");
 }
 
 export async function deleteProduct(id: string): Promise<void> {
   await deleteDoc(doc(db, COL, id));
+  invalidate("products");
 }

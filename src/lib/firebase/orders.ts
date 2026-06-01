@@ -4,6 +4,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
 
 const COL = "orders";
@@ -29,6 +30,7 @@ async function applyOrderStock(
       }),
     ),
   );
+  invalidate("products"); // o estoque mudou
 }
 
 /* Firestore rejeita qualquer valor `undefined`, inclusive aninhado em objetos
@@ -48,23 +50,27 @@ function stripUndefined<T>(value: T): T {
   return value;
 }
 
-export async function getOrders(limitCount?: number): Promise<Order[]> {
-  const q = limitCount
-    ? query(collection(db, COL), orderBy("createdAt", "desc"), limit(limitCount))
-    : query(collection(db, COL), orderBy("createdAt", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+export async function getOrders(limitCount?: number, force = false): Promise<Order[]> {
+  return cached(`orders:list:${limitCount ?? "all"}`, async () => {
+    const q = limitCount
+      ? query(collection(db, COL), orderBy("createdAt", "desc"), limit(limitCount))
+      : query(collection(db, COL), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+  }, force);
 }
 
-export async function getOrdersByCustomer(customerId: string): Promise<Order[]> {
+export async function getOrdersByCustomer(customerId: string, force = false): Promise<Order[]> {
   // Filtra apenas por customerId (sem orderBy) para dispensar o índice composto;
   // a lista de um cliente é pequena, então ordenamos por data no cliente.
-  const snap = await getDocs(
-    query(collection(db, COL), where("customerId", "==", customerId))
-  );
-  return snap.docs
-    .map(d => ({ id: d.id, ...d.data() } as Order))
-    .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+  return cached(`orders:customer:${customerId}`, async () => {
+    const snap = await getDocs(
+      query(collection(db, COL), where("customerId", "==", customerId))
+    );
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as Order))
+      .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+  }, force);
 }
 
 export async function createOrder(
@@ -83,6 +89,7 @@ export async function createOrder(
   if (applyStock) {
     await applyOrderStock({ id: ref.id, items: data.items }, "out");
   }
+  invalidate("orders");
   return ref.id;
 }
 
@@ -111,6 +118,7 @@ export async function updateOrderStatus(
       await updateDoc(ref, { stockApplied: false, updatedAt: serverTimestamp() });
     }
   }
+  invalidate("orders");
 }
 
 /**
@@ -140,6 +148,7 @@ export async function updatePaymentStatus(
     paymentStatus: status, // espelho legado
     updatedAt: serverTimestamp(),
   });
+  invalidate("orders");
 }
 
 /** Cliente confirmou que efetuou a compra combinada pelo WhatsApp. */
@@ -168,6 +177,7 @@ export async function confirmWhatsappOrder(id: string): Promise<void> {
     await applyOrderStock({ id, items: order.items }, "out");
     await updateDoc(ref, { stockApplied: true, updatedAt: serverTimestamp() });
   }
+  invalidate("orders");
 }
 
 /** Marks an order's purchase points as credited so they're never awarded twice. */
@@ -176,4 +186,5 @@ export async function markOrderPointsAwarded(id: string): Promise<void> {
     pointsAwarded: true,
     updatedAt: serverTimestamp(),
   });
+  invalidate("orders");
 }

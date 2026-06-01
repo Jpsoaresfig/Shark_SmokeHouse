@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { addStockMovement } from "@/lib/firebase/inventory";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { Sale, SalePaymentMethod } from "@/types";
 
 const COL = "sales";
@@ -23,21 +24,24 @@ function toDate(value: any): Date {
   return new Date(0);
 }
 
-export async function getSales(startDate?: Date, endDate?: Date): Promise<Sale[]> {
-  const constraints: QueryConstraint[] = [];
-  if (startDate) {
-    const start = new Date(startDate);
-    start.setHours(0, 0, 0, 0);
-    constraints.push(where("createdAt", ">=", Timestamp.fromDate(start)));
-  }
-  if (endDate) {
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-    constraints.push(where("createdAt", "<=", Timestamp.fromDate(end)));
-  }
-  constraints.push(orderBy("createdAt", "desc"));
-  const snap = await getDocs(query(collection(db, COL), ...constraints));
-  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
+export async function getSales(startDate?: Date, endDate?: Date, force = false): Promise<Sale[]> {
+  const key = `sales:${startDate ? startDate.toISOString().slice(0, 10) : "-"}:${endDate ? endDate.toISOString().slice(0, 10) : "-"}`;
+  return cached(key, async () => {
+    const constraints: QueryConstraint[] = [];
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      constraints.push(where("createdAt", ">=", Timestamp.fromDate(start)));
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      constraints.push(where("createdAt", "<=", Timestamp.fromDate(end)));
+    }
+    constraints.push(orderBy("createdAt", "desc"));
+    const snap = await getDocs(query(collection(db, COL), ...constraints));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Sale));
+  }, force);
 }
 
 export async function createSale(
@@ -77,6 +81,8 @@ export async function createSale(
       })
     )
   );
+  invalidate("sales");
+  invalidate("products"); // estoque baixado
   return ref.id;
 }
 

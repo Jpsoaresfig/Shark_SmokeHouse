@@ -3,6 +3,7 @@ import {
   doc, serverTimestamp, query, orderBy, increment, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidate } from "@/lib/firebase/cache";
 import type { StockMovement, MovementType } from "@/types";
 
 const COL = "stockMovements";
@@ -27,4 +28,5 @@ export async function addStockMovement(
     ...data,
     createdAt: serverTimestamp(),
   });
+  invalidate("products"); // o estoque do produto mudou
 }

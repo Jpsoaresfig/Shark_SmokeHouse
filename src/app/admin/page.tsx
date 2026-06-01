@@ -81,15 +81,15 @@ export default function AdminDashboard() {
     criticalStock: 0,
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
         // Dashboard only needs recent data — limit to avoid fetching entire collections
         const [orders, sales, users, products] = await Promise.all([
-          getOrders(200),    // last 200 orders covers months of stats
-          getSales(),        // all PDV sales for revenue calculation
-          getAllUsers(500),   // last 500 users enough for customer count
-          getProducts(),     // all products needed for low-stock calculation
+          getOrders(200, force),       // last 200 orders covers months of stats
+          getSales(undefined, undefined, force), // all PDV sales for revenue calculation
+          getAllUsers(500, force),     // last 500 users enough for customer count
+          getProducts(force),          // all products needed for low-stock calculation
         ]);
 
 
@@ -308,7 +308,7 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => load()}
+              onClick={() => load(true)}
               disabled={loading}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/50 transition-all disabled:opacity-40"
             >

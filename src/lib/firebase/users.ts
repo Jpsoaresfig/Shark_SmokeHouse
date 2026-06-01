@@ -4,6 +4,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { generateReferralCode, registerReferralCode } from "./loyalty";
+import { cached, invalidate } from "@/lib/firebase/cache";
 import type { UserProfile, UserRole } from "@/types";
 
 const COLLECTION = "users";
@@ -75,16 +76,19 @@ export async function updateUserProfile(
   });
 }
 
-export async function getAllUsers(limitCount?: number): Promise<UserProfile[]> {
-  const q = limitCount
-    ? query(collection(db, COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
-    : query(collection(db, COLLECTION), orderBy("createdAt", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map(d => d.data() as UserProfile);
+export async function getAllUsers(limitCount?: number, force = false): Promise<UserProfile[]> {
+  return cached(`users:${limitCount ?? "all"}`, async () => {
+    const q = limitCount
+      ? query(collection(db, COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+      : query(collection(db, COLLECTION), orderBy("createdAt", "desc"));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as UserProfile);
+  }, force);
 }
 
 export async function updateUserRole(uid: string, role: UserRole): Promise<void> {
   await updateDoc(doc(db, COLLECTION, uid), { role, updatedAt: serverTimestamp() });
+  invalidate("users");
 }
 
 /**
@@ -99,10 +103,12 @@ export async function updateUserCommission(
     commissionRate: commissionRate == null ? deleteField() : commissionRate,
     updatedAt: serverTimestamp(),
   });
+  invalidate("users");
 }
 
 export async function deleteUserProfile(uid: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTION, uid));
+  invalidate("users");
 }
 
 export async function createUserWithRole(
@@ -151,5 +157,6 @@ export async function createUserWithRole(
   };
   await setDoc(ref, profile);
   if (referralCode) await registerReferralCode(uid, referralCode);
+  invalidate("users");
   return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as UserProfile;
 }
