@@ -158,7 +158,7 @@ export function Header() {
                               <DropdownLink href="/admin" icon={BarChart3} onClick={() => setUserMenuOpen(false)}>Dashboard Admin</DropdownLink>
                             )}
                             {user.role === "seller" && (
-                              <DropdownLink href="/admin/sales" icon={BarChart3} onClick={() => setUserMenuOpen(false)}>Painel Vendedor</DropdownLink>
+                              <DropdownLink href="/admin/seller" icon={BarChart3} onClick={() => setUserMenuOpen(false)}>Painel Vendedor</DropdownLink>
                             )}
                             <DropdownLink href="/orders" icon={Package} onClick={() => setUserMenuOpen(false)}>Meus Pedidos</DropdownLink>
                             <DropdownLink href="/account" icon={UserIcon} onClick={() => setUserMenuOpen(false)}>Minha Conta</DropdownLink>
@@ -291,7 +291,7 @@ export function Header() {
                       </DrawerLink>
                     )}
                     {user.role === "seller" && (
-                      <DrawerLink href="/admin/sales" icon={BarChart3} onClick={() => setMobileOpen(false)}>
+                      <DrawerLink href="/admin/seller" icon={BarChart3} onClick={() => setMobileOpen(false)}>
                         Painel Vendedor
                       </DrawerLink>
                     )}

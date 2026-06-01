@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Plus, Search, X, Eye, EyeOff, Mail, Lock,
   User, Phone, Shield, Bike, ShoppingBag, Crown,
-  Pencil, Trash2, AlertCircle, CheckCircle, Star,
+  Pencil, Trash2, AlertCircle, CheckCircle, Star, Percent,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import {
-  getAllUsers, createUserWithRole, updateUserRole, deleteUserProfile,
+  getAllUsers, createUserWithRole, updateUserRole, updateUserCommission, deleteUserProfile,
 } from "@/lib/firebase/users";
 import { formatDate } from "@/lib/utils";
 import type { UserProfile, UserRole } from "@/types";
@@ -42,6 +42,7 @@ function CreateUserModal({ onClose, onCreated }: {
 }) {
   const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
   const [role, setRole] = useState<UserRole>("customer");
+  const [commission, setCommission] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -51,7 +52,8 @@ function CreateUserModal({ onClose, onCreated }: {
     setError("");
     setLoading(true);
     try {
-      const profile = await createUserWithRole(form.email, form.password, form.name, form.phone, role);
+      const rate = role === "seller" && commission.trim() !== "" ? Number(commission) : undefined;
+      const profile = await createUserWithRole(form.email, form.password, form.name, form.phone, role, rate);
       toast.success("Usuário criado com sucesso!");
       onCreated(profile);
     } catch (err) {
@@ -141,6 +143,21 @@ function CreateUserModal({ onClose, onCreated }: {
             </div>
           </div>
 
+          {/* Comissão — apenas para vendedor */}
+          {role === "seller" && (
+            <Input
+              type="number"
+              label="Comissão sobre vendas (%) — opcional"
+              placeholder="Ex: 5"
+              min={0}
+              max={100}
+              step="0.5"
+              icon={<Percent className="w-4 h-4" />}
+              value={commission}
+              onChange={(e) => setCommission(e.target.value)}
+            />
+          )}
+
           {error && (
             <div className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5">
               <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
@@ -166,18 +183,30 @@ function CreateUserModal({ onClose, onCreated }: {
 function EditRoleModal({ user, onClose, onUpdated }: {
   user: UserProfile;
   onClose: () => void;
-  onUpdated: (uid: string, role: UserRole) => void;
+  onUpdated: (uid: string, role: UserRole, commissionRate?: number) => void;
 }) {
   const [role, setRole] = useState<UserRole>(user.role);
+  const [commission, setCommission] = useState(
+    user.commissionRate != null ? String(user.commissionRate) : ""
+  );
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
-    if (role === user.role) { onClose(); return; }
+    // Comissão desejada: só vale para vendedor; vazio/null remove.
+    const desiredRate =
+      role === "seller" && commission.trim() !== "" ? Number(commission) : null;
+    const roleChanged = role !== user.role;
+    const rateChanged = (desiredRate ?? null) !== (user.commissionRate ?? null);
+
+    if (!roleChanged && !rateChanged) { onClose(); return; }
     setLoading(true);
     try {
-      await updateUserRole(user.uid, role);
+      if (roleChanged) await updateUserRole(user.uid, role);
+      if (rateChanged || (roleChanged && role !== "seller")) {
+        await updateUserCommission(user.uid, desiredRate);
+      }
       toast.success("Perfil do usuário atualizado!");
-      onUpdated(user.uid, role);
+      onUpdated(user.uid, role, desiredRate ?? undefined);
     } catch {
       toast.error("Erro ao atualizar perfil. Tente novamente.");
     } finally {
@@ -235,6 +264,23 @@ function EditRoleModal({ user, onClose, onUpdated }: {
             );
           })}
         </div>
+
+        {/* Comissão — apenas para vendedor */}
+        {role === "seller" && (
+          <div className="mb-5">
+            <Input
+              type="number"
+              label="Comissão sobre vendas (%) — opcional"
+              placeholder="Ex: 5"
+              min={0}
+              max={100}
+              step="0.5"
+              icon={<Percent className="w-4 h-4" />}
+              value={commission}
+              onChange={(e) => setCommission(e.target.value)}
+            />
+          </div>
+        )}
 
         <div className="flex gap-3">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
@@ -305,8 +351,8 @@ export default function AdminUsersPage() {
     setShowCreate(false);
   };
 
-  const handleRoleUpdated = (uid: string, newRole: UserRole) => {
-    setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, role: newRole } : u));
+  const handleRoleUpdated = (uid: string, newRole: UserRole, commissionRate?: number) => {
+    setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, role: newRole, commissionRate } : u));
     setEditingUser(null);
   };
 
@@ -450,13 +496,20 @@ export default function AdminUsersPage() {
                           </Badge>
                         </div>
 
-                        {/* Loyalty points */}
+                        {/* Loyalty points (cliente) / comissão (vendedor) */}
                         <div className="hidden md:flex items-center gap-1.5">
                           {u.role === "customer" ? (
                             <>
                               <Star className="w-3.5 h-3.5 text-[var(--color-warning)] shrink-0" />
                               <span className="text-sm font-semibold text-[var(--color-warning)]">
                                 {(u.loyaltyPoints ?? 0).toLocaleString("pt-BR")}
+                              </span>
+                            </>
+                          ) : u.role === "seller" && u.commissionRate != null ? (
+                            <>
+                              <Percent className="w-3.5 h-3.5 text-[var(--color-neon-blue)] shrink-0" />
+                              <span className="text-sm font-semibold text-[var(--color-neon-blue)]">
+                                {u.commissionRate}%
                               </span>
                             </>
                           ) : (

@@ -59,7 +59,17 @@ service cloud.firestore {
         || isSeller()
         || (isMotoboy() && resource.data.motoboyId == request.auth.uid)
         || (isAuth() && resource.data.customerId == request.auth.uid
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']))
+        // Cliente respondendo "A compra foi efetuada?" (fluxo WhatsApp): pode
+        // confirmar (awaitingConfirmation -> false) ou cancelar o próprio pedido.
+        // Restrito aos campos do fluxo e ao status final received/cancelled, para
+        // impedir escalonamento (ex.: marcar como entregue).
+        || (isAuth() && resource.data.customerId == request.auth.uid
+            && resource.data.status == 'received'
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['awaitingConfirmation', 'status', 'statusHistory',
+                           'stockApplied', 'payment', 'paymentStatus', 'updatedAt'])
+            && request.resource.data.status in ['received', 'cancelled']);
       allow delete: if isAdmin();
     }
 

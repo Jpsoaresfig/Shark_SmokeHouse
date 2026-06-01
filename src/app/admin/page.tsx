@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, ShoppingBag, Users, Package, AlertTriangle,
-  ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck, LayoutDashboard, CalendarDays, Receipt,
-  BarChart3, RefreshCw, QrCode,
+  ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck,
+  BarChart3, RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +19,10 @@ import { getOrders } from "@/lib/firebase/orders";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales } from "@/lib/firebase/sales";
+import { resolveOrderPayment } from "@/lib/payments";
 import { toast } from "@/stores/toastStore";
 import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
+import { AdminTopNav } from "@/components/admin/AdminTopNav";
 import type { Order, Product, Sale } from "@/types";
 
 const MONTH_NAMES_SHORT = [
@@ -105,18 +107,21 @@ export default function AdminDashboard() {
         let todayOrders = 0;
         let yesterdayOrders = 0;
 
-        // Online orders (excluindo cancelados — não geraram receita)
+        // Online orders: só entram na RECEITA quando o pagamento foi confirmado
+        // (admin clicou em "Confirmar pagamento" → paid). Pagamentos cancelados
+        // não somam. A contagem de pedidos ignora apenas os cancelados.
         for (const order of orders) {
-          if (order.status === "cancelled" || order.awaitingConfirmation) continue;
+          if (order.status === "cancelled") continue;
+          const isPaid = resolveOrderPayment(order).status === "paid";
           const d = toDate(order.createdAt);
           const m = d.getMonth();
           const y = d.getFullYear();
           if (m === thisMonth && y === thisYear) {
-            monthRevenue += order.total ?? 0;
+            if (isPaid) monthRevenue += order.total ?? 0;
             if (d >= todayStart) todayOrders++;
             else if (d >= yesterdayStart) yesterdayOrders++;
           } else if (m === prevMonth && y === prevYear) {
-            prevMonthRevenue += order.total ?? 0;
+            if (isPaid) prevMonthRevenue += order.total ?? 0;
           }
         }
 
@@ -180,7 +185,8 @@ export default function AdminDashboard() {
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
-      if (order.status === "cancelled" || order.awaitingConfirmation) continue;
+      if (order.status === "cancelled") continue;
+      if (resolveOrderPayment(order).status !== "paid") continue;
       addToDay(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
@@ -211,7 +217,8 @@ export default function AdminDashboard() {
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
-      if (order.status === "cancelled" || order.awaitingConfirmation) continue;
+      if (order.status === "cancelled") continue;
+      if (resolveOrderPayment(order).status !== "paid") continue;
       addToMonth(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
@@ -303,6 +310,15 @@ export default function AdminDashboard() {
             <Badge variant="premium">Admin Master</Badge>
           </div>
         </div>
+
+        {/* Navegação do painel — atalhos no topo */}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8"
+        >
+          <AdminTopNav />
+        </motion.div>
 
         {/* Stats grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
@@ -488,40 +504,6 @@ export default function AdminDashboard() {
           </motion.div>
         </div>
 
-        {/* Quick actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="mt-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
-        >
-          {[
-            { label: "Produtos", href: "/admin/products", icon: Package, color: "text-[var(--color-neon-blue)]", bg: "bg-[var(--color-neon-blue-glow)]" },
-            { label: "Pedidos", href: "/admin/orders", icon: ShoppingBag, color: "text-purple-400", bg: "bg-purple-500/10" },
-            { label: "Usuários", href: "/admin/users", icon: Users, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-            { label: "Estoque", href: "/admin/inventory", icon: Package, color: "text-amber-400", bg: "bg-amber-500/10" },
-            { label: "Vendas", href: "/admin/sales", icon: Receipt, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-            { label: "Seções", href: "/admin/sections", icon: LayoutDashboard, color: "text-pink-400", bg: "bg-pink-500/10" },
-            { label: "Pagamentos", href: "/admin/payments", icon: QrCode, color: "text-[var(--color-neon-blue)]", bg: "bg-[var(--color-neon-blue-glow)]" },
-            { label: "Agenda Lounge", href: "/admin/lounge", icon: CalendarDays, color: "text-[var(--color-neon-cyan)]", bg: "bg-[var(--color-neon-cyan)]/10" },
-          ].map((action) => {
-            const Icon = action.icon;
-            return (
-              <a
-                key={action.label}
-                href={action.href}
-                className="group rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-5 flex flex-col items-center gap-3 hover:border-[var(--color-neon-blue)] transition-all duration-200 text-center"
-              >
-                <div className={`w-10 h-10 rounded-xl ${action.bg} flex items-center justify-center group-hover:scale-110 transition-transform`}>
-                  <Icon className={`w-5 h-5 ${action.color}`} />
-                </div>
-                <span className="text-sm font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]">
-                  {action.label}
-                </span>
-              </a>
-            );
-          })}
-        </motion.div>
       </div>
 
       {/* ── Revenue chart dialog ── */}

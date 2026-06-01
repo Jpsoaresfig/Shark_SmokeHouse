@@ -112,6 +112,12 @@ export default function AdminSales() {
 
   /* ── Item management ── */
   function addItem(product: Product) {
+    // Trava: não permite adicionar mais do que há em estoque.
+    const current = items.find(i => i.productId === product.id)?.quantity ?? 0;
+    if (current >= product.stock) {
+      toast.error(`Estoque insuficiente para "${product.name}" (disponível: ${product.stock} un).`);
+      return;
+    }
     setItems(prev => {
       const existing = prev.find(i => i.productId === product.id);
       if (existing) {
@@ -134,6 +140,15 @@ export default function AdminSales() {
   }
 
   function changeQty(productId: string, delta: number) {
+    // Trava: ao aumentar, não ultrapassa o estoque do produto.
+    if (delta > 0) {
+      const product = products.find(p => p.id === productId);
+      const item = items.find(i => i.productId === productId);
+      if (product && item && item.quantity >= product.stock) {
+        toast.error(`Estoque máximo de "${product.name}": ${product.stock} un.`);
+        return;
+      }
+    }
     setItems(prev =>
       prev
         .map(i => {
@@ -152,6 +167,16 @@ export default function AdminSales() {
   /* ── Save sale ── */
   async function handleSave() {
     if (!items.length || !user) return;
+    // Trava final: bloqueia a venda se algum item exceder o estoque atual.
+    const over = items.find(i => {
+      const p = products.find(pp => pp.id === i.productId);
+      return !p || i.quantity > p.stock;
+    });
+    if (over) {
+      const p = products.find(pp => pp.id === over.productId);
+      toast.error(`Estoque insuficiente para "${over.productName}" (disponível: ${p?.stock ?? 0} un).`);
+      return;
+    }
     setSaving(true);
     setSavedId(null);
     try {

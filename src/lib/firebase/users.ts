@@ -1,5 +1,5 @@
 import {
-  doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp,
+  doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp,
   collection, getDocs, query, orderBy, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -87,6 +87,20 @@ export async function updateUserRole(uid: string, role: UserRole): Promise<void>
   await updateDoc(doc(db, COLLECTION, uid), { role, updatedAt: serverTimestamp() });
 }
 
+/**
+ * Define/atualiza a % de comissão de um vendedor. Passar `undefined` ou `null`
+ * remove a comissão (vendedor sem comissão).
+ */
+export async function updateUserCommission(
+  uid: string,
+  commissionRate: number | null | undefined,
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTION, uid), {
+    commissionRate: commissionRate == null ? deleteField() : commissionRate,
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function deleteUserProfile(uid: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTION, uid));
 }
@@ -96,7 +110,8 @@ export async function createUserWithRole(
   password: string,
   displayName: string,
   phone: string,
-  role: UserRole
+  role: UserRole,
+  commissionRate?: number,
 ): Promise<UserProfile> {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
   const res = await fetch(
@@ -129,6 +144,8 @@ export async function createUserWithRole(
     loyaltyPoints: role === "customer" ? 100 : 0,
     referralCode,
     addresses: [],
+    // Comissão só para vendedor e quando informada (Firestore rejeita undefined).
+    ...(role === "seller" && commissionRate != null ? { commissionRate } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
