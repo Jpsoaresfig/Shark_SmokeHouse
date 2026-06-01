@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { QrCode, Save, RefreshCw, KeyRound, User, Copy, Check } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import { toast } from "@/stores/toastStore";
 export default function AdminPayments() {
   const [pixKey, setPixKey] = useState("");
   const [pixName, setPixName] = useState("");
+  const [pixQrPayload, setPixQrPayload] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -25,6 +27,7 @@ export default function AdminPayments() {
       const s = await getSiteSettings();
       setPixKey(s.payment.pixKey);
       setPixName(s.payment.pixName);
+      setPixQrPayload(s.payment.pixQrPayload ?? "");
     } catch {
       toast.error("Não foi possível carregar as configurações de pagamento.");
     } finally {
@@ -44,7 +47,7 @@ export default function AdminPayments() {
     }
     setSaving(true);
     try {
-      const payment = { pixKey: key, pixName: pixName.trim() };
+      const payment = { pixKey: key, pixName: pixName.trim(), pixQrPayload: pixQrPayload.trim() };
       await updateSiteSettings({ payment });
       /* mantém o store em sincronia para o checkout usar a chave nova na hora */
       useSiteSettingsStore.setState({ payment });
@@ -121,9 +124,34 @@ export default function AdminPayments() {
                     icon={<User className="w-4 h-4" />}
                   />
 
+                  {/* PIX Copia e Cola (BR Code) + preview do QR */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+                      PIX Copia e Cola (BR Code) — opcional
+                    </label>
+                    <textarea
+                      rows={4}
+                      value={pixQrPayload}
+                      onChange={(e) => setPixQrPayload(e.target.value)}
+                      placeholder="Cole aqui o código PIX copia e cola gerado no seu banco. O QR Code é montado a partir dele."
+                      className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm font-mono text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] placeholder:font-sans focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none break-all"
+                    />
+                    {pixQrPayload.trim() && (
+                      <div className="mt-2 flex items-center gap-4 p-3 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
+                        <div className="p-2 rounded-lg bg-white shrink-0">
+                          <QRCodeSVG value={pixQrPayload.trim()} size={96} marginSize={0} />
+                        </div>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          Pré-visualização do QR Code que o cliente verá no checkout. Confira
+                          escaneando com o app do seu banco.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)]">
-                    Essa chave é exibida na tela de confirmação do pedido quando o cliente
-                    seleciona <span className="font-medium text-[var(--color-neon-blue)]">Pagar Online (PIX)</span> no checkout.
+                    A chave e o QR Code são exibidos na tela de confirmação do pedido quando o
+                    cliente escolhe <span className="font-medium text-[var(--color-neon-blue)]">PIX</span> no checkout.
                   </div>
                 </>
               )}

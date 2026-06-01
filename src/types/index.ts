@@ -88,16 +88,63 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
+/* Gateway que processa o pagamento. Hoje só "manual"; futuramente "asaas". */
+export type PaymentProvider = "manual" | "asaas";
+
 export type PaymentMethod =
-  | "online"      // plataforma de pagamento (PIX na hora)
-  | "on_arrival"  // pagamento na chegada (dinheiro/cartão ao receber)
-  | "whatsapp"    // cliente combina o pagamento com a equipe
+  /* Fase 1 — gateways manuais */
+  | "pix_manual"   // PIX com validação externa (comprovante via WhatsApp)
+  | "on_delivery"  // pagamento na entrega (cobrança pelo motoboy)
+  | "whatsapp"     // tratativa direta via WhatsApp
   /* legados — mantidos para pedidos antigos */
+  | "online"
+  | "on_arrival"
   | "pix"
   | "card"
   | "cash"
   | "pending";
-export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
+
+export type PaymentStatus =
+  | "pending"          // genérico / aguardando ação
+  | "awaiting_proof"   // PIX manual: aguardando comprovante no WhatsApp
+  | "in_negotiation"   // whatsapp: tratativa em andamento
+  | "due_on_delivery"  // pagamento na entrega: a cobrar pelo motoboy
+  | "paid"
+  | "failed"
+  | "refunded"
+  | "cancelled";
+
+/** Evento do histórico financeiro de um pedido (auditoria das transições). */
+export interface PaymentEvent {
+  status: PaymentStatus;
+  timestamp: string;
+  note?: string;
+  /** uid de quem alterou (admin). Ausente em eventos do sistema/gateway. */
+  by?: string;
+}
+
+/**
+ * Abstração de pagamento do pedido — modelada como gateway para permitir a
+ * futura integração com o Asaas (webhooks/processamento automático) sem
+ * refatoração profunda. Na Fase 1 todos os métodos usam o provider "manual".
+ */
+export interface PaymentInfo {
+  method: PaymentMethod;
+  provider: PaymentProvider;
+  status: PaymentStatus;
+  /** Snapshot do valor cobrado. */
+  amount: number;
+  /** Referência da cobrança externa (ex.: id do Asaas). Vazio no manual. */
+  providerRef?: string;
+  /** Snapshot da chave PIX exibida ao cliente (pix_manual). */
+  pixKey?: string;
+  pixName?: string;
+  /** Quando o pagamento foi confirmado. */
+  paidAt?: string;
+  /** uid do admin que deu baixa manual. */
+  confirmedBy?: string;
+  history: PaymentEvent[];
+}
 
 export interface Order {
   id: string;
@@ -110,8 +157,12 @@ export interface Order {
   discount?: number;
   total: number;
   status: OrderStatus;
-  paymentMethod: PaymentMethod;
-  paymentStatus: PaymentStatus;
+  /** Fonte canônica do pagamento (abstração de gateway). */
+  payment: PaymentInfo;
+  /** @deprecated Espelhos mantidos para compatibilidade com pedidos antigos.
+   *  Use `payment.method` / `payment.status` e o helper resolveOrderPayment(). */
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
   deliveryAddress: Address;
   motoboyId?: string;
   motoboyName?: string;
@@ -221,10 +272,12 @@ export interface SiteSettings {
   };
   /** Dados de pagamento configuráveis pelo admin. */
   payment: {
-    /** Chave PIX usada quando o cliente escolhe pagar online. */
+    /** Chave PIX usada quando o cliente escolhe pagar via PIX. */
     pixKey: string;
     /** Nome do titular da chave (exibido ao cliente). */
     pixName: string;
+    /** Payload PIX "copia e cola" (BR Code) — renderizado como QR Code no checkout. */
+    pixQrPayload?: string;
   };
   updatedAt?: string;
 }

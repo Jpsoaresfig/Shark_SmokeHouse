@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
   payment: {
     pixKey: "contato@sharksmokehou.se",
     pixName: "Shark Smokehouse",
+    pixQrPayload: "",
   },
 };
 
@@ -33,6 +34,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
     payment: {
       pixKey: data.payment?.pixKey ?? DEFAULT_SETTINGS.payment.pixKey,
       pixName: data.payment?.pixName ?? DEFAULT_SETTINGS.payment.pixName,
+      pixQrPayload: data.payment?.pixQrPayload ?? "",
     },
   };
 }

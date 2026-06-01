@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package,
+  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +15,13 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { getOrders, updateOrderStatus, markOrderPointsAwarded } from "@/lib/firebase/orders";
+import { getOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus } from "@/lib/firebase/orders";
 import { awardPurchasePoints } from "@/lib/firebase/loyalty";
+import { resolveOrderPayment } from "@/lib/payments";
+import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
+import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
-import type { Order, OrderStatus } from "@/types";
+import type { Order, OrderStatus, PaymentStatus } from "@/types";
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; badge: "secondary" | "warning" | "default" | "purple" | "orange" | "success" | "destructive"; icon: React.ElementType }> = {
   received:         { label: "Recebido",         badge: "secondary",    icon: Clock },
@@ -40,6 +43,7 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
 };
 
 export default function AdminOrders() {
+  const { user } = useAuthStore();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
@@ -47,6 +51,8 @@ export default function AdminOrders() {
   const [newStatus, setNewStatus] = useState<OrderStatus>("analyzing");
   const [note, setNote] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [payNote, setPayNote] = useState("");
+  const [payingStatus, setPayingStatus] = useState<PaymentStatus | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +71,26 @@ export default function AdminOrders() {
     setSelected(order);
     setNewStatus(NEXT_STATUS[order.status] ?? order.status);
     setNote("");
+    setPayNote("");
+  }
+
+  /** Baixa financeira manual (ou estorno/cancelamento) do pagamento do pedido. */
+  async function handlePaymentStatus(status: PaymentStatus) {
+    if (!selected) return;
+    setPayingStatus(status);
+    try {
+      await updatePaymentStatus(selected.id, status, {
+        by: user?.uid,
+        note: payNote.trim() || undefined,
+      });
+      toast.success("Status de pagamento atualizado!");
+      setSelected(null);
+      await load();
+    } catch {
+      toast.error("Erro ao atualizar o pagamento. Tente novamente.");
+    } finally {
+      setPayingStatus(null);
+    }
   }
 
   async function handleUpdateStatus() {
@@ -251,6 +277,95 @@ export default function AdminOrders() {
                   <span className="text-[var(--color-neon-blue)]">{formatCurrency(selected.total)}</span>
                 </div>
               </div>
+
+              {/* Pagamento — gestão financeira manual */}
+              {(() => {
+                const pay = resolveOrderPayment(selected);
+                const settled = pay.status === "paid" || pay.status === "cancelled" || pay.status === "refunded";
+                return (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5" /> Pagamento
+                    </p>
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3 space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--color-text-secondary)]">
+                          {PAYMENT_METHOD_LABELS[pay.method] ?? pay.method}
+                        </span>
+                        <Badge variant={PAYMENT_STATUS_BADGE[pay.status] ?? "secondary"} className="text-xs">
+                          {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
+                        </Badge>
+                      </div>
+                      {pay.paidAt && (
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          Confirmado em {formatDateTime(pay.paidAt)}
+                        </p>
+                      )}
+
+                      {/* Histórico financeiro */}
+                      {pay.history?.length > 0 && (
+                        <div className="space-y-1 pt-1">
+                          {pay.history.slice().reverse().map((ev, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                              <span className="text-[var(--color-text-secondary)]">
+                                {PAYMENT_STATUS_LABELS[ev.status] ?? ev.status}
+                              </span>
+                              <span>· {ev.timestamp ? formatDateTime(ev.timestamp) : ""}</span>
+                              {ev.note && <span className="truncate">· {ev.note}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Ações de baixa */}
+                      {!settled && (
+                        <div className="pt-2 space-y-2">
+                          <input
+                            value={payNote}
+                            onChange={e => setPayNote(e.target.value)}
+                            placeholder="Observação do pagamento (opcional)"
+                            className={inputCls}
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="premium"
+                              size="sm"
+                              onClick={() => handlePaymentStatus("paid")}
+                              disabled={payingStatus !== null}
+                            >
+                              {payingStatus === "paid"
+                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                : <><CheckCircle className="w-3.5 h-3.5" /> Confirmar pagamento</>}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handlePaymentStatus("cancelled")}
+                              disabled={payingStatus !== null}
+                            >
+                              Cancelar pagamento
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      {pay.status === "paid" && (
+                        <div className="pt-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handlePaymentStatus("refunded")}
+                            disabled={payingStatus !== null}
+                          >
+                            {payingStatus === "refunded"
+                              ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                              : "Estornar"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Status history */}
               {selected.statusHistory?.length > 0 && (

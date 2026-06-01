@@ -16,6 +16,7 @@ const DEFAULT: SiteSettings["sections"] = {
 const DEFAULT_PAYMENT: SiteSettings["payment"] = {
   pixKey: "contato@sharksmokehou.se",
   pixName: "Shark Smokehouse",
+  pixQrPayload: "",
 };
 
 interface SiteSettingsStore {

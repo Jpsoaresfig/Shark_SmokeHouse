@@ -11,6 +11,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/authStore";
 import { getOrdersByCustomer } from "@/lib/firebase/orders";
+import { resolveOrderPayment } from "@/lib/payments";
+import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,16 +34,6 @@ const statusConfig: Record<OrderStatus, {
   out_for_delivery: { label: "Saiu para Entrega",  badge: "orange",       icon: Truck,         description: "Seu pedido está a caminho.",                   step: 4 },
   delivered:        { label: "Entregue",           badge: "success",      icon: CheckCircle,   description: "Pedido entregue com sucesso!",                  step: 5 },
   cancelled:        { label: "Cancelado",          badge: "destructive",  icon: XCircle,       description: "Este pedido foi cancelado.",                    step: 0 },
-};
-
-const paymentLabels: Record<string, string> = {
-  online: "Pagamento Online",
-  on_arrival: "Na Chegada",
-  whatsapp: "Via WhatsApp",
-  pix: "PIX",
-  card: "Cartão",
-  cash: "Dinheiro",
-  pending: "Aguardando",
 };
 
 /* ── Progress bar ────────────────────────────────────────── */
@@ -264,13 +256,18 @@ function OrderCard({ order, index }: { order: Order; index: number }) {
                     <span>Total</span>
                     <span className="text-[var(--color-neon-blue)]">{formatCurrency(order.total)}</span>
                   </div>
-                  <div className="flex items-center gap-1.5 pt-1 text-xs text-[var(--color-text-muted)]">
-                    <CreditCard className="w-3.5 h-3.5" />
-                    {paymentLabels[order.paymentMethod] ?? order.paymentMethod}
-                    {order.paymentStatus === "paid" && (
-                      <Badge variant="success" className="text-[10px] ml-1">Pago</Badge>
-                    )}
-                  </div>
+                  {(() => {
+                    const pay = resolveOrderPayment(order);
+                    return (
+                      <div className="flex items-center gap-1.5 pt-1 text-xs text-[var(--color-text-muted)]">
+                        <CreditCard className="w-3.5 h-3.5" />
+                        {PAYMENT_METHOD_LABELS[pay.method] ?? pay.method}
+                        <Badge variant={PAYMENT_STATUS_BADGE[pay.status] ?? "secondary"} className="text-[10px] ml-1">
+                          {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
+                        </Badge>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Delivery address */}
