@@ -37,11 +37,6 @@ const SECTION_META: {
     label: "Próximos Eventos",
     description: "Exibe os próximos eventos cadastrados na página inicial.",
   },
-  {
-    key: "loyalty",
-    label: "Programa de Fidelidade",
-    description: "Apresentação dos níveis do programa de pontos (Smoke, Ember, Inferno).",
-  },
 ];
 
 export default function AdminSections() {
@@ -50,7 +45,6 @@ export default function AdminSections() {
     featuredProducts: true,
     lounge: true,
     events: true,
-    loyalty: true,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

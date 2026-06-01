@@ -10,7 +10,6 @@ const DEFAULT_SETTINGS: SiteSettings = {
     featuredProducts: true,
     lounge: true,
     events: true,
-    loyalty: true,
   },
   payment: {
     pixKey: "contato@sharksmokehou.se",
@@ -29,7 +28,6 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       featuredProducts: data.sections?.featuredProducts ?? true,
       lounge: data.sections?.lounge ?? true,
       events: data.sections?.events ?? true,
-      loyalty: data.sections?.loyalty ?? true,
     },
     payment: {
       pixKey: data.payment?.pixKey ?? DEFAULT_SETTINGS.payment.pixKey,

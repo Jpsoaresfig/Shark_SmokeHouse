@@ -23,7 +23,7 @@ export function Footer() {
         ? [{ href: "/lounge", label: "Lounge Agendamento" }]
         : []),
       { href: "/events", label: "Eventos" },
-      { href: "/loyalty", label: "Clube Fidelidade" },
+      { href: "/account", label: "Clube Fidelidade" },
     ],
     suporte: [
       { href: "/faq", label: "Perguntas Frequentes" },

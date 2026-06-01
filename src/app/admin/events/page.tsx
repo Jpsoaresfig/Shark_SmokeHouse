@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CalendarDays, Plus, X, Pencil, Trash2, ToggleLeft, ToggleRight,
-  Upload, ImageIcon, AlertCircle, Eye, EyeOff, Calendar,
+  Upload, ImageIcon, AlertCircle, Eye, EyeOff, Calendar, Loader2,
 } from "lucide-react";
 import Image from "next/image";
+import { uploadToCloudinary } from "@/components/ui/CloudinaryUpload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,32 +25,47 @@ function isUpcoming(dateStr: string) {
   return new Date(dateStr) >= new Date(new Date().setHours(0, 0, 0, 0));
 }
 
-/* ── Image upload picker ─────────────────────────────────── */
+/* ── Image upload picker (Cloudinary) ────────────────────── */
 function ImagePicker({
   current,
   onChange,
+  onUploadingChange,
 }: {
   current?: string;
-  onChange: (file: File, preview: string) => void;
+  onChange: (url: string) => void;
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState(current ?? "");
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState("");
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    onChange(file, url);
+    setErr("");
+    setPreview(URL.createObjectURL(file)); // preview local imediato
+    setUploading(true);
+    onUploadingChange?.(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      onChange(url);
+      setPreview(url);
+    } catch {
+      setErr("Falha ao enviar a imagem. Tente novamente.");
+    } finally {
+      setUploading(false);
+      onUploadingChange?.(false);
+    }
   };
 
   return (
     <div>
       <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">
-        Imagem do Evento
+        Imagem do Evento <span className="text-[var(--color-text-muted)] font-normal">(opcional)</span>
       </label>
       <div
-        onClick={() => inputRef.current?.click()}
+        onClick={() => !uploading && inputRef.current?.click()}
         className="relative cursor-pointer rounded-xl border-2 border-dashed border-[var(--color-border)] hover:border-[var(--color-neon-blue)] transition-colors overflow-hidden aspect-video bg-[var(--color-bg-overlay)] flex items-center justify-center group"
       >
         {preview ? (
@@ -67,8 +83,14 @@ function ImagePicker({
             <span className="text-xs">PNG, JPG, WEBP — recomendado 16:9</span>
           </div>
         )}
+        {uploading && (
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+            <Loader2 className="w-7 h-7 text-[var(--color-neon-blue)] animate-spin" />
+          </div>
+        )}
         <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
       </div>
+      {err && <p className="text-xs text-[var(--color-error)] mt-1.5">{err}</p>}
     </div>
   );
 }
@@ -90,27 +112,23 @@ function EventModal({
     date: event?.date ?? "",
     active: event?.active ?? true,
   });
-  const [imageFile, setImageFile] = useState<File | undefined>();
+  const [imageUrl, setImageUrl] = useState(event?.imageUrl ?? "");
+  const [imgUploading, setImgUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!imageFile && !event?.imageUrl) {
-      setError("Adicione uma imagem para o evento.");
-      return;
-    }
+    if (imgUploading) return; // aguarda o upload da imagem terminar
     setLoading(true);
     try {
+      // Imagem é opcional — segue com imageUrl vazio se não houver.
       if (isEdit) {
-        await updateEvent(event.id, form, imageFile);
-        onSaved({ ...event, ...form });
+        await updateEvent(event.id, { ...form, imageUrl });
+        onSaved({ ...event, ...form, imageUrl });
       } else {
-        const created = await createEvent(
-          { ...form, imageUrl: "" },
-          imageFile
-        );
+        const created = await createEvent({ ...form, imageUrl });
         onSaved(created);
       }
     } catch {
@@ -145,7 +163,8 @@ function EventModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <ImagePicker
             current={event?.imageUrl}
-            onChange={(file) => setImageFile(file)}
+            onChange={setImageUrl}
+            onUploadingChange={setImgUploading}
           />
 
           <Input
@@ -202,9 +221,11 @@ function EventModal({
 
           <div className="flex gap-3 pt-1">
             <Button type="button" variant="secondary" className="flex-1" onClick={onClose} disabled={loading}>Cancelar</Button>
-            <Button type="submit" variant="premium" className="flex-1" disabled={loading}>
+            <Button type="submit" variant="premium" className="flex-1" disabled={loading || imgUploading}>
               {loading
                 ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : imgUploading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando imagem…</>
                 : isEdit ? "Salvar Alterações" : <><Plus className="w-4 h-4" />Criar Evento</>}
             </Button>
           </div>

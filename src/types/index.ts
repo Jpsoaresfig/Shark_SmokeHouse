@@ -277,7 +277,6 @@ export interface SiteSettings {
     featuredProducts: boolean;
     lounge: boolean;
     events: boolean;
-    loyalty: boolean;
   };
   /** Dados de pagamento configuráveis pelo admin. */
   payment: {
@@ -312,6 +311,18 @@ export interface Sale {
   total: number;
   paymentMethod: SalePaymentMethod;
   notes?: string;
+  createdAt: string;
+}
+
+/* ── Review (avaliação de pedido) ────────────────────────── */
+export interface Review {
+  id: string;
+  orderId: string;
+  customerId: string;
+  customerName: string;
+  /** Nota de 1 a 5. */
+  rating: number;
+  comment?: string;
   createdAt: string;
 }
 
