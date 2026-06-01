@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard,
@@ -73,6 +73,18 @@ export default function AdminOrders() {
     setNote("");
     setPayNote("");
   }
+
+  /* Abre automaticamente o pedido indicado na URL (?order=<id>),
+     ex.: ao clicar num pedido recente no dashboard. Roda só uma vez. */
+  const urlHandledRef = useRef(false);
+  useEffect(() => {
+    if (urlHandledRef.current || loading || orders.length === 0) return;
+    urlHandledRef.current = true;
+    const id = new URLSearchParams(window.location.search).get("order");
+    if (!id) return;
+    const match = orders.find(o => o.id === id);
+    if (match) openOrder(match);
+  }, [loading, orders]);
 
   /** Baixa financeira manual (ou estorno/cancelamento) do pagamento do pedido. */
   async function handlePaymentStatus(status: PaymentStatus) {

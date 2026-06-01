@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   TrendingUp, ShoppingBag, Users, Package, AlertTriangle,
@@ -63,6 +64,7 @@ const statusConfig = {
 };
 
 export default function AdminDashboard() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [allSales, setAllSales] = useState<Sale[]>([]);
@@ -265,6 +267,8 @@ export default function AdminDashboard() {
       color: "text-purple-400",
       bg: "bg-purple-500/10",
       border: "border-purple-500/20",
+      onClick: () => router.push("/admin/orders"),
+      clickHint: "Ver pedidos",
     },
     {
       title: "Clientes Ativos",
@@ -274,6 +278,8 @@ export default function AdminDashboard() {
       color: "text-emerald-400",
       bg: "bg-emerald-500/10",
       border: "border-emerald-500/20",
+      onClick: () => router.push("/admin/users"),
+      clickHint: "Ver clientes",
     },
     {
       title: "Estoque Crítico",
@@ -284,6 +290,8 @@ export default function AdminDashboard() {
       bg: "bg-amber-500/10",
       border: "border-amber-500/20",
       isAlert: dashStats.criticalStock > 0,
+      onClick: () => router.push("/admin/inventory"),
+      clickHint: "Ver estoque",
     },
   ];
 
@@ -412,7 +420,10 @@ export default function AdminDashboard() {
                       const StatusIcon = cfg.icon;
                       return (
                         <div key={order.id}>
-                          <div className="flex items-center gap-3 py-3">
+                          <a
+                            href={`/admin/orders?order=${order.id}`}
+                            className="flex items-center gap-3 py-3 -mx-2 px-2 rounded-xl hover:bg-[var(--color-bg-overlay)] transition-colors"
+                          >
                             <div className="w-8 h-8 rounded-lg bg-[var(--color-bg-overlay)] flex items-center justify-center shrink-0">
                               <ShoppingBag className="w-4 h-4 text-[var(--color-text-muted)]" />
                             </div>
@@ -439,7 +450,7 @@ export default function AdminDashboard() {
                                 {formatCurrency(order.total)}
                               </span>
                             </div>
-                          </div>
+                          </a>
                           {i < recentOrders.length - 1 && <Separator />}
                         </div>
                       );
