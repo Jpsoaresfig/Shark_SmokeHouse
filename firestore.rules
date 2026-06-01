@@ -128,6 +128,16 @@ service cloud.firestore {
       allow read, write: if isAdmin() || isSeller();
     }
 
+    // ── Reviews (avaliações de pedidos) ───────────────────────
+    // List: autenticados (o app filtra por customerId). Get: dono ou admin.
+    // Create: o próprio cliente. Update/delete: só admin.
+    match /reviews/{id} {
+      allow list:   if isAuth();
+      allow get:    if isAuth() && (resource.data.customerId == request.auth.uid || isAdmin());
+      allow create: if isAuth() && request.resource.data.customerId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
     // ── Commissions ───────────────────────────────────────────
     match /commissions/{commId} {
       allow read: if isAdmin() || (isAuth() && resource.data.sellerId == request.auth.uid);

@@ -5,15 +5,17 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, ChevronDown, ChevronUp, ShoppingBag,
   Clock, CheckCircle, Truck, XCircle, AlertTriangle,
-  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw,
+  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/authStore";
 import { getOrdersByCustomer } from "@/lib/firebase/orders";
+import { createReview, getReviewsByCustomer } from "@/lib/firebase/reviews";
 import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { toast } from "@/stores/toastStore";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -85,7 +87,93 @@ function OrderProgress({ status }: { status: OrderStatus }) {
 }
 
 /* ── Order card ──────────────────────────────────────────── */
-function OrderCard({ order, index }: { order: Order; index: number }) {
+/* ── Bloco de avaliação do pedido ────────────────────────── */
+function ReviewBlock({ order, reviewedRating, onReviewed }: {
+  order: Order;
+  reviewedRating?: number;
+  onReviewed?: (orderId: string, rating: number) => void;
+}) {
+  const [rating, setRating] = useState(0);
+  const [hover, setHover] = useState(0);
+  const [comment, setComment] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  /* Já avaliado — mostra a nota dada */
+  if (reviewedRating) {
+    return (
+      <div className="p-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
+        <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-2">Sua avaliação</p>
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <Star key={n} className={`w-5 h-5 ${n <= reviewedRating ? "text-[var(--color-warning)] fill-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`} />
+          ))}
+          <span className="ml-2 text-sm text-[var(--color-success)] font-medium flex items-center gap-1">
+            <CheckCircle className="w-3.5 h-3.5" /> Avaliação enviada
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const submit = async () => {
+    if (rating < 1) { toast.error("Escolha uma nota de 1 a 5 estrelas."); return; }
+    setSaving(true);
+    try {
+      await createReview({
+        orderId: order.id,
+        customerId: order.customerId,
+        customerName: order.customerName,
+        rating,
+        comment: comment.trim() || undefined,
+      });
+      toast.success("Avaliação enviada. Obrigado! 🦈");
+      onReviewed?.(order.id, rating);
+    } catch (err) {
+      console.error("[review] createReview", err);
+      toast.error("Não foi possível enviar a avaliação. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
+      <h4 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3">Avaliar pedido</h4>
+      <div className="flex items-center gap-1 mb-3">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            onClick={() => setRating(n)}
+            className="p-0.5"
+            aria-label={`${n} estrela${n > 1 ? "s" : ""}`}
+          >
+            <Star className={`w-7 h-7 transition-colors ${n <= (hover || rating) ? "text-[var(--color-warning)] fill-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`} />
+          </button>
+        ))}
+      </div>
+      <textarea
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+        rows={2}
+        placeholder="Conte como foi sua experiência (opcional)"
+        className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none mb-3"
+      />
+      <Button variant="premium" size="sm" onClick={submit} disabled={saving}>
+        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Star className="w-4 h-4" /> Enviar avaliação</>}
+      </Button>
+    </div>
+  );
+}
+
+function OrderCard({ order, index, reviewedRating, onReviewed }: {
+  order: Order;
+  index: number;
+  reviewedRating?: number;
+  onReviewed?: (orderId: string, rating: number) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const cfg = statusConfig[order.status];
   const StatusIcon = cfg.icon;
@@ -324,6 +412,11 @@ function OrderCard({ order, index }: { order: Order; index: number }) {
                   <p className="text-sm text-[var(--color-text-secondary)]">{order.notes}</p>
                 </div>
               )}
+
+              {/* Avaliação — só para pedidos entregues */}
+              {order.status === "delivered" && (
+                <ReviewBlock order={order} reviewedRating={reviewedRating} onReviewed={onReviewed} />
+              )}
             </div>
           </motion.div>
         )}
@@ -353,6 +446,7 @@ function filterOrders(orders: Order[], f: FilterValue): Order[] {
 export default function OrdersPage() {
   const { user, loading: authLoading, firebaseReady } = useAuthStore();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [reviewed, setReviewed] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterValue>("all");
 
@@ -360,7 +454,13 @@ export default function OrdersPage() {
     if (!user) return;
     setLoading(true);
     try {
-      setOrders(await getOrdersByCustomer(user.uid));
+      const [ords, revs] = await Promise.all([
+        getOrdersByCustomer(user.uid),
+        // Não bloqueia a lista se as regras de reviews ainda não foram publicadas.
+        getReviewsByCustomer(user.uid).catch(() => []),
+      ]);
+      setOrders(ords);
+      setReviewed(Object.fromEntries(revs.map((r) => [r.orderId, r.rating])));
     } finally {
       setLoading(false);
     }
@@ -506,7 +606,13 @@ export default function OrdersPage() {
         {!loading && !authLoading && filtered.length > 0 && (
           <div className="space-y-4">
             {filtered.map((order, i) => (
-              <OrderCard key={order.id} order={order} index={i} />
+              <OrderCard
+                key={order.id}
+                order={order}
+                index={i}
+                reviewedRating={reviewed[order.id]}
+                onReviewed={(id, rating) => setReviewed((prev) => ({ ...prev, [id]: rating }))}
+              />
             ))}
           </div>
         )}

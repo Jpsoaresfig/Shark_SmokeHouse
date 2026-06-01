@@ -18,6 +18,7 @@ import {
 } from "@/lib/firebase/loyalty";
 import { getUserProfile } from "@/lib/firebase/users";
 import { formatDateTime } from "@/lib/utils";
+import { LoyaltyProgramModal } from "@/components/account/LoyaltyProgramModal";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
 /* ── Tier helpers ────────────────────────────────────────── */
@@ -290,11 +291,14 @@ export default function AccountPage() {
         <motion.div
           initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
+          className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4"
         >
-          <p className="text-eyebrow text-[var(--color-neon-blue)] mb-2">Clube Fidelidade</p>
-          <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Minha Conta</h1>
-          <p className="text-sm text-[var(--color-text-muted)] mt-1">Olá, {storeUser.displayName?.split(" ")[0]}!</p>
+          <div>
+            <p className="text-eyebrow text-[var(--color-neon-blue)] mb-2">Clube Fidelidade</p>
+            <h1 className="text-3xl font-black text-[var(--color-text-primary)]">Minha Conta</h1>
+            <p className="text-sm text-[var(--color-text-muted)] mt-1">Olá, {storeUser.displayName?.split(" ")[0]}!</p>
+          </div>
+          <LoyaltyProgramModal />
         </motion.div>
 
         {/* Points + tier card */}

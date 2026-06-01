@@ -11,7 +11,7 @@ interface CloudinaryUploadProps {
   maxImages?: number;
 }
 
-async function uploadToCloudinary(file: File): Promise<string> {
+export async function uploadToCloudinary(file: File): Promise<string> {
   const cloudName    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
 

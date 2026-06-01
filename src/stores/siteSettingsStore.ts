@@ -10,7 +10,6 @@ const DEFAULT: SiteSettings["sections"] = {
   featuredProducts: true,
   lounge: true,
   events: true,
-  loyalty: true,
 };
 
 const DEFAULT_PAYMENT: SiteSettings["payment"] = {
