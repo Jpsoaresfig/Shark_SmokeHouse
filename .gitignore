@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scripts de operação locais (ex.: limpeza de dados — destrutivos, não versionar)
+/scripts/
