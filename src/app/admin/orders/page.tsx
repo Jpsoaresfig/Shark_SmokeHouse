@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
-  Bell, BellOff,
+  Bell, BellOff, Search, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -61,6 +61,7 @@ export default function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
+  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Order | null>(null);
   const [newStatus, setNewStatus] = useState<OrderStatus>("analyzing");
   const [note, setNote] = useState("");
@@ -153,7 +154,19 @@ export default function AdminOrders() {
     }
   }
 
-  const filtered = filter === "all" ? orders : orders.filter(o => o.status === filter);
+  // Busca por código do pedido (ex.: LTU5U00C), nome ou telefone do cliente.
+  // O "código" é o final do id; tiramos um "#" inicial caso o admin cole assim.
+  const q = search.trim().toLowerCase().replace(/^#/, "");
+  const qDigits = q.replace(/\D/g, "");
+  const filtered = orders.filter(o => {
+    if (filter !== "all" && o.status !== filter) return false;
+    if (!q) return true;
+    return (
+      o.id.toLowerCase().includes(q) ||
+      o.customerName?.toLowerCase().includes(q) ||
+      (qDigits.length >= 3 && (o.customerPhone ?? "").replace(/\D/g, "").includes(qDigits))
+    );
+  });
 
   const counts = ALL_STATUSES.reduce((acc, s) => {
     acc[s] = orders.filter(o => o.status === s).length;
@@ -191,6 +204,26 @@ export default function AdminOrders() {
             {soundOn ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
             {soundOn ? "Som ligado" : "Som desligado"}
           </button>
+        </div>
+
+        {/* Busca por código do pedido, nome ou telefone */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por código (ex.: LTU5U00C), nome ou telefone…"
+            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-9 pr-9 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              aria-label="Limpar busca"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* Filter tabs */}
