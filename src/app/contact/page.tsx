@@ -3,7 +3,7 @@
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import {
-  MessageCircle, MapPin, Phone, Mail, Clock, Anchor,
+  MessageCircle, MapPin, Phone, Clock, Anchor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -55,15 +55,6 @@ const channels = [
     color: "text-[var(--color-neon-blue)]",
     bg: "bg-[var(--color-neon-blue-glow)]",
     border: "border-[var(--color-neon-blue)]/20",
-  },
-  {
-    icon: Mail,
-    label: "E-mail",
-    value: "contato@sharksmokehou.se",
-    href: "mailto:contato@sharksmokehou.se",
-    color: "text-purple-400",
-    bg: "bg-purple-500/10",
-    border: "border-purple-500/20",
   },
   {
     icon: InstagramGlyph,
