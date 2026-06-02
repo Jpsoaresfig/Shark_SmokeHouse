@@ -46,7 +46,6 @@ export const metadata: Metadata = {
     locale: "pt_BR",
     siteName: "Shark SmokeHouse",
   },
-  icons: { icon: "/logo_shark_branca.jpeg", apple: "/logo_shark_branca.jpeg" },
   robots: { index: true, follow: true },
 };
 
