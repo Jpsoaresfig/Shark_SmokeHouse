@@ -10,7 +10,7 @@ import { useSiteSections } from "@/stores/siteSettingsStore";
 const statsData = [
   { value: "500+", label: "Produtos Premium" },
   { value: "5★",  label: "Avaliação Média" },
-  { value: "2h",  label: "Entrega Expressa" },
+  { value: "1h",  label: "Entrega Expressa" },
   { value: "10k+",label: "Clientes Satisfeitos" },
 ];
 

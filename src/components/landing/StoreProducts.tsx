@@ -29,6 +29,8 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
     : null;
 
   const handleAdd = () => {
+    // Com cores: deixa o modal (abre pelo clique no card) cuidar da escolha.
+    if (product.colors?.length) return;
     addItem(product);
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);

@@ -2,8 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star, X } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -15,7 +15,6 @@ import {
 import { formatCurrency, slugify } from "@/lib/utils";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/firebase/products";
 import { CloudinaryUpload } from "@/components/ui/CloudinaryUpload";
-import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Product, ProductCategory } from "@/types";
 
@@ -39,14 +38,13 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   price: 0, compareAtPrice: undefined, category: "accessories",
   tags: [], images: [], stock: 0, minStock: 5,
   sku: "", featured: false, active: true, loyaltyPoints: undefined,
-  pointsEarned: undefined,
+  pointsEarned: undefined, colors: [],
 };
 
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
 export default function AdminProducts() {
-  const { user } = useAuthStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -57,6 +55,22 @@ export default function AdminProducts() {
   const [form, setForm] = useState(EMPTY);
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
   const [earnEnabled, setEarnEnabled] = useState(false);
+  const [colorInput, setColorInput] = useState("");
+
+  function addColor() {
+    const c = colorInput.trim();
+    if (!c) return;
+    setForm(f => {
+      const list = f.colors ?? [];
+      if (list.some(x => x.toLowerCase() === c.toLowerCase())) return f;
+      return { ...f, colors: [...list, c] };
+    });
+    setColorInput("");
+  }
+
+  function removeColor(c: string) {
+    setForm(f => ({ ...f, colors: (f.colors ?? []).filter(x => x !== c) }));
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +106,7 @@ export default function AdminProducts() {
       sku: p.sku ?? "", featured: p.featured ?? false, active: p.active,
       loyaltyPoints: p.loyaltyPoints,
       pointsEarned: p.pointsEarned,
+      colors: p.colors ?? [],
     });
     setOpen(true);
   }
@@ -487,6 +502,40 @@ export default function AdminProducts() {
                 onChange={(urls) => set("images", urls)}
                 maxImages={5}
               />
+            </div>
+
+            {/* Cores/estampas disponíveis (opcional) */}
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">
+                Cores/estampas disponíveis <span className="text-[var(--color-text-muted)] font-normal">(opcional — o cliente escolhe, mesmo preço)</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  value={colorInput}
+                  onChange={e => setColorInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addColor(); } }}
+                  placeholder="Ex: Preto, Vermelho, Floral, Camuflado..."
+                  className={inputCls}
+                />
+                <Button type="button" variant="secondary" onClick={addColor} disabled={!colorInput.trim()}>
+                  Adicionar
+                </Button>
+              </div>
+              {(form.colors ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(form.colors ?? []).map(c => (
+                    <span
+                      key={c}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/30"
+                    >
+                      {c}
+                      <button type="button" onClick={() => removeColor(c)} className="hover:text-[var(--color-error)]" aria-label={`Remover ${c}`}>
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-4 sm:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">

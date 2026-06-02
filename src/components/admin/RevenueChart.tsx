@@ -37,7 +37,7 @@ export function RevenueChart({ data, loading }: RevenueChartProps) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const { points, yMax, gridLines, total, avg, peak, trend } = useMemo(() => {
+  const { points, gridLines, total, avg, peak, trend } = useMemo(() => {
     if (data.length === 0) {
       return { points: [], yMax: 100, gridLines: [], total: 0, avg: 0, peak: null as ChartPoint | null, trend: 0 };
     }

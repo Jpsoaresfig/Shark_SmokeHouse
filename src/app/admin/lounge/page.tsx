@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import {
-  getLoungeBookings, updateLoungeBookingStatus, deleteLoungeBooking,
+  getLoungeBookings, updateLoungeBookingStatus, deleteLoungeBooking, SLOT_TAKEN,
 } from "@/lib/firebase/lounge";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
@@ -117,18 +117,29 @@ export default function AdminLoungePage() {
 
   const pendingCount = bookings.filter((b) => b.status === "pending").length;
 
-  async function changeStatus(id: string, status: BookingStatus) {
-    setActionId(id);
+  async function changeStatus(booking: LoungeBooking, status: BookingStatus) {
+    setActionId(booking.id);
     try {
-      await updateLoungeBookingStatus(id, status);
-      setBookings((prev) => prev.map((b) => b.id === id ? { ...b, status } : b));
+      // Reativar uma reserva cancelada precisa reclamar o slot (pode ter sido
+      // ocupado por outra pessoa nesse meio-tempo).
+      const reactivate = booking.status === "cancelled" && status !== "cancelled";
+      await updateLoungeBookingStatus(booking.id, status, {
+        date: booking.date,
+        time: booking.time,
+        reactivate,
+      });
+      setBookings((prev) => prev.map((b) => b.id === booking.id ? { ...b, status } : b));
       toast.success(
         status === "approved" ? "Reserva confirmada!" :
         status === "cancelled" ? "Reserva cancelada." :
         "Status atualizado."
       );
-    } catch {
-      toast.error("Erro ao atualizar a reserva.");
+    } catch (err) {
+      if (err instanceof Error && err.message === SLOT_TAKEN) {
+        toast.error("Não foi possível reativar: o horário já foi reservado por outra pessoa.");
+      } else {
+        toast.error("Erro ao atualizar a reserva.");
+      }
     } finally {
       setActionId(null);
     }
@@ -138,7 +149,7 @@ export default function AdminLoungePage() {
     if (!deleteTarget) return;
     setActionId(deleteTarget.id);
     try {
-      await deleteLoungeBooking(deleteTarget.id);
+      await deleteLoungeBooking(deleteTarget.id, { date: deleteTarget.date, time: deleteTarget.time });
       setBookings((prev) => prev.filter((b) => b.id !== deleteTarget.id));
       toast.success("Reserva excluída.");
       setDeleteTarget(null);
@@ -428,7 +439,7 @@ export default function AdminLoungePage() {
                                   {booking.status === "pending" && (
                                     <button
                                       disabled={isUpdating}
-                                      onClick={() => changeStatus(booking.id, "approved")}
+                                      onClick={() => changeStatus(booking, "approved")}
                                       className="flex items-center gap-1 px-2.5 h-8 rounded-lg border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-xs font-medium text-[var(--color-success)] hover:bg-[var(--color-success)]/20 transition-colors disabled:opacity-50"
                                     >
                                       <CheckCircle className="w-3 h-3" /> Confirmar
@@ -437,7 +448,7 @@ export default function AdminLoungePage() {
                                   {booking.status !== "cancelled" && (
                                     <button
                                       disabled={isUpdating}
-                                      onClick={() => changeStatus(booking.id, "cancelled")}
+                                      onClick={() => changeStatus(booking, "cancelled")}
                                       className="flex items-center gap-1 px-2.5 h-8 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 text-xs font-medium text-[var(--color-error)] hover:bg-red-500/20 transition-colors disabled:opacity-50"
                                     >
                                       <XCircle className="w-3 h-3" /> Cancelar
@@ -446,7 +457,7 @@ export default function AdminLoungePage() {
                                   {booking.status === "cancelled" && (
                                     <button
                                       disabled={isUpdating}
-                                      onClick={() => changeStatus(booking.id, "pending")}
+                                      onClick={() => changeStatus(booking, "pending")}
                                       className="flex items-center gap-1 px-2.5 h-8 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-xs font-medium text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20 transition-colors disabled:opacity-50"
                                     >
                                       <RefreshCw className="w-3 h-3" /> Reabrir

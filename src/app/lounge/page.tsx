@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Calendar, Clock, Users, MessageSquare, CheckCircle, Flame, ArrowRight, CalendarOff } from "lucide-react";
+import { Clock, CheckCircle, Flame, ArrowRight, CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { createLoungeBooking } from "@/lib/firebase/lounge";
+import { createLoungeBooking, getTakenSlots, SLOT_TAKEN } from "@/lib/firebase/lounge";
 import { useSiteSettingsStore, useSiteSections } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 
@@ -29,9 +29,25 @@ export default function LoungePage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");
+  const [takenSlots, setTakenSlots] = useState<string[]>([]);
   const [form, setForm] = useState({
     name: "", whatsapp: "", email: "", date: "", guests: "1", notes: "",
   });
+
+  // Ao escolher a data, busca os horários já reservados para desabilitá-los.
+  useEffect(() => {
+    if (!form.date) { setTakenSlots([]); return; }
+    let active = true;
+    getTakenSlots(form.date)
+      .then((taken) => { if (active) setTakenSlots(taken); })
+      .catch(() => { if (active) setTakenSlots([]); });
+    return () => { active = false; };
+  }, [form.date]);
+
+  // Se o horário selecionado ficou ocupado (ex.: outra reserva), limpa a seleção.
+  useEffect(() => {
+    if (selectedTime && takenSlots.includes(selectedTime)) setSelectedTime("");
+  }, [takenSlots, selectedTime]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +66,16 @@ export default function LoungePage() {
       setSubmitted(true);
     } catch (err) {
       console.error("[lounge] createLoungeBooking", err);
-      toast.error("Não foi possível enviar sua reserva. Tente novamente.");
+      if (err instanceof Error && err.message === SLOT_TAKEN) {
+        toast.error("Esse horário acabou de ser reservado. Escolha outro, por favor.");
+        setSelectedTime("");
+        getTakenSlots(form.date).then(setTakenSlots).catch(() => {});
+      } else if (err instanceof Error && err.message && !err.message.includes("Firebase")) {
+        // Mensagens de validação (data passada, campos obrigatórios) já vêm prontas.
+        toast.error(err.message);
+      } else {
+        toast.error("Não foi possível enviar sua reserva. Tente novamente.");
+      }
     } finally {
       setLoading(false);
     }
@@ -198,23 +223,32 @@ export default function LoungePage() {
                     Horário
                   </label>
                   <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                    {timeSlots.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => setSelectedTime(t)}
-                        className={`h-11 rounded-lg text-sm font-medium transition-all ${
-                          selectedTime === t
-                            ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/40 shadow-[var(--shadow-neon-sm)]"
-                            : "border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)] hover:text-[var(--color-neon-blue)] bg-[var(--color-bg-overlay)]"
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
+                    {timeSlots.map((t) => {
+                      const taken = takenSlots.includes(t);
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          disabled={taken}
+                          onClick={() => setSelectedTime(t)}
+                          title={taken ? "Horário já reservado" : undefined}
+                          className={`h-11 rounded-lg text-sm font-medium transition-all ${
+                            taken
+                              ? "border border-[var(--color-border)] text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] line-through opacity-50 cursor-not-allowed"
+                              : selectedTime === t
+                                ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/40 shadow-[var(--shadow-neon-sm)]"
+                                : "border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)] hover:text-[var(--color-neon-blue)] bg-[var(--color-bg-overlay)]"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
                   </div>
                   {!selectedTime && (
-                    <p className="text-xs text-[var(--color-text-muted)] mt-1.5">Selecione um horário</p>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                      {form.date ? "Selecione um horário" : "Escolha a data para ver os horários disponíveis"}
+                    </p>
                   )}
                 </div>
 

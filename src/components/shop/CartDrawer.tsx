@@ -82,7 +82,7 @@ export function CartDrawer() {
                   <AnimatePresence initial={false}>
                     {items.map((item) => (
                       <motion.div
-                        key={item.productId}
+                        key={item.productId + (item.color ?? "")}
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
@@ -110,6 +110,9 @@ export function CartDrawer() {
                             <p className="text-sm font-medium text-[var(--color-text-primary)] truncate mb-1">
                               {item.name}
                             </p>
+                            {item.color && (
+                              <p className="text-xs text-[var(--color-text-muted)] mb-0.5">Cor/estampa: {item.color}</p>
+                            )}
                             <p className="text-sm font-semibold text-[var(--color-neon-blue)]">
                               {formatCurrency(item.price)}
                             </p>
@@ -118,7 +121,7 @@ export function CartDrawer() {
                             <div className="flex items-center gap-2 mt-2">
                               <div className="flex items-center rounded-lg border border-[var(--color-border)] overflow-hidden">
                                 <button
-                                  onClick={() => updateQuantity(item.productId, item.quantity - 1)}
+                                  onClick={() => updateQuantity(item.productId, item.quantity - 1, item.color)}
                                   className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors active:bg-[var(--color-bg-hover)]"
                                   aria-label="Diminuir"
                                 >
@@ -128,7 +131,7 @@ export function CartDrawer() {
                                   {item.quantity}
                                 </span>
                                 <button
-                                  onClick={() => updateQuantity(item.productId, item.quantity + 1)}
+                                  onClick={() => updateQuantity(item.productId, item.quantity + 1, item.color)}
                                   className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors active:bg-[var(--color-bg-hover)]"
                                   aria-label="Aumentar"
                                 >
@@ -136,7 +139,7 @@ export function CartDrawer() {
                                 </button>
                               </div>
                               <button
-                                onClick={() => removeItem(item.productId)}
+                                onClick={() => removeItem(item.productId, item.color)}
                                 className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 rounded-lg transition-colors active:bg-red-500/10"
                                 aria-label="Remover item"
                               >

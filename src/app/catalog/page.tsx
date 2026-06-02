@@ -53,6 +53,8 @@ export default function CatalogPage() {
   }), [products, search, activeCategory]);
 
   const handleAddToCart = (product: Product) => {
+    // Produto com cores: abre o modal para o cliente escolher a cor.
+    if (product.colors?.length) { setSelectedProduct(product); return; }
     addItem(product);
     setAddedId(product.id);
     setTimeout(() => setAddedId(null), 1500);

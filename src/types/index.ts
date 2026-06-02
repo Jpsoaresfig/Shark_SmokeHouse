@@ -60,6 +60,8 @@ export interface Product {
   weight?: number;
   featured?: boolean;
   active: boolean;
+  /** Cores disponíveis (nomes) para o cliente escolher. Mesma peça, mesmo preço. */
+  colors?: string[];
   /** Points required to redeem this product as a loyalty reward. */
   loyaltyPoints?: number;
   /** Points the customer earns (per unit) when buying this product. */
@@ -75,6 +77,8 @@ export interface CartItem {
   price: number;
   image: string;
   quantity: number;
+  /** Cor escolhida pelo cliente (quando o produto oferece cores). */
+  color?: string;
   notes?: string;
   /** Loyalty points earned per unit, snapshotted from the product at add-to-cart. */
   pointsEarned?: number;

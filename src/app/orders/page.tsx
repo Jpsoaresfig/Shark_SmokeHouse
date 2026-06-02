@@ -293,7 +293,7 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
                 </h4>
                 <div className="space-y-2.5">
                   {order.items.map((item) => (
-                    <div key={item.productId} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg-overlay)]">
+                    <div key={item.productId + (item.color ?? "")} className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg-overlay)]">
                       {/* Product image */}
                       <div className="w-12 h-12 rounded-lg bg-[var(--color-bg-hover)] overflow-hidden shrink-0 relative">
                         {item.image ? (
@@ -307,7 +307,7 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{item.name}</p>
                         <p className="text-xs text-[var(--color-text-muted)]">
-                          {item.quantity}x · {formatCurrency(item.price)} cada
+                          {item.quantity}x · {formatCurrency(item.price)} cada{item.color ? ` · Cor/estampa: ${item.color}` : ""}
                         </p>
                       </div>
                       <span className="text-sm font-semibold text-[var(--color-text-primary)] whitespace-nowrap">
