@@ -106,6 +106,16 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // ── Lounge Slots (trava pública de horário, sem PII) ──────
+    // Guarda apenas { date, time } para impedir conflito de horário. Leitura
+    // pública permite ao formulário desabilitar horários ocupados. Qualquer um
+    // pode CRIAR um slot livre (a transação garante unicidade), mas só o admin
+    // pode sobrescrever/remover — o que impede roubar/alterar um slot existente.
+    match /lounge_slots/{slotId} {
+      allow read, create: if true;
+      allow update, delete: if isAdmin();
+    }
+
     // ── Banners / CMS ─────────────────────────────────────────
     match /banners/{bannerId} {
       allow read: if true;

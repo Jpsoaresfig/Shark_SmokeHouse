@@ -282,7 +282,10 @@ export default function AdminOrders() {
                 <div className="space-y-2">
                   {selected.items.map((item, i) => (
                     <div key={i} className="flex justify-between text-sm">
-                      <span className="text-[var(--color-text-secondary)]">{item.quantity}× {item.name}</span>
+                      <span className="text-[var(--color-text-secondary)]">
+                        {item.quantity}× {item.name}
+                        {item.color ? <span className="text-[var(--color-text-muted)]"> · {item.color}</span> : null}
+                      </span>
                       <span className="text-[var(--color-text-primary)] font-medium">{formatCurrency(item.price * item.quantity)}</span>
                     </div>
                   ))}

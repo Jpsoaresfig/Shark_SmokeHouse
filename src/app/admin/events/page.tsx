@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
-import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
   getEvents, createEvent, updateEvent, deleteEvent, toggleEventActive,
@@ -261,7 +260,7 @@ function DeleteConfirm({ event, onClose, onDeleted }: { event: Event; onClose: (
         <p className="text-sm text-[var(--color-text-secondary)] text-center mb-1">
           Tem certeza que deseja excluir
         </p>
-        <p className="text-sm font-semibold text-[var(--color-neon-blue)] text-center mb-6">"{event.title}"?</p>
+        <p className="text-sm font-semibold text-[var(--color-neon-blue)] text-center mb-6">&ldquo;{event.title}&rdquo;?</p>
         <div className="flex gap-3">
           <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
           <Button variant="destructive" className="flex-1" onClick={handle} disabled={loading}>

@@ -25,6 +25,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const [qty, setQty] = useState(1);
   const [added, setAdded] = useState(false);
   const [imgIndex, setImgIndex] = useState(0);
+  const [selectedColor, setSelectedColor] = useState("");
   const { addItem, openCart } = useCartStore();
 
   if (!product) return null;
@@ -37,9 +38,13 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
     : null;
   const outOfStock = product.stock === 0;
   const lowStock = product.stock > 0 && product.stock <= 5;
+  const colors = product.colors ?? [];
+  const hasColors = colors.length > 0;
+  const needsColor = hasColors && !selectedColor;
 
   const handleAdd = () => {
-    addItem(product, qty);
+    if (needsColor) return;
+    addItem(product, qty, { color: selectedColor || undefined });
     setAdded(true);
     setTimeout(() => {
       setAdded(false);
@@ -236,6 +241,31 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                   </span>
                 </div>
 
+                {/* Color selector */}
+                {hasColors && (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                      Cor/estampa {needsColor && <span className="text-[var(--color-error)] normal-case">— selecione uma</span>}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {colors.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setSelectedColor(c)}
+                          className={`px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
+                            selectedColor === c
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Spacer */}
                 <div className="flex-1" />
 
@@ -267,12 +297,17 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                       size="lg"
                       className="flex-1"
                       onClick={handleAdd}
-                      disabled={added}
+                      disabled={added || needsColor}
                     >
                       {added ? (
                         <>
                           <Check className="w-4 h-4" />
                           Adicionado!
+                        </>
+                      ) : needsColor ? (
+                        <>
+                          <ShoppingCart className="w-4 h-4" />
+                          Selecione cor/estampa
                         </>
                       ) : (
                         <>

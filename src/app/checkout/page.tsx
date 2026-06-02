@@ -21,6 +21,8 @@ import { useAuthStore } from "@/stores/authStore";
 import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus } from "@/lib/firebase/orders";
+import { getProducts } from "@/lib/firebase/products";
+import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
 import { manualGateway } from "@/lib/payments";
 import { formatCurrency } from "@/lib/utils";
@@ -394,6 +396,16 @@ export default function CheckoutPage() {
     if (!canSubmit || !user) return;
     setPlacing(true);
     try {
+      /* Revalida o estoque com dados frescos antes de finalizar. O helper soma a
+         quantidade de todas as cores/estampas do mesmo produto (estoque compartilhado)
+         e bloqueia a compra se algum item exceder o disponível (evita estoque negativo). */
+      const fresh = await getProducts(true);
+      const shortages = findStockShortages(items, fresh);
+      if (shortages.length) {
+        toast.error(`Estoque insuficiente — ${describeShortages(shortages)}. Ajuste o carrinho para continuar.`);
+        return;
+      }
+
       const address: Address = isPickup
         ? {
             id: "pickup",
@@ -801,7 +813,7 @@ export default function CheckoutPage() {
                 {/* Items */}
                 <div className="space-y-3 mb-4">
                   {items.map((item) => (
-                    <div key={item.productId} className="flex items-center gap-3">
+                    <div key={item.productId + (item.color ?? "")} className="flex items-center gap-3">
                       <div className="w-12 h-12 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] overflow-hidden shrink-0 relative">
                         {item.image
                           ? <Image src={item.image} alt={item.name} fill className="object-cover" />
@@ -810,7 +822,9 @@ export default function CheckoutPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-[var(--color-text-primary)] truncate">{item.name}</p>
-                        <p className="text-xs text-[var(--color-text-muted)]">Qtd: {item.quantity}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">
+                          Qtd: {item.quantity}{item.color ? ` · Cor/estampa: ${item.color}` : ""}
+                        </p>
                       </div>
                       <span className="text-xs font-semibold text-[var(--color-text-primary)] shrink-0">
                         {formatCurrency(item.price * item.quantity)}

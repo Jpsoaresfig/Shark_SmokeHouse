@@ -218,7 +218,7 @@ export default function AboutPage() {
               <div className="glass rounded-2xl border border-[var(--color-neon-blue)]/20 bg-[var(--color-neon-blue-glow)] p-8 text-center">
                 <Waves className="w-8 h-8 text-[var(--color-neon-blue)] mx-auto mb-4" />
                 <p className="text-xl text-[var(--color-text-primary)] font-semibold leading-relaxed max-w-2xl mx-auto">
-                  "Fica ligado porque o melhor ainda vem por aí… prepare-se para embarcar."
+                  &ldquo;Fica ligado porque o melhor ainda vem por aí… prepare-se para embarcar.&rdquo;
                 </p>
                 <div className="flex items-center justify-center gap-2 mt-4 text-[var(--color-neon-blue)] text-sm font-medium">
                   <Anchor className="w-4 h-4" />
