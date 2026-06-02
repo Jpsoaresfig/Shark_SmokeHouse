@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
-  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star,
+  ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,6 +41,18 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   preparing: "out_for_delivery",
   out_for_delivery: "delivered",
 };
+
+/** Monta o link do WhatsApp do cliente com a mensagem de aviso de entrega pronta. */
+function waNotifyLink(phone: string, name: string, kind: "out_for_delivery" | "delivered", orderId: string) {
+  const digits = phone.replace(/\D/g, "");
+  const full = digits.startsWith("55") ? digits : `55${digits}`;
+  const ref = `#${orderId.slice(-6).toUpperCase()}`;
+  const firstName = (name || "").trim().split(" ")[0] || "tudo bem";
+  const text = kind === "out_for_delivery"
+    ? `Olá ${firstName}! 🦈 Seu pedido ${ref} da Shark Smokehouse saiu para entrega e chega já já. Qualquer coisa, é só responder por aqui!`
+    : `Olá ${firstName}! 🦈 Seu pedido ${ref} foi entregue. Esperamos que aproveite — obrigado por comprar com a Shark Smokehouse! 💨`;
+  return `https://wa.me/${full}?text=${encodeURIComponent(text)}`;
+}
 
 export default function AdminOrders() {
   const { user } = useAuthStore();
@@ -455,6 +467,34 @@ export default function AdminOrders() {
                       className={inputCls}
                     />
                   </div>
+                </div>
+              )}
+
+              {/* Avisar o cliente no WhatsApp (mensagem pronta, 1 clique) */}
+              {selected.customerPhone && selected.status !== "cancelled" && (
+                <div>
+                  <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Avisar cliente no WhatsApp</p>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={waNotifyLink(selected.customerPhone, selected.customerName, "out_for_delivery", selected.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-xs font-medium text-[var(--color-warning)] hover:bg-[var(--color-warning)]/20 transition-colors"
+                    >
+                      <Truck className="w-3.5 h-3.5" /> Saiu para entrega
+                    </a>
+                    <a
+                      href={waNotifyLink(selected.customerPhone, selected.customerName, "delivered", selected.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-xs font-medium text-[var(--color-success)] hover:bg-[var(--color-success)]/20 transition-colors"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" /> Pedido chegou
+                    </a>
+                  </div>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5 flex items-center gap-1">
+                    <MessageCircle className="w-3 h-3" /> Abre o WhatsApp com a mensagem pronta — você só confirma o envio.
+                  </p>
                 </div>
               )}
             </div>

@@ -75,7 +75,20 @@ Tempo estimado: ~20 min.
 - [ ] **Pagamentos / Pedidos / Avaliações / Usuários:** abrem sem erro de permissão.
 - [ ] Navegação **mobile** do admin (barra inferior) funciona.
 
-## 8. Saúde geral
+## 8. Reportes de problemas (novo)
+- [ ] No site (fora do admin), o botão flutuante **"Reportar problema"** aparece.
+- [ ] Enviar um reporte de teste → mensagem de sucesso.
+- [ ] No **admin → Reportes**, o reporte aparece com a página de origem, autor e data.
+- [ ] Marcar como **resolvido** e **reabrir** funcionam; excluir funciona.
+- [ ] (Logado) o reporte mostra nome/e-mail; (deslogado) mostra "Visitante".
+
+## 9. Aviso de entrega no WhatsApp (novo)
+- [ ] Abrir um pedido com telefone no **admin → Pedidos**.
+- [ ] Botão **"Saiu para entrega"** abre o WhatsApp do cliente com a mensagem pronta.
+- [ ] Botão **"Pedido chegou"** abre com a mensagem de entrega concluída.
+- [ ] O número abre corretamente (com DDI 55).
+
+## 10. Saúde geral
 - [ ] Abrir o **console do navegador** durante os testes → sem erros vermelhos de
       `permission-denied` (regra faltando) ou `requires an index` (índice faltando).
 - [ ] Testar em **celular real** (a maior parte do tráfego é mobile).

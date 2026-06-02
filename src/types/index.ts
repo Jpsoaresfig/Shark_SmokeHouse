@@ -343,3 +343,22 @@ export interface Commission {
   paidAt?: string;
   createdAt: string;
 }
+
+/* ── Report (problema reportado por usuário) ─────────────── */
+export type ReportStatus = "open" | "resolved";
+
+export interface Report {
+  id: string;
+  /** Descrição do problema escrita pelo usuário. */
+  message: string;
+  /** Rota onde o usuário estava ao reportar (ex.: "/checkout"). */
+  page: string;
+  /** Dados de quem reportou (quando logado). */
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+  /** Navegador/dispositivo, para ajudar a reproduzir o erro. */
+  userAgent?: string;
+  status: ReportStatus;
+  createdAt: string;
+}

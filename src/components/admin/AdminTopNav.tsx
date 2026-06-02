@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingBag, Users,
-  Warehouse, Receipt, QrCode, CalendarDays, PartyPopper, Star,
+  Warehouse, Receipt, QrCode, CalendarDays, PartyPopper, Star, MessageSquareWarning,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 
@@ -22,6 +22,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/events",    label: "Eventos",       icon: PartyPopper },
   { href: "/admin/payments",  label: "Pagamentos",    icon: QrCode },
   { href: "/admin/lounge",    label: "Agenda Lounge", icon: CalendarDays },
+  { href: "/admin/reports",   label: "Reportes",      icon: MessageSquareWarning },
 ];
 
 const SELLER_NAV: NavItem[] = [

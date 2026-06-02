@@ -5,6 +5,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { CartDrawer } from "@/components/shop/CartDrawer";
+import { ReportButton } from "@/components/ReportButton";
 import { AgeGate } from "@/components/AgeGate";
 import { FirebaseAnalytics } from "@/components/FirebaseAnalytics";
 import { AuthProvider } from "@/providers/AuthProvider";
@@ -68,6 +69,7 @@ export default function RootLayout({
           <Footer />
           <MobileNav />
           <CartDrawer />
+          <ReportButton />
           <Toaster />
         </AuthProvider>
       </body>

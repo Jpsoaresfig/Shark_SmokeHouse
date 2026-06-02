@@ -101,8 +101,14 @@ service cloud.firestore {
     }
 
     // ── Lounge Bookings ───────────────────────────────────────
+    // Criação pública (formulário sem login), mas valida os campos obrigatórios
+    // e força status "pending" para impedir reservas-lixo ou já "aprovadas".
     match /lounge_bookings/{bookingId} {
-      allow create: if true;
+      allow create: if request.resource.data.status == 'pending'
+                    && request.resource.data.name is string && request.resource.data.name.size() > 0
+                    && request.resource.data.whatsapp is string && request.resource.data.whatsapp.size() > 0
+                    && request.resource.data.date is string
+                    && request.resource.data.time is string;
       allow read, update, delete: if isAdmin();
     }
 
@@ -111,8 +117,12 @@ service cloud.firestore {
     // pública permite ao formulário desabilitar horários ocupados. Qualquer um
     // pode CRIAR um slot livre (a transação garante unicidade), mas só o admin
     // pode sobrescrever/remover — o que impede roubar/alterar um slot existente.
+    // A criação só aceita exatamente { date, time, createdAt } (sem lixo extra).
     match /lounge_slots/{slotId} {
-      allow read, create: if true;
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['date', 'time', 'createdAt'])
+                    && request.resource.data.date is string
+                    && request.resource.data.time is string;
       allow update, delete: if isAdmin();
     }
 
@@ -152,6 +162,18 @@ service cloud.firestore {
     match /commissions/{commId} {
       allow read: if isAdmin() || (isAuth() && resource.data.sellerId == request.auth.uid);
       allow write: if isAdmin();
+    }
+
+    // ── Reports (problemas reportados por usuários) ───────────
+    // Qualquer um pode criar um reporte (inclusive visitante não logado), desde
+    // que tenha uma mensagem válida e status "open". Só o admin lê/resolve/exclui.
+    match /reports/{reportId} {
+      allow create: if request.resource.data.status == 'open'
+                    && request.resource.data.message is string
+                    && request.resource.data.message.size() > 0
+                    && request.resource.data.message.size() <= 2000
+                    && request.resource.data.page is string;
+      allow read, update, delete: if isAdmin();
     }
   }
 }
