@@ -212,6 +212,12 @@ function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; p
               <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pague via PIX</span>
             </div>
 
+            {/* Valor a pagar — destaque para o cliente saber quanto transferir */}
+            <div className="flex items-center justify-between gap-2 p-3 mb-4 rounded-xl bg-[var(--color-neon-blue-glow)] border border-[var(--color-neon-blue)]/30">
+              <span className="text-xs font-medium text-[var(--color-text-secondary)]">Valor a pagar</span>
+              <span className="text-xl font-black text-[var(--color-neon-blue)]">{formatCurrency(total)}</span>
+            </div>
+
             {/* QR Code (BR Code) — quando o admin cadastrou o payload copia e cola */}
             {pixQrPayload && (
               <div className="flex justify-center mb-4">
