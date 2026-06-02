@@ -48,10 +48,15 @@ export function Footer() {
             </p>
             {/* Contact info */}
             <div className="space-y-2.5">
-              <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
+              <a
+                href="https://maps.app.goo.gl/P8ZJh4wtXAMu73et5"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] transition-colors"
+              >
                 <MapPin className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
                 <span>Av. Alfredo Ferreira da Rocha, 742 — Mangabeira I, João Pessoa, PB</span>
-              </div>
+              </a>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
                 <span>(83) 99902-0606</span>
@@ -68,9 +73,10 @@ export function Footer() {
             {/* Social */}
             <div className="flex items-center gap-3 mt-6">
               <a
-                href="https://instagram.com"
+                href="https://www.instagram.com/shark_smokehouse_"
                 target="_blank"
                 rel="noopener noreferrer"
+                aria-label="Instagram da Shark Smokehouse"
                 className="w-9 h-9 rounded-lg border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-accent-pink)] hover:border-[var(--color-accent-pink)] hover:bg-pink-500/10 transition-all"
               >
                 <span className="text-xs font-bold">IG</span>

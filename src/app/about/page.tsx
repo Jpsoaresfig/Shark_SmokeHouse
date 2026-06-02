@@ -310,7 +310,7 @@ export default function AboutPage() {
               <div className="glass rounded-2xl border border-[var(--color-border)] overflow-hidden h-full min-h-[260px] relative">
                 <iframe
                   title="Shark Smokehouse — Localização"
-                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3958.4964551905!2d-34.8836!3d-7.1614!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zN8KwMDknNDEuMCJTIDM0wrA1Myc0MS4wIlc!5e0!3m2!1spt-BR!2sbr!4v1"
+                  src="https://www.google.com/maps?q=-7.1690894,-34.8423557&z=16&output=embed"
                   width="100%"
                   height="100%"
                   style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)", minHeight: "260px" }}
@@ -331,11 +331,16 @@ export default function AboutPage() {
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-[var(--color-text-primary)]">Endereço</p>
-                    <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed">
+                    <a
+                      href="https://maps.app.goo.gl/P8ZJh4wtXAMu73et5"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed hover:text-[var(--color-neon-blue)] transition-colors"
+                    >
                       Av. Alfredo Ferreira da Rocha, 742<br />
                       Mangabeira I — João Pessoa, PB<br />
                       CEP: 58055-540
-                    </p>
+                    </a>
                   </div>
                 </div>
 
@@ -423,7 +428,7 @@ export default function AboutPage() {
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <a
-                href="https://instagram.com/sharksmokehou.se"
+                href="https://www.instagram.com/shark_smokehouse_"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-accent-pink)] hover:border-[var(--color-accent-pink)] hover:bg-pink-500/10 transition-all"

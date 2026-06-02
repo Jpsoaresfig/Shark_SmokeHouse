@@ -68,8 +68,8 @@ const channels = [
   {
     icon: InstagramGlyph,
     label: "Instagram",
-    value: "@sharksmokehou.se",
-    href: "https://instagram.com/sharksmokehou.se",
+    value: "@shark_smokehouse_",
+    href: "https://www.instagram.com/shark_smokehouse_",
     color: "text-[var(--color-accent-pink)]",
     bg: "bg-pink-500/10",
     border: "border-pink-500/20",
@@ -173,7 +173,7 @@ export default function ContactPage() {
             <div className="glass rounded-2xl border border-[var(--color-border)] overflow-hidden h-full min-h-[220px] relative">
               <iframe
                 title="Shark Smokehouse — Localização"
-                src="https://www.google.com/maps?q=Av.+Alfredo+Ferreira+da+Rocha,+742,+Mangabeira,+Jo%C3%A3o+Pessoa+-+PB&output=embed"
+                src="https://www.google.com/maps?q=-7.1690894,-34.8423557&z=16&output=embed"
                 width="100%"
                 height="100%"
                 style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)", minHeight: "220px" }}
@@ -189,11 +189,16 @@ export default function ContactPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">Endereço</p>
-                <p className="text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed">
+                <a
+                  href="https://maps.app.goo.gl/P8ZJh4wtXAMu73et5"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed hover:text-[var(--color-neon-blue)] transition-colors"
+                >
                   Av. Alfredo Ferreira da Rocha, 742<br />
                   Mangabeira I — João Pessoa, PB<br />
                   CEP: 58055-540
-                </p>
+                </a>
               </div>
             </div>
           </FadeIn>
