@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { MessageCircle, MapPin, Phone, Mail, Clock } from "lucide-react";
+import { MessageCircle, MapPin, Phone, Clock } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/ui/Logo";
 import { useSiteSections } from "@/stores/siteSettingsStore";
@@ -60,10 +60,6 @@ export function Footer() {
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
                 <span>(83) 99902-0606</span>
-              </div>
-              <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
-                <Mail className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>contato@sharksmokehou.se</span>
               </div>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />

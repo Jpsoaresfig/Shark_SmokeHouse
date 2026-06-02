@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
     events: true,
   },
   payment: {
-    pixKey: "contato@sharksmokehou.se",
+    pixKey: "",
     pixName: "Shark Smokehouse",
     pixQrPayload: "",
   },
