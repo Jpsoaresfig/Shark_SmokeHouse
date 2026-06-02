@@ -11,9 +11,62 @@ interface CloudinaryUploadProps {
   maxImages?: number;
 }
 
-export async function uploadToCloudinary(file: File): Promise<string> {
+/** Limite do plano Cloudinary (10 MB). Comprimimos abaixo disso, com folga. */
+const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
+const TARGET_BYTES = 9 * 1024 * 1024;
+const MAX_EDGE = 2560; // px — mais que suficiente para fotos de produto na web
+
+/**
+ * Se a imagem ultrapassar o limite do Cloudinary, reduz dimensão e qualidade
+ * no próprio navegador até caber. Só funciona com formatos que o browser
+ * decodifica (JPEG, PNG, WEBP); outros formatos seguem sem alteração.
+ */
+async function compressImage(file: File): Promise<File> {
+  if (file.size <= CLOUDINARY_MAX_BYTES) return file;
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
+
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file;
+
+  let { width, height } = bitmap;
+  const longest = Math.max(width, height);
+  if (longest > MAX_EDGE) {
+    const scale = MAX_EDGE / longest;
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const toBlob = (q: number) =>
+    new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", q)
+    );
+
+  let quality = 0.92;
+  let blob = await toBlob(quality);
+  while (blob && blob.size > TARGET_BYTES && quality > 0.5) {
+    quality -= 0.1;
+    blob = await toBlob(quality);
+  }
+
+  if (!blob || blob.size >= file.size) return file; // não conseguiu reduzir
+
+  const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+  return new File([blob], name, { type: "image/jpeg" });
+}
+
+export async function uploadToCloudinary(rawFile: File): Promise<string> {
   const cloudName    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME!;
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET!;
+
+  const file = await compressImage(rawFile);
 
   const body = new FormData();
   body.append("file", file);
@@ -25,8 +78,14 @@ export async function uploadToCloudinary(file: File): Promise<string> {
     { method: "POST", body }
   );
 
-  if (!res.ok) throw new Error("Falha ao enviar imagem.");
-  const data = await res.json();
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const reason = data?.error?.message ?? `HTTP ${res.status}`;
+    console.error("Cloudinary upload falhou:", reason, data);
+    throw new Error(`Falha ao enviar imagem: ${reason}`);
+  }
+
   return data.secure_url as string;
 }
 
@@ -62,8 +121,8 @@ export function CloudinaryUpload({
         const url = await uploadToCloudinary(toUpload[i]);
         results.push(url);
         setProgress(p => p.map((v, j) => (j <= i ? 100 : v)));
-      } catch {
-        setError("Erro ao enviar uma ou mais imagens. Tente novamente.");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erro ao enviar uma ou mais imagens. Tente novamente.");
       }
     }
 
@@ -180,7 +239,7 @@ export function CloudinaryUpload({
               <ImageIcon className="w-10 h-10" />
               <div>
                 <p className="text-sm font-semibold">Clique ou arraste as imagens aqui</p>
-                <p className="text-xs mt-0.5 opacity-70">JPG, PNG, WEBP · máx 5 MB por foto</p>
+                <p className="text-xs mt-0.5 opacity-70">JPG, PNG, WEBP, HEIC e outros formatos de imagem</p>
               </div>
             </>
           )}
@@ -204,7 +263,7 @@ export function CloudinaryUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/*"
         multiple
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}

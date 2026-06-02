@@ -40,6 +40,7 @@ export function Logo({
         height={px}
         className="object-cover w-full h-full"
         priority
+        unoptimized
       />
     </div>
   );
