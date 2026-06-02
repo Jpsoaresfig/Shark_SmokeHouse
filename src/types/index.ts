@@ -33,15 +33,19 @@ export interface Address {
 }
 
 /* ── Product ─────────────────────────────────────────────── */
-export type ProductCategory =
-  | "cigars"
-  | "hookah"
-  | "cigarettes"
-  | "accessories"
-  | "beverages"
-  | "clothing"
-  | "kits"
-  | "premium";
+/** Slug da categoria do produto. Dinâmica — gerenciada no admin (coleção `categories`). */
+export type ProductCategory = string;
+
+/** Categoria de produto cadastrável pelo admin. */
+export interface Category {
+  id: string;
+  /** Identificador usado no produto (Product.category) e na URL do catálogo. */
+  slug: string;
+  /** Nome exibido. */
+  label: string;
+  /** Ordem de exibição (menor primeiro). */
+  order?: number;
+}
 
 export interface Product {
   id: string;

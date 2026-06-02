@@ -8,30 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
 import { getActiveProducts } from "@/lib/firebase/products";
+import { getCategories } from "@/lib/firebase/categories";
 import { ProductModal } from "@/components/shop/ProductModal";
 import { formatCurrency } from "@/lib/utils";
-import type { Product, ProductCategory } from "@/types";
-
-const categories: { value: ProductCategory | "all"; label: string }[] = [
-  { value: "all",         label: "Todos" },
-  { value: "cigars",      label: "Charutos" },
-  { value: "hookah",      label: "Narguilé" },
-  { value: "cigarettes",  label: "Cigarros" },
-  { value: "accessories", label: "Acessórios" },
-  { value: "beverages",   label: "Bebidas" },
-  { value: "clothing",    label: "Vestuário" },
-  { value: "kits",        label: "Kits" },
-  { value: "premium",     label: "Premium" },
-];
-
-const CATEGORY_LABEL: Record<ProductCategory, string> = {
-  cigars: "Charutos", hookah: "Narguilé", cigarettes: "Cigarros",
-  accessories: "Acessórios", beverages: "Bebidas", clothing: "Vestuário",
-  kits: "Kits", premium: "Premium",
-};
+import type { Product, ProductCategory, Category } from "@/types";
 
 export default function CatalogPage() {
   const [products, setProducts]         = useState<Product[]>([]);
+  const [cats, setCats]                 = useState<Category[]>([]);
   const [loading, setLoading]           = useState(true);
   const [search, setSearch]             = useState("");
   const [activeCategory, setActiveCategory] = useState<ProductCategory | "all">("all");
@@ -43,7 +27,15 @@ export default function CatalogPage() {
     getActiveProducts()
       .then(setProducts)
       .finally(() => setLoading(false));
+    getCategories().then(setCats).catch(() => {});
   }, []);
+
+  // Abas de filtro (Todos + categorias dinâmicas) e resolução de rótulo.
+  const categories = useMemo(
+    () => [{ value: "all" as const, label: "Todos" }, ...cats.map(c => ({ value: c.slug, label: c.label }))],
+    [cats],
+  );
+  const categoryLabel = (slug: string) => cats.find(c => c.slug === slug)?.label ?? slug;
 
   const filtered = useMemo(() => products.filter((p) => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -230,7 +222,7 @@ export default function CatalogPage() {
                     {/* Info */}
                     <div className="mt-2 sm:mt-3 space-y-0.5 sm:space-y-1">
                       <p className="text-[10px] sm:text-xs text-[var(--color-neon-blue)] font-medium uppercase tracking-wide truncate">
-                        {CATEGORY_LABEL[product.category]}
+                        {categoryLabel(product.category)}
                       </p>
                       <h3 className="text-xs sm:text-sm font-semibold text-[var(--color-text-primary)] line-clamp-2 leading-snug group-hover:text-[var(--color-neon-blue)] transition-colors duration-200">
                         {product.name}

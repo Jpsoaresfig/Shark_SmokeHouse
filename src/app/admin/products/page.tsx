@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star, X, Tag } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,28 +14,16 @@ import {
 } from "@/components/ui/dialog";
 import { formatCurrency, slugify } from "@/lib/utils";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/firebase/products";
+import {
+  getCategories, ensureCategoriesSeeded, createCategory, deleteCategory,
+} from "@/lib/firebase/categories";
 import { CloudinaryUpload } from "@/components/ui/CloudinaryUpload";
 import { toast } from "@/stores/toastStore";
-import type { Product, ProductCategory } from "@/types";
-
-const CATEGORIES: { value: ProductCategory; label: string }[] = [
-  { value: "cigars", label: "Charutos" },
-  { value: "hookah", label: "Narguilé" },
-  { value: "cigarettes", label: "Cigarros" },
-  { value: "accessories", label: "Acessórios" },
-  { value: "beverages", label: "Bebidas" },
-  { value: "clothing", label: "Vestuário" },
-  { value: "kits", label: "Kits" },
-  { value: "premium", label: "Premium" },
-];
-
-const CATEGORY_LABEL: Record<ProductCategory, string> = Object.fromEntries(
-  CATEGORIES.map(c => [c.value, c.label])
-) as Record<ProductCategory, string>;
+import type { Product, ProductCategory, Category } from "@/types";
 
 const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
-  price: 0, compareAtPrice: undefined, category: "accessories",
+  price: 0, compareAtPrice: undefined, category: "",
   tags: [], images: [], stock: 0, minStock: 5,
   sku: "", featured: false, active: true, loyaltyPoints: undefined,
   pointsEarned: undefined, colors: [], variations: [],
@@ -112,6 +100,24 @@ export default function AdminProducts() {
     setForm(f => ({ ...f, colors: (f.colors ?? []).filter(x => x !== c) }));
   }
 
+  /* Categorias dinâmicas (gerenciadas pelo admin) */
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [catOpen, setCatOpen] = useState(false);
+  const [catInput, setCatInput] = useState("");
+  const [catSaving, setCatSaving] = useState(false);
+  const categoryLabel = useCallback(
+    (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug,
+    [categories],
+  );
+
+  const loadCategories = useCallback(async () => {
+    try {
+      setCategories(await getCategories());
+    } catch {
+      /* mantém o que tiver */
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -123,11 +129,56 @@ export default function AdminProducts() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); loadCategories(); }, [load, loadCategories]);
+
+  /* Abre o gerenciador de categorias (garante que os padrões virem editáveis). */
+  async function openCategories() {
+    setCatOpen(true);
+    try {
+      setCategories(await ensureCategoriesSeeded());
+    } catch {
+      toast.error("Não foi possível carregar as categorias.");
+    }
+  }
+
+  async function handleAddCategory() {
+    const label = catInput.trim();
+    if (!label) return;
+    if (categories.some(c => c.label.toLowerCase() === label.toLowerCase())) {
+      toast.error("Já existe uma categoria com esse nome.");
+      return;
+    }
+    setCatSaving(true);
+    try {
+      await createCategory(label);
+      setCatInput("");
+      setCategories(await getCategories(true));
+      toast.success("Categoria criada!");
+    } catch {
+      toast.error("Erro ao criar categoria.");
+    } finally {
+      setCatSaving(false);
+    }
+  }
+
+  async function handleDeleteCategory(cat: Category) {
+    const inUse = products.filter(p => p.category === cat.slug).length;
+    if (inUse > 0) {
+      toast.error(`"${cat.label}" está em uso por ${inUse} produto${inUse !== 1 ? "s" : ""}. Mude a categoria deles antes de remover.`);
+      return;
+    }
+    try {
+      await deleteCategory(cat.id);
+      setCategories(await getCategories(true));
+      toast.success("Categoria removida.");
+    } catch {
+      toast.error("Erro ao remover categoria.");
+    }
+  }
 
   function openAdd() {
     setEditing(null);
-    setForm(EMPTY);
+    setForm({ ...EMPTY, category: categories[0]?.slug ?? "" });
     setLoyaltyEnabled(false);
     setEarnEnabled(false);
     setOpen(true);
@@ -233,9 +284,14 @@ export default function AdminProducts() {
           title="Produtos"
           subtitle={`${products.length} cadastrado${products.length !== 1 ? "s" : ""}`}
           action={
-            <Button variant="premium" onClick={openAdd}>
-              <Plus className="w-4 h-4" /> Adicionar Produto
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={openCategories}>
+                <Tag className="w-4 h-4" /> Categorias
+              </Button>
+              <Button variant="premium" onClick={openAdd}>
+                <Plus className="w-4 h-4" /> Adicionar Produto
+              </Button>
+            </div>
           }
         />
 
@@ -293,7 +349,7 @@ export default function AdminProducts() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-[var(--color-text-primary)]">{p.name}</span>
-                            <Badge variant="secondary">{CATEGORY_LABEL[p.category]}</Badge>
+                            <Badge variant="secondary">{categoryLabel(p.category)}</Badge>
                             {p.featured && <Badge variant="premium">Destaque</Badge>}
                             {!p.active && <Badge variant="destructive">Inativo</Badge>}
                             {p.loyaltyPoints && (
@@ -378,8 +434,16 @@ export default function AdminProducts() {
             <div>
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Categoria *</label>
               <select value={form.category} onChange={e => set("category", e.target.value as ProductCategory)} className={inputCls}>
-                {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                {!form.category && <option value="">Selecione…</option>}
+                {/* categoria legada que não está mais na lista */}
+                {form.category && !categories.some(c => c.slug === form.category) && (
+                  <option value={form.category}>{form.category}</option>
+                )}
+                {categories.map(c => <option key={c.id} value={c.slug}>{c.label}</option>)}
               </select>
+              <button type="button" onClick={openCategories} className="text-xs text-[var(--color-neon-blue)] hover:underline mt-1">
+                + Gerenciar categorias
+              </button>
             </div>
             <Input
               label="SKU"
@@ -689,6 +753,62 @@ export default function AdminProducts() {
             <Button variant="premium" onClick={handleSave} disabled={saving || !form.name || !form.price}>
               {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : (editing ? "Salvar" : "Criar")}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Categories manager */}
+      <Dialog open={catOpen} onOpenChange={setCatOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Categorias de produtos</DialogTitle>
+            <DialogDescription>Crie ou remova as categorias usadas nos produtos.</DialogDescription>
+          </DialogHeader>
+
+          {/* Add */}
+          <div className="flex gap-2">
+            <input
+              value={catInput}
+              onChange={e => setCatInput(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAddCategory(); } }}
+              placeholder="Nova categoria (ex: Isqueiros)"
+              className={inputCls}
+            />
+            <Button variant="premium" onClick={handleAddCategory} disabled={catSaving || !catInput.trim()}>
+              {catSaving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus className="w-4 h-4" />}
+            </Button>
+          </div>
+
+          {/* List */}
+          <div className="mt-3 space-y-2">
+            {categories.length === 0 ? (
+              <p className="text-sm text-[var(--color-text-muted)] py-4 text-center">Nenhuma categoria.</p>
+            ) : (
+              categories.map(cat => {
+                const inUse = products.filter(p => p.category === cat.slug).length;
+                return (
+                  <div key={cat.id} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{cat.label}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">{cat.slug} · {inUse} produto{inUse !== 1 ? "s" : ""}</p>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteCategory(cat)}
+                      title={inUse > 0 ? "Categoria em uso — não pode remover" : "Remover categoria"}
+                      className={`p-2 rounded-lg transition-colors ${inUse > 0 ? "text-[var(--color-text-muted)] opacity-40 cursor-not-allowed" : "text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10"}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="secondary">Fechar</Button>
+            </DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
