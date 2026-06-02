@@ -91,3 +91,4 @@ export function resolveOrderPayment(order: Order): PaymentInfo {
 }
 
 export { manualGateway } from "./manual";
+export { asaasGateway, isAsaasConfigured } from "./asaas";

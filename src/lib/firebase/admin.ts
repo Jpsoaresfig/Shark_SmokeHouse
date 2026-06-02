@@ -1,5 +1,6 @@
 import { initializeApp, getApps, cert, type App } from "firebase-admin/app";
 import { getAuth, type Auth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 /**
  * Firebase Admin SDK — usado APENAS no servidor (route handlers).
@@ -36,4 +37,12 @@ let cachedAuth: Auth | null = null;
 export function getAdminAuth(): Auth {
   if (!cachedAuth) cachedAuth = getAuth(getAdminApp());
   return cachedAuth;
+}
+
+let cachedDb: Firestore | null = null;
+/** Firestore via Admin SDK — escritas confiáveis do servidor (ex.: webhook do
+ *  Asaas), ignorando as regras de segurança do cliente. */
+export function getAdminDb(): Firestore {
+  if (!cachedDb) cachedDb = getFirestore(getAdminApp());
+  return cachedDb;
 }
