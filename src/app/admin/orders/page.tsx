@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
-  Bell, BellOff, Search, X,
+  Bell, BellOff, Search, X, Banknote,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -405,6 +405,17 @@ export default function AdminOrders() {
                   </div>
                 );
               })()}
+
+              {/* Observações do pedido (inclui o troco, quando pagamento na entrega) */}
+              {selected.notes && (
+                <div className="flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5">
+                  <Banknote className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning)]" />
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-warning)] uppercase tracking-wider mb-0.5">Observações</p>
+                    <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-line">{selected.notes}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Pagamento — gestão financeira manual */}
               {(() => {

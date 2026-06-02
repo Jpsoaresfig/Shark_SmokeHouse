@@ -17,6 +17,7 @@ import { getProducts } from "@/lib/firebase/products";
 import { getSales, createSale, exportSalesCSV } from "@/lib/firebase/sales";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
+import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import type { Product, Sale, SaleItem, SalePaymentMethod } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,6 +104,25 @@ export default function AdminSales() {
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku?.toLowerCase().includes(search.toLowerCase())
     ), [products, search]);
+
+  /* ── Leitor de código de barras (só na aba de venda) ──
+     Bipou → procura o produto pelo SKU exato e adiciona ao carrinho.
+     Não achou → joga o código no campo de busca para o vendedor conferir. */
+  useBarcodeScanner((code) => {
+    const match = products.find(p => p.sku && p.sku.toLowerCase() === code.toLowerCase());
+    if (!match) {
+      setSearch(code);
+      toast.error(`Nenhum produto com o código ${code}.`);
+      return;
+    }
+    if (match.stock <= 0) {
+      toast.error(`"${match.name}" está sem estoque.`);
+      return;
+    }
+    addItem(match);
+    setSearch("");
+    toast.success(`${match.name} adicionado.`);
+  }, { enabled: tab === "new" });
 
   const total = useMemo(() =>
     items.reduce((s, i) => s + i.subtotal, 0), [items]);

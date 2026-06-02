@@ -369,6 +369,8 @@ export default function CheckoutPage() {
   const [fulfillment, setFulfillment] = useState<"delivery" | "pickup">("delivery");
   const [payment, setPayment] = useState<PaymentMethod>("pix_manual");
   const [notes, setNotes] = useState("");
+  /* Troco para pagamento na entrega — guardado separado da observação geral. */
+  const [changeFor, setChangeFor] = useState("");
 
   /* ui state */
   const [cepLoading, setCepLoading] = useState(false);
@@ -508,7 +510,13 @@ export default function CheckoutPage() {
         paymentMethod: payment,            // espelho legado
         paymentStatus: paymentInfo.status, // espelho legado
         deliveryAddress: address,
-        notes: [isPickup ? "Retirada na loja" : "", notes.trim()].filter(Boolean).join(" — ") || undefined,
+        notes: [
+          isPickup ? "Retirada na loja" : "",
+          payment === "on_delivery" && changeFor.trim()
+            ? `Troco para R$ ${changeFor.replace(/^R\$\s*/i, "").trim()}`
+            : "",
+          notes.trim(),
+        ].filter(Boolean).join(" — ") || undefined,
         statusHistory: [{ status: "received", timestamp: new Date().toISOString() }],
         pointsEarned: pointsToEarn,
         ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
@@ -818,9 +826,9 @@ export default function CheckoutPage() {
                   >
                     <Input
                       label="Precisa de troco para quanto?"
-                      placeholder="Ex: R$ 100,00 (opcional)"
-                      value={notes.startsWith("Troco") ? notes : ""}
-                      onChange={(e) => setNotes(e.target.value ? `Troco para ${e.target.value}` : "")}
+                      placeholder="Ex: 100,00 (opcional)"
+                      value={changeFor}
+                      onChange={(e) => setChangeFor(e.target.value)}
                     />
                   </motion.div>
                 )}
@@ -845,11 +853,10 @@ export default function CheckoutPage() {
                 <h2 className="text-sm font-bold text-[var(--color-text-primary)] mb-3">Observações do Pedido</h2>
                 <textarea
                   rows={3}
-                  value={payment === "on_delivery" ? "" : notes}
+                  value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  disabled={payment === "on_delivery"}
                   placeholder="Alguma instrução especial para o entregador? (opcional)"
-                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none disabled:opacity-40"
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
                 />
               </CardContent>
             </Card>
