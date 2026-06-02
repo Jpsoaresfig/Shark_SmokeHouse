@@ -26,11 +26,18 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isOwner(uid) || isAdmin();
       allow create: if isOwner(uid);
-      // Owner can update own profile (except role).
-      // Any authenticated user can update loyaltyPoints/referredBy (referral system).
+      // Owner: atualiza o próprio perfil (menos o campo role). Inclui o débito
+      // dos próprios pontos no resgate e o bônus de quem foi indicado.
+      // Admin: tudo.
+      // Crédito de indicação: um usuário logado pode somar APENAS os pontos
+      // exatos da indicação (+200) na conta de OUTRO usuário (o indicador),
+      // mexendo só em loyaltyPoints/updatedAt. Isso impede que alguém dê pontos
+      // arbitrários a si mesmo (pontos valem recompensas/dinheiro).
       allow update: if (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
                     || isAdmin()
-                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loyaltyPoints', 'referredBy', 'updatedAt']));
+                    || (isAuth()
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loyaltyPoints', 'updatedAt'])
+                        && request.resource.data.loyaltyPoints == resource.data.loyaltyPoints + 200);
       allow delete: if isAdmin();
     }
 
