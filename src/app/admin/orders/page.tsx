@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
+  Bell, BellOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,8 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { getOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus } from "@/lib/firebase/orders";
+import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus } from "@/lib/firebase/orders";
+import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { awardPurchasePoints } from "@/lib/firebase/loyalty";
 import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
@@ -65,19 +67,25 @@ export default function AdminOrders() {
   const [updating, setUpdating] = useState(false);
   const [payNote, setPayNote] = useState("");
   const [payingStatus, setPayingStatus] = useState<PaymentStatus | null>(null);
+  const { soundOn, toggleSound, announce } = useNewOrderAlerts();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setOrders(await getOrders(300));
-    } catch {
-      toast.error("Não foi possível carregar os pedidos.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  // Escuta os pedidos em tempo real: a lista atualiza sozinha (sem refresh) e
+  // cada pedido novo dispara toast + som + notificação do sistema.
+  useEffect(() => {
+    const unsub = subscribeOrders(
+      300,
+      (list, added) => {
+        setOrders(list);
+        setLoading(false);
+        announce(added);
+      },
+      () => {
+        toast.error("Não foi possível carregar os pedidos.");
+        setLoading(false);
+      },
+    );
+    return () => unsub();
+  }, [announce]);
 
   function openOrder(order: Order) {
     setSelected(order);
@@ -109,7 +117,7 @@ export default function AdminOrders() {
       });
       toast.success("Status de pagamento atualizado!");
       setSelected(null);
-      await load();
+      // A lista se atualiza sozinha pela escuta em tempo real (subscribeOrders).
     } catch {
       toast.error("Erro ao atualizar o pagamento. Tente novamente.");
     } finally {
@@ -137,7 +145,7 @@ export default function AdminOrders() {
       }
 
       setSelected(null);
-      await load();
+      // A lista se atualiza sozinha pela escuta em tempo real (subscribeOrders).
     } catch {
       toast.error("Erro ao atualizar o pedido. Tente novamente.");
     } finally {
@@ -161,6 +169,29 @@ export default function AdminOrders() {
           title="Pedidos"
           subtitle={`${orders.length} pedido${orders.length !== 1 ? "s" : ""} no total`}
         />
+
+        {/* Status ao vivo + controle de som dos alertas de pedido novo */}
+        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-success)]">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-success)] opacity-75 animate-ping" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-success)]" />
+            </span>
+            Ao vivo · novos pedidos aparecem aqui automaticamente
+          </div>
+          <button
+            onClick={toggleSound}
+            title={soundOn ? "Desligar som de pedido novo" : "Ligar som de pedido novo"}
+            className={`flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-medium transition-colors ${
+              soundOn
+                ? "bg-[var(--color-neon-blue)]/10 text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/30"
+                : "bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] border border-[var(--color-border)]"
+            }`}
+          >
+            {soundOn ? <Bell className="w-3.5 h-3.5" /> : <BellOff className="w-3.5 h-3.5" />}
+            {soundOn ? "Som ligado" : "Som desligado"}
+          </button>
+        </div>
 
         {/* Filter tabs */}
         <div className="flex flex-wrap gap-2 mb-6">

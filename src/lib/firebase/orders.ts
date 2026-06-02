@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, getDoc, addDoc, updateDoc,
+  collection, getDocs, getDoc, addDoc, updateDoc, onSnapshot,
   doc, serverTimestamp, query, orderBy, where, arrayUnion, increment, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -60,6 +60,37 @@ export async function getOrders(limitCount?: number, force = false): Promise<Ord
   }, force);
 }
 
+/**
+ * Escuta os pedidos em tempo real (`onSnapshot`). Sempre que algo muda no
+ * Firestore, `onChange` recebe a lista completa atualizada e a lista de pedidos
+ * que acabaram de ser criados (`added`) — útil para alertar "pedido novo".
+ * Na primeira leitura `added` vem vazio (todos os pedidos já existiam) e
+ * ignoramos escritas locais pendentes (`hasPendingWrites`), que não são
+ * pedidos novos vindos do servidor. Retorna a função para cancelar a escuta.
+ */
+export function subscribeOrders(
+  limitCount: number,
+  onChange: (orders: Order[], added: Order[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const q = query(collection(db, COL), orderBy("createdAt", "desc"), limit(limitCount));
+  let first = true;
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+      const added = first
+        ? []
+        : snap.docChanges()
+            .filter(c => c.type === "added" && !c.doc.metadata.hasPendingWrites)
+            .map(c => ({ id: c.doc.id, ...c.doc.data() } as Order));
+      first = false;
+      onChange(orders, added);
+    },
+    (err) => onError?.(err),
+  );
+}
+
 export async function getOrdersByCustomer(customerId: string, force = false): Promise<Order[]> {
   // Filtra apenas por customerId (sem orderBy) para dispensar o índice composto;
   // a lista de um cliente é pequena, então ordenamos por data no cliente.
@@ -71,6 +102,31 @@ export async function getOrdersByCustomer(customerId: string, force = false): Pr
       .map(d => ({ id: d.id, ...d.data() } as Order))
       .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
   }, force);
+}
+
+/**
+ * Escuta em tempo real os pedidos de um cliente (`onSnapshot`). Igual a
+ * getOrdersByCustomer, filtra só por `customerId` (sem `orderBy`, dispensando o
+ * índice composto) e ordena por data no cliente. Usado pelo indicador de
+ * "pedido em andamento" no header, que atualiza sozinho a cada mudança de status.
+ * Retorna a função para cancelar a escuta.
+ */
+export function subscribeOrdersByCustomer(
+  customerId: string,
+  onChange: (orders: Order[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const q = query(collection(db, COL), where("customerId", "==", customerId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Order))
+        .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+      onChange(orders);
+    },
+    (err) => onError?.(err),
+  );
 }
 
 export async function createOrder(

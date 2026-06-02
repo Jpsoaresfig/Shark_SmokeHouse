@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
   TrendingUp, ShoppingBag, Users, Package, AlertTriangle,
   ArrowUpRight, ArrowDownRight, Clock, CheckCircle, Truck,
-  BarChart3, RefreshCw,
+  BarChart3, RefreshCw, Bell, BellOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
-import { getOrders } from "@/lib/firebase/orders";
+import { getOrders, subscribeOrders } from "@/lib/firebase/orders";
+import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales } from "@/lib/firebase/sales";
@@ -155,10 +156,9 @@ export default function AdminDashboard() {
           totalCustomers: customers.length,
           criticalStock: critical.length,
         });
-        setAllOrders(orders);
         setAllSales(sales);
-        setRecentOrders(orders.slice(0, 5));
         setLowStockItems(critical.slice(0, 5));
+        // allOrders / recentOrders são alimentados pela escuta em tempo real abaixo.
       } catch (err) {
         console.error("[dashboard load]", err);
         toast.error("Não foi possível carregar os dados do dashboard.");
@@ -168,6 +168,24 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Alerta de pedido novo (toast + som + notificação do SO), compartilhado com /admin/orders.
+  const { soundOn, toggleSound, announce } = useNewOrderAlerts();
+
+  // Escuta os pedidos em tempo real: "Pedidos Recentes" e os gráficos atualizam
+  // sozinhos e cada pedido novo dispara o alerta — sem precisar atualizar a página.
+  useEffect(() => {
+    const unsub = subscribeOrders(
+      200,
+      (list, added) => {
+        setAllOrders(list);
+        setRecentOrders(list.slice(0, 5));
+        announce(added);
+      },
+      (err) => console.error("[dashboard orders subscribe]", err),
+    );
+    return () => unsub();
+  }, [announce]);
 
   /* ── Chart data — daily (last 30 days) or monthly (last 12 months) ── */
   const dailyChart: ChartPoint[] = useMemo(() => {
@@ -399,10 +417,34 @@ export default function AdminDashboard() {
           >
             <Card>
               <CardHeader className="flex-row items-center justify-between pb-0">
-                <CardTitle className="text-base">Pedidos Recentes</CardTitle>
-                <Button variant="ghost" size="sm" asChild>
-                  <a href="/admin/orders">Ver todos</a>
-                </Button>
+                <div className="flex items-center gap-2.5">
+                  <CardTitle className="text-base">Pedidos Recentes</CardTitle>
+                  {/* Indicador "ao vivo" — novos pedidos aparecem sozinhos */}
+                  <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--color-success)]" title="Atualiza em tempo real">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-success)] opacity-75 animate-ping" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-success)]" />
+                    </span>
+                    Ao vivo
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={toggleSound}
+                    title={soundOn ? "Desligar som de pedido novo" : "Ligar som de pedido novo"}
+                    aria-label={soundOn ? "Desligar som de pedido novo" : "Ligar som de pedido novo"}
+                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                      soundOn
+                        ? "text-[var(--color-neon-blue)] hover:bg-[var(--color-bg-overlay)]"
+                        : "text-[var(--color-text-muted)] hover:bg-[var(--color-bg-overlay)]"
+                    }`}
+                  >
+                    {soundOn ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+                  </button>
+                  <Button variant="ghost" size="sm" asChild>
+                    <a href="/admin/orders">Ver todos</a>
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="pt-4">
                 {loading ? (

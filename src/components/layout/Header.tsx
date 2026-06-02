@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
+import { MyOrdersButton } from "@/components/shop/MyOrdersButton";
 import { useCartStore } from "@/stores/cartStore";
 import { useSiteSections } from "@/stores/siteSettingsStore";
 import { useAuth } from "@/hooks/useAuth";
@@ -103,6 +104,9 @@ export function Header() {
 
             {/* Right actions */}
             <div className="flex items-center gap-1">
+              {/* Pedidos em andamento (tempo real) — ao lado do carrinho */}
+              <MyOrdersButton />
+
               {/* Cart */}
               <Button
                 variant="ghost"
