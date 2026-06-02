@@ -5,11 +5,9 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, AlertCircle, UserPlus, Loader2 } from "lucide-react";
-import { fetchSignInMethodsForEmail } from "firebase/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/ui/Logo";
-import { auth } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
 import type { AuthError } from "@/hooks/useAuth";
 
@@ -38,15 +36,6 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [redirecting, setRedirecting] = useState(false);
 
-  async function checkEmailExists(emailToCheck: string): Promise<boolean> {
-    try {
-      const methods = await fetchSignInMethodsForEmail(auth, emailToCheck);
-      return methods.length > 0;
-    } catch {
-      return true; // on error, assume exists to avoid false redirects
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -57,22 +46,16 @@ function LoginForm() {
     } catch (err) {
       const authErr = err as AuthError;
 
-      // "user-not-found" is explicit — go to register
+      // "user-not-found" is explicit — go to register.
+      // NOTE: com a Email Enumeration Protection do Firebase ligada (padrão),
+      // senha errada e e-mail inexistente retornam ambos "auth/invalid-credential",
+      // e fetchSignInMethodsForEmail fica desativado. Não dá mais para distinguir
+      // os dois casos com segurança, então apenas mostramos o erro e deixamos o
+      // usuário tentar de novo ou clicar em "Cadastre-se".
       if (authErr.code === "auth/user-not-found") {
         setRedirecting(true);
         router.push(`/register?email=${encodeURIComponent(email)}`);
         return;
-      }
-
-      // "invalid-credential" can mean wrong password OR non-existent email
-      // Check with Firebase whether the email actually has an account
-      if (authErr.code === "auth/invalid-credential") {
-        const exists = await checkEmailExists(email);
-        if (!exists) {
-          setRedirecting(true);
-          router.push(`/register?email=${encodeURIComponent(email)}`);
-          return;
-        }
       }
 
       setError(authErr.message);

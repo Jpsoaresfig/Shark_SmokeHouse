@@ -26,8 +26,16 @@ function parseFirebaseError(error: unknown): AuthError {
     "auth/invalid-email": "E-mail inválido.",
     "auth/too-many-requests": "Muitas tentativas. Aguarde alguns minutos.",
     "auth/popup-closed-by-user": "Login com Google cancelado.",
+    "auth/cancelled-popup-request": "Login com Google cancelado.",
+    "auth/popup-blocked": "O navegador bloqueou a janela de login. Permita pop-ups e tente de novo.",
+    "auth/unauthorized-domain": "Este domínio não está autorizado para login. Avise o administrador.",
+    "auth/operation-not-allowed": "Login com Google não está habilitado neste projeto.",
     "auth/network-request-failed": "Erro de conexão. Verifique sua internet.",
   };
+  // Loga o código bruto para facilitar diagnóstico em produção.
+  if (!e.code || !(e.code in map)) {
+    console.error("Erro de autenticação não mapeado:", error);
+  }
   return {
     message: map[e.code ?? ""] ?? "Ocorreu um erro inesperado. Tente novamente.",
     code: e.code,
