@@ -337,7 +337,7 @@ export default function AboutPage() {
                       rel="noopener noreferrer"
                       className="block text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed hover:text-[var(--color-neon-blue)] transition-colors"
                     >
-                      Av. Alfredo Ferreira da Rocha, 742<br />
+                      Avenida Alfredo Ferreira da Rocha, 742<br />
                       Mangabeira I — João Pessoa, PB<br />
                       CEP: 58055-540
                     </a>

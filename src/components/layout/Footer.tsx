@@ -55,7 +55,7 @@ export function Footer() {
                 className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] transition-colors"
               >
                 <MapPin className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>Av. Alfredo Ferreira da Rocha, 742 — Mangabeira I, João Pessoa, PB</span>
+                <span>Avenida Alfredo Ferreira da Rocha, 742 — Mangabeira I, João Pessoa, PB</span>
               </a>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
