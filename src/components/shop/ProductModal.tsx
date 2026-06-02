@@ -26,6 +26,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const [added, setAdded] = useState(false);
   const [imgIndex, setImgIndex] = useState(0);
   const [selectedColor, setSelectedColor] = useState("");
+  const [selectedVarId, setSelectedVarId] = useState("");
   const { addItem, openCart } = useCartStore();
 
   if (!product) return null;
@@ -36,15 +37,35 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const discount = product.compareAtPrice
     ? Math.round((1 - product.price / product.compareAtPrice) * 100)
     : null;
-  const outOfStock = product.stock === 0;
-  const lowStock = product.stock > 0 && product.stock <= 5;
+
+  // Variações (grade) têm prioridade sobre o `colors` legado.
+  const variations = product.variations ?? [];
+  const hasVariations = variations.length > 0;
+  const selectedVar = variations.find(v => v.id === selectedVarId) ?? null;
   const colors = product.colors ?? [];
-  const hasColors = colors.length > 0;
+  const hasColors = !hasVariations && colors.length > 0;
+
+  // Estoque disponível depende da variação escolhida (quando há grade).
+  const availableStock = hasVariations
+    ? (selectedVar?.stock ?? 0)
+    : product.stock;
+  const outOfStock = hasVariations ? variations.every(v => v.stock <= 0) : product.stock === 0;
+  const lowStock = availableStock > 0 && availableStock <= 5;
+
   const needsColor = hasColors && !selectedColor;
+  const needsVariation = hasVariations && !selectedVar;
 
   const handleAdd = () => {
-    if (needsColor) return;
-    addItem(product, qty, { color: selectedColor || undefined });
+    if (needsColor || needsVariation) return;
+    if (hasVariations && selectedVar) {
+      addItem(product, qty, {
+        color: selectedVar.name,      // exibido no carrinho/pedido
+        variationId: selectedVar.id,
+        variationSku: selectedVar.sku,
+      });
+    } else {
+      addItem(product, qty, { color: selectedColor || undefined });
+    }
     setAdded(true);
     setTimeout(() => {
       setAdded(false);
@@ -236,10 +257,44 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                                  "text-[var(--color-success)]"
                   }`}>
                     {outOfStock ? "Esgotado"
-                      : lowStock ? `Últimas ${product.stock} unidades`
+                      : needsVariation ? "Selecione uma variação"
+                      : lowStock ? `Últimas ${availableStock} unidades`
                       : "Em estoque"}
                   </span>
                 </div>
+
+                {/* Variation selector (grade) */}
+                {hasVariations && (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-2">
+                      Variação {needsVariation && <span className="text-[var(--color-error)] normal-case">— selecione uma</span>}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {variations.map((v) => {
+                        const vOut = v.stock <= 0;
+                        const selected = selectedVarId === v.id;
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            disabled={vOut}
+                            onClick={() => { setSelectedVarId(v.id); setQty(1); }}
+                            className={`px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
+                              vOut
+                                ? "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] line-through opacity-50 cursor-not-allowed"
+                                : selected
+                                ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                                : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/40"
+                            }`}
+                          >
+                            {v.name}
+                            {vOut && <span className="ml-1 text-[10px]">(esgotado)</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
                 {/* Color selector */}
                 {hasColors && (
@@ -284,7 +339,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                         {qty}
                       </span>
                       <button
-                        onClick={() => setQty(q => Math.min(product.stock, q + 1))}
+                        onClick={() => setQty(q => Math.max(1, Math.min(availableStock || 1, q + 1)))}
                         className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -297,12 +352,17 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                       size="lg"
                       className="flex-1 min-w-0 px-4 h-auto min-h-12 py-2 whitespace-normal leading-tight text-center text-sm sm:text-base sm:px-6"
                       onClick={handleAdd}
-                      disabled={added || needsColor}
+                      disabled={added || needsColor || needsVariation}
                     >
                       {added ? (
                         <>
                           <Check className="w-4 h-4" />
                           Adicionado!
+                        </>
+                      ) : needsVariation ? (
+                        <>
+                          <ShoppingCart className="w-4 h-4" />
+                          Selecione a variação
                         </>
                       ) : needsColor ? (
                         <>

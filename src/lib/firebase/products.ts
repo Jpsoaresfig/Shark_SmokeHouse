@@ -1,12 +1,36 @@
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp, query, orderBy,
+  doc, serverTimestamp, query, orderBy, runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import type { Product } from "@/types";
 
 const COL = "products";
+
+/**
+ * Ajusta o estoque de uma variação (delta) e recomputa o `stock` agregado do
+ * produto, atomicamente (transação). Usado na baixa/estorno de pedidos online e
+ * vendas do PDV quando o item é de uma variação específica.
+ */
+export async function adjustVariationStock(
+  productId: string,
+  variationId: string,
+  delta: number,
+): Promise<void> {
+  const ref = doc(db, COL, productId);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const data = snap.data() as Product;
+    const variations = (data.variations ?? []).map(v =>
+      v.id === variationId ? { ...v, stock: Math.max(0, (v.stock ?? 0) + delta) } : v
+    );
+    const stock = variations.reduce((s, v) => s + (v.stock ?? 0), 0);
+    tx.update(ref, { variations, stock, updatedAt: serverTimestamp() });
+  });
+  invalidate("products");
+}
 
 /** Firestore rejects undefined values — strip them before writing */
 function clean<T extends object>(obj: T): Partial<T> {

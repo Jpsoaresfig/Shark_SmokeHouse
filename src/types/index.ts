@@ -60,14 +60,32 @@ export interface Product {
   weight?: number;
   featured?: boolean;
   active: boolean;
-  /** Cores disponíveis (nomes) para o cliente escolher. Mesma peça, mesmo preço. */
+  /** Cores disponíveis (nomes) para o cliente escolher. Mesma peça, mesmo preço.
+   *  @deprecated Use `variations` (com SKU e estoque por variação). Mantido para
+   *  produtos antigos. */
   colors?: string[];
+  /** Variações/grade do produto: mesmo preço, atributo (sabor/aroma/cor) e
+   *  código de barras (SKU) diferentes, com estoque próprio por variação.
+   *  Quando presente, `stock` deste produto é a SOMA dos estoques das variações. */
+  variations?: ProductVariation[];
   /** Points required to redeem this product as a loyalty reward. */
   loyaltyPoints?: number;
   /** Points the customer earns (per unit) when buying this product. */
   pointsEarned?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Uma variação (grade) do produto: mesmo preço, atributo e SKU diferentes. */
+export interface ProductVariation {
+  /** id estável da variação (não muda ao renomear). */
+  id: string;
+  /** Nome do atributo: "Menta", "Lavanda", "Uva"… */
+  name: string;
+  /** Código de barras / SKU único desta variação (o que o leitor bipa). */
+  sku: string;
+  /** Estoque próprio desta variação. */
+  stock: number;
 }
 
 /* ── Cart ────────────────────────────────────────────────── */
@@ -77,8 +95,13 @@ export interface CartItem {
   price: number;
   image: string;
   quantity: number;
-  /** Cor escolhida pelo cliente (quando o produto oferece cores). */
+  /** Cor/variação escolhida (exibida ao cliente). Para produtos com `variations`,
+   *  recebe o NOME da variação, então pedidos/carrinho a mostram sem mudança. */
   color?: string;
+  /** id da variação escolhida (quando o produto tem `variations`). */
+  variationId?: string;
+  /** SKU da variação escolhida (correlação com o leitor de código de barras). */
+  variationSku?: string;
   notes?: string;
   /** Loyalty points earned per unit, snapshotted from the product at add-to-cart. */
   pointsEarned?: number;
@@ -275,6 +298,9 @@ export interface StockMovement {
   reason: string;
   userId: string;
   createdAt: string;
+  /** Variação movimentada (quando o produto tem grade). */
+  variationId?: string;
+  variationName?: string;
 }
 
 /* ── Site Settings ───────────────────────────────────────── */
@@ -308,6 +334,9 @@ export interface SaleItem {
   price: number;
   quantity: number;
   subtotal: number;
+  /** Variação vendida (quando o produto tem grade). */
+  variationId?: string;
+  variationName?: string;
 }
 
 export interface Sale {

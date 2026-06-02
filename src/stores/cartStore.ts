@@ -29,7 +29,11 @@ interface CartStore extends CartTotals {
   items: CartItem[];
   isOpen: boolean;
 
-  addItem: (product: Product, quantity?: number, opts?: { notes?: string; color?: string }) => void;
+  addItem: (
+    product: Product,
+    quantity?: number,
+    opts?: { notes?: string; color?: string; variationId?: string; variationSku?: string },
+  ) => void;
   removeItem: (productId: string, color?: string) => void;
   updateQuantity: (productId: string, quantity: number, color?: string) => void;
   clearCart: () => void;
@@ -46,9 +50,10 @@ export const useCartStore = create<CartStore>()(
       ...deriveTotals([]),
 
       addItem: (product, quantity = 1, opts) => {
-        const { notes, color } = opts ?? {};
+        const { notes, color, variationId, variationSku } = opts ?? {};
         const state = get();
-        // Mesma peça em cores diferentes = linhas separadas (productId + color).
+        // Mesma peça em variações/cores diferentes = linhas separadas (productId + color).
+        // Para variações, `color` recebe o nome da variação, então a mesma chave serve.
         const existing = state.items.find(
           (i) => i.productId === product.id && (i.color ?? "") === (color ?? "")
         );
@@ -67,6 +72,8 @@ export const useCartStore = create<CartStore>()(
                 image: product.images[0] ?? "",
                 quantity,
                 ...(color ? { color } : {}),
+                ...(variationId ? { variationId } : {}),
+                ...(variationSku ? { variationSku } : {}),
                 notes,
                 pointsEarned: product.pointsEarned ?? 0,
               },

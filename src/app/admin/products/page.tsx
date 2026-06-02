@@ -38,7 +38,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   price: 0, compareAtPrice: undefined, category: "accessories",
   tags: [], images: [], stock: 0, minStock: 5,
   sku: "", featured: false, active: true, loyaltyPoints: undefined,
-  pointsEarned: undefined, colors: [],
+  pointsEarned: undefined, colors: [], variations: [],
 };
 
 const inputCls =
@@ -56,6 +56,46 @@ export default function AdminProducts() {
   const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
   const [earnEnabled, setEarnEnabled] = useState(false);
   const [colorInput, setColorInput] = useState("");
+  /* Campos da nova variação (grade) */
+  const [varName, setVarName] = useState("");
+  const [varSku, setVarSku] = useState("");
+  const [varStock, setVarStock] = useState("");
+
+  const variations = form.variations ?? [];
+  const hasVariations = variations.length > 0;
+  const variationsTotalStock = variations.reduce((s, v) => s + (Number(v.stock) || 0), 0);
+
+  function addVariation() {
+    const name = varName.trim();
+    const sku = varSku.trim();
+    if (!name || !sku) {
+      toast.error("Informe o nome e o código de barras da variação.");
+      return;
+    }
+    if (variations.some(v => v.sku.toLowerCase() === sku.toLowerCase())) {
+      toast.error("Já existe uma variação com esse código de barras.");
+      return;
+    }
+    const variation = {
+      id: `var_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      sku,
+      stock: Number(varStock) || 0,
+    };
+    setForm(f => ({ ...f, variations: [...(f.variations ?? []), variation] }));
+    setVarName(""); setVarSku(""); setVarStock("");
+  }
+
+  function removeVariation(id: string) {
+    setForm(f => ({ ...f, variations: (f.variations ?? []).filter(v => v.id !== id) }));
+  }
+
+  function setVariationStock(id: string, stock: number) {
+    setForm(f => ({
+      ...f,
+      variations: (f.variations ?? []).map(v => v.id === id ? { ...v, stock } : v),
+    }));
+  }
 
   function addColor() {
     const c = colorInput.trim();
@@ -107,6 +147,7 @@ export default function AdminProducts() {
       loyaltyPoints: p.loyaltyPoints,
       pointsEarned: p.pointsEarned,
       colors: p.colors ?? [],
+      variations: p.variations ?? [],
     });
     setOpen(true);
   }
@@ -123,12 +164,20 @@ export default function AdminProducts() {
     if (!form.name || !form.price) return;
     setSaving(true);
     try {
+      // Com variações, o estoque do produto é a SOMA das variações; o campo
+      // "Estoque" simples é ignorado. Sempre grava `variations` (mesmo []) para
+      // permitir limpar a grade de um produto que antes tinha variações.
+      const cleanVariations = (form.variations ?? []).map(v => ({
+        id: v.id, name: v.name.trim(), sku: v.sku.trim(), stock: Number(v.stock) || 0,
+      }));
+      const usesVariations = cleanVariations.length > 0;
       const payload = {
         ...form,
         price: Number(form.price),
         compareAtPrice: form.compareAtPrice ? Number(form.compareAtPrice) : undefined,
-        stock: Number(form.stock),
+        stock: usesVariations ? cleanVariations.reduce((s, v) => s + v.stock, 0) : Number(form.stock),
         minStock: Number(form.minStock),
+        variations: cleanVariations,
         loyaltyPoints: loyaltyEnabled && form.loyaltyPoints ? Number(form.loyaltyPoints) : undefined,
         pointsEarned: earnEnabled && form.pointsEarned ? Number(form.pointsEarned) : undefined,
       };
@@ -262,6 +311,7 @@ export default function AdminProducts() {
                           </div>
                           <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                             SKU: {p.sku || "—"} · Estoque: {p.stock} un. · Mín: {p.minStock}
+                            {p.variations && p.variations.length > 0 && ` · ${p.variations.length} variações`}
                           </p>
                         </div>
                       </div>
@@ -356,11 +406,12 @@ export default function AdminProducts() {
               placeholder="Preço original (opcional)"
             />
             <Input
-              label="Estoque"
+              label={hasVariations ? "Estoque (soma das variações)" : "Estoque"}
               type="number"
               min="0"
-              value={form.stock}
+              value={hasVariations ? variationsTotalStock : form.stock}
               onChange={e => set("stock", e.target.value)}
+              disabled={hasVariations}
             />
             <Input
               label="Estoque mínimo"
@@ -504,10 +555,82 @@ export default function AdminProducts() {
               />
             </div>
 
-            {/* Cores/estampas disponíveis (opcional) */}
+            {/* Variações / grade (sabor, aroma, cor) com código de barras e estoque próprio */}
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">
-                Cores/estampas disponíveis <span className="text-[var(--color-text-muted)] font-normal">(opcional — o cliente escolhe, mesmo preço)</span>
+                Variações (grade) <span className="text-[var(--color-text-muted)] font-normal">(opcional — mesmo preço; código de barras e estoque por variação)</span>
+              </label>
+
+              {hasVariations && (
+                <div className="space-y-2 mb-3">
+                  {variations.map(v => (
+                    <div key={v.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{v.name}</p>
+                        <p className="text-xs text-[var(--color-text-muted)] truncate">Cód.: {v.sku}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <label className="text-xs text-[var(--color-text-muted)]">Estoque</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={v.stock}
+                          onChange={e => setVariationStock(v.id, Number(e.target.value) || 0)}
+                          className="w-16 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-sm text-center text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeVariation(v.id)}
+                          className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                          aria-label={`Remover ${v.name}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Estoque total: <strong className="text-[var(--color-text-secondary)]">{variationsTotalStock} un.</strong>
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_5rem_auto] gap-2">
+                <input
+                  value={varName}
+                  onChange={e => setVarName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addVariation(); } }}
+                  placeholder="Nome (ex: Menta)"
+                  className={inputCls}
+                />
+                <input
+                  value={varSku}
+                  onChange={e => setVarSku(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addVariation(); } }}
+                  placeholder="Código de barras"
+                  className={inputCls}
+                />
+                <input
+                  value={varStock}
+                  onChange={e => setVarStock(e.target.value)}
+                  type="number"
+                  min="0"
+                  placeholder="Estq."
+                  className={inputCls}
+                />
+                <Button type="button" variant="secondary" onClick={addVariation} disabled={!varName.trim() || !varSku.trim()}>
+                  Adicionar
+                </Button>
+              </div>
+              <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                Com variações, o cliente escolhe a opção no site e o leitor bipa o código de cada uma no PDV.
+              </p>
+            </div>
+
+            {/* Cores/estampas disponíveis (opcional, legado — prefira Variações) */}
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">
+                Cores/estampas disponíveis <span className="text-[var(--color-text-muted)] font-normal">(legado — sem código/estoque próprio; prefira Variações)</span>
               </label>
               <div className="flex gap-2">
                 <input

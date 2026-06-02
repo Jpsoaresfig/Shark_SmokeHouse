@@ -5,6 +5,7 @@ import {
 import { db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
 import { cached, invalidate } from "@/lib/firebase/cache";
+import { adjustVariationStock } from "@/lib/firebase/products";
 import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
 
 const COL = "orders";
@@ -24,10 +25,12 @@ async function applyOrderStock(
   const sign = type === "out" ? -1 : 1;
   await Promise.all(
     order.items.map((item) =>
-      updateDoc(doc(db, "products", item.productId), {
-        stock: increment(sign * item.quantity),
-        updatedAt: serverTimestamp(),
-      }),
+      item.variationId
+        ? adjustVariationStock(item.productId, item.variationId, sign * item.quantity)
+        : updateDoc(doc(db, "products", item.productId), {
+            stock: increment(sign * item.quantity),
+            updatedAt: serverTimestamp(),
+          }),
     ),
   );
   invalidate("products"); // o estoque mudou

@@ -8,28 +8,40 @@ export interface StockShortage {
 }
 
 /**
- * Compara o que o carrinho pede contra o estoque atual, somando a quantidade de
- * todas as cores/estampas do mesmo produto (o estoque é compartilhado entre as
- * variações). Retorna a lista de itens cuja quantidade pedida excede o disponível
- * — vazia quando tudo cabe. Produto ausente em `products` (ex.: removido do
- * catálogo) conta como estoque 0.
+ * Compara o que o carrinho pede contra o estoque atual. Quando o item é de uma
+ * variação (grade), confere contra o estoque DAQUELA variação; senão, contra o
+ * estoque simples do produto. Itens da mesma variação somam. Retorna a lista de
+ * itens cuja quantidade pedida excede o disponível — vazia quando tudo cabe.
+ * Produto/variação ausente conta como estoque 0.
  */
 export function findStockShortages(
-  items: Pick<CartItem, "productId" | "name" | "quantity">[],
-  products: Pick<Product, "id" | "stock">[],
+  items: Pick<CartItem, "productId" | "name" | "quantity" | "variationId" | "color">[],
+  products: Pick<Product, "id" | "stock" | "variations">[],
 ): StockShortage[] {
-  const stockById = new Map(products.map((p) => [p.id, p.stock]));
-  const wantedById = new Map<string, number>();
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  const wanted = new Map<string, { productId: string; variationId?: string; name: string; qty: number }>();
   for (const it of items) {
-    wantedById.set(it.productId, (wantedById.get(it.productId) ?? 0) + it.quantity);
+    const key = it.variationId ? `${it.productId}:${it.variationId}` : it.productId;
+    const cur = wanted.get(key);
+    if (cur) {
+      cur.qty += it.quantity;
+    } else {
+      const name = it.color ? `${it.name} (${it.color})` : it.name;
+      wanted.set(key, { productId: it.productId, variationId: it.variationId, name, qty: it.quantity });
+    }
   }
 
   const shortages: StockShortage[] = [];
-  for (const [productId, requested] of wantedById) {
-    const available = stockById.get(productId) ?? 0;
-    if (requested > available) {
-      const name = items.find((i) => i.productId === productId)?.name ?? "Produto";
-      shortages.push({ productId, name, requested, available });
+  for (const w of wanted.values()) {
+    const product = productById.get(w.productId);
+    const available = !product
+      ? 0
+      : w.variationId
+        ? product.variations?.find((v) => v.id === w.variationId)?.stock ?? 0
+        : product.stock ?? 0;
+    if (w.qty > available) {
+      shortages.push({ productId: w.productId, name: w.name, requested: w.qty, available });
     }
   }
   return shortages;

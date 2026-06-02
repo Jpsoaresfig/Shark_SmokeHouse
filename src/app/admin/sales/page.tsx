@@ -18,7 +18,7 @@ import { getSales, createSale, exportSalesCSV } from "@/lib/firebase/sales";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
-import type { Product, Sale, SaleItem, SalePaymentMethod } from "@/types";
+import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(v: any): Date {
@@ -99,17 +99,36 @@ export default function AdminSales() {
   }, [tab]);
 
   /* ── Derived ── */
-  const filtered = useMemo(() =>
-    products.filter(p =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku?.toLowerCase().includes(search.toLowerCase())
-    ), [products, search]);
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku?.toLowerCase().includes(q) ||
+      (p.variations ?? []).some(v => v.name.toLowerCase().includes(q) || v.sku.toLowerCase().includes(q))
+    );
+  }, [products, search]);
 
   /* ── Leitor de código de barras (só na aba de venda) ──
      Bipou → procura o produto pelo SKU exato e adiciona ao carrinho.
      Não achou → joga o código no campo de busca para o vendedor conferir. */
   useBarcodeScanner((code) => {
-    const match = products.find(p => p.sku && p.sku.toLowerCase() === code.toLowerCase());
+    const target = code.toLowerCase();
+    // 1) tenta achar uma VARIAÇÃO pelo código de barras.
+    for (const p of products) {
+      const v = p.variations?.find(vr => vr.sku && vr.sku.toLowerCase() === target);
+      if (v) {
+        if (v.stock <= 0) {
+          toast.error(`"${p.name} - ${v.name}" está sem estoque.`);
+          return;
+        }
+        addItem(p, v);
+        setSearch("");
+        toast.success(`${p.name} - ${v.name} adicionado.`);
+        return;
+      }
+    }
+    // 2) produto simples pelo SKU.
+    const match = products.find(p => p.sku && p.sku.toLowerCase() === target);
     if (!match) {
       setSearch(code);
       toast.error(`Nenhum produto com o código ${code}.`);
@@ -130,19 +149,28 @@ export default function AdminSales() {
   const historyTotal = useMemo(() =>
     sales.reduce((s, sale) => s + sale.total, 0), [sales]);
 
-  /* ── Item management ── */
-  function addItem(product: Product) {
-    // Trava: não permite adicionar mais do que há em estoque.
-    const current = items.find(i => i.productId === product.id)?.quantity ?? 0;
-    if (current >= product.stock) {
-      toast.error(`Estoque insuficiente para "${product.name}" (disponível: ${product.stock} un).`);
+  /* ── Item management ──
+     Cada linha é identificada por produto + variação (productId + variationId).
+     Produtos com grade são adicionados por variação; simples, direto. */
+  function lineStock(product: Product, variationId?: string): number {
+    if (variationId) return product.variations?.find(v => v.id === variationId)?.stock ?? 0;
+    return product.stock;
+  }
+
+  function addItem(product: Product, variation?: ProductVariation) {
+    const vId = variation?.id ?? "";
+    const stock = variation ? variation.stock : product.stock;
+    const label = variation ? `${product.name} - ${variation.name}` : product.name;
+    const current = items.find(i => i.productId === product.id && (i.variationId ?? "") === vId)?.quantity ?? 0;
+    if (current >= stock) {
+      toast.error(`Estoque insuficiente para "${label}" (disponível: ${stock} un).`);
       return;
     }
     setItems(prev => {
-      const existing = prev.find(i => i.productId === product.id);
+      const existing = prev.find(i => i.productId === product.id && (i.variationId ?? "") === vId);
       if (existing) {
         return prev.map(i =>
-          i.productId === product.id
+          i.productId === product.id && (i.variationId ?? "") === vId
             ? { ...i, quantity: i.quantity + 1, subtotal: (i.quantity + 1) * i.price }
             : i
         );
@@ -150,29 +178,32 @@ export default function AdminSales() {
       return [...prev, {
         productId: product.id,
         productName: product.name,
-        sku: product.sku,
+        sku: variation?.sku ?? product.sku,
         category: product.category,
         price: product.price,
         quantity: 1,
         subtotal: product.price,
+        ...(variation ? { variationId: variation.id, variationName: variation.name } : {}),
       }];
     });
   }
 
-  function changeQty(productId: string, delta: number) {
-    // Trava: ao aumentar, não ultrapassa o estoque do produto.
+  function changeQty(productId: string, variationId: string | undefined, delta: number) {
+    const vId = variationId ?? "";
     if (delta > 0) {
       const product = products.find(p => p.id === productId);
-      const item = items.find(i => i.productId === productId);
-      if (product && item && item.quantity >= product.stock) {
-        toast.error(`Estoque máximo de "${product.name}": ${product.stock} un.`);
+      const item = items.find(i => i.productId === productId && (i.variationId ?? "") === vId);
+      const stock = product ? lineStock(product, variationId) : 0;
+      if (item && item.quantity >= stock) {
+        const label = item.variationName ? `${item.productName} - ${item.variationName}` : item.productName;
+        toast.error(`Estoque máximo de "${label}": ${stock} un.`);
         return;
       }
     }
     setItems(prev =>
       prev
         .map(i => {
-          if (i.productId !== productId) return i;
+          if (!(i.productId === productId && (i.variationId ?? "") === vId)) return i;
           const qty = Math.max(0, i.quantity + delta);
           return { ...i, quantity: qty, subtotal: qty * i.price };
         })
@@ -180,8 +211,9 @@ export default function AdminSales() {
     );
   }
 
-  function removeItem(productId: string) {
-    setItems(prev => prev.filter(i => i.productId !== productId));
+  function removeItem(productId: string, variationId?: string) {
+    const vId = variationId ?? "";
+    setItems(prev => prev.filter(i => !(i.productId === productId && (i.variationId ?? "") === vId)));
   }
 
   /* ── Save sale ── */
@@ -190,11 +222,13 @@ export default function AdminSales() {
     // Trava final: bloqueia a venda se algum item exceder o estoque atual.
     const over = items.find(i => {
       const p = products.find(pp => pp.id === i.productId);
-      return !p || i.quantity > p.stock;
+      return !p || i.quantity > lineStock(p, i.variationId);
     });
     if (over) {
       const p = products.find(pp => pp.id === over.productId);
-      toast.error(`Estoque insuficiente para "${over.productName}" (disponível: ${p?.stock ?? 0} un).`);
+      const stock = p ? lineStock(p, over.variationId) : 0;
+      const label = over.variationName ? `${over.productName} - ${over.variationName}` : over.productName;
+      toast.error(`Estoque insuficiente para "${label}" (disponível: ${stock} un).`);
       return;
     }
     setSaving(true);
@@ -291,7 +325,58 @@ export default function AdminSales() {
               ) : (
                 <div className="grid sm:grid-cols-2 gap-2">
                   {filtered.map(p => {
-                    const inCart = items.find(i => i.productId === p.id);
+                    const hasVars = (p.variations?.length ?? 0) > 0;
+                    const thumb = (
+                      <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
+                        {p.images?.[0]
+                          ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
+                          : <Package className="w-4 h-4 text-[var(--color-text-muted)]" />
+                        }
+                      </div>
+                    );
+
+                    // Produto com grade: card com chips por variação (bipa ou clica).
+                    if (hasVars) {
+                      return (
+                        <div key={p.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3">
+                          <div className="flex items-center gap-3 mb-2">
+                            {thumb}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-[var(--color-text-primary)] truncate">{p.name}</p>
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                {formatCurrency(p.price)} · {p.stock} un. no total
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {p.variations!.map(v => {
+                              const inCartV = items.find(i => i.productId === p.id && i.variationId === v.id);
+                              const out = v.stock <= 0;
+                              return (
+                                <button
+                                  key={v.id}
+                                  onClick={() => !out && addItem(p, v)}
+                                  disabled={out}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                    out
+                                      ? "opacity-40 cursor-not-allowed border-[var(--color-border)] text-[var(--color-text-muted)]"
+                                      : inCartV
+                                      ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                                      : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/50"
+                                  }`}
+                                >
+                                  {v.name} <span className="opacity-70">({v.stock})</span>
+                                  {inCartV && <span className="ml-1 font-bold">·{inCartV.quantity}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // Produto simples: clique adiciona.
+                    const inCart = items.find(i => i.productId === p.id && !i.variationId);
                     return (
                       <button
                         key={p.id}
@@ -305,12 +390,7 @@ export default function AdminSales() {
                             : "border-[var(--color-border)] bg-[var(--color-bg-elevated)] hover:border-[var(--color-neon-blue)]/50 hover:bg-[var(--color-bg-overlay)]"
                         }`}
                       >
-                        <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
-                          {p.images?.[0]
-                            ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
-                            : <Package className="w-4 h-4 text-[var(--color-text-muted)]" />
-                          }
-                        </div>
+                        {thumb}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-[var(--color-text-primary)] truncate">{p.name}</p>
                           <p className="text-xs text-[var(--color-text-muted)]">
@@ -359,29 +439,32 @@ export default function AdminSales() {
                     <div className="space-y-2">
                       {items.map(item => (
                         <div
-                          key={item.productId}
+                          key={`${item.productId}:${item.variationId ?? ""}`}
                           className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-2.5"
                         >
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{item.productName}</p>
+                            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                              {item.productName}
+                              {item.variationName && <span className="text-[var(--color-neon-blue)]"> · {item.variationName}</span>}
+                            </p>
                             <p className="text-xs text-[var(--color-text-muted)]">{formatCurrency(item.price)} × {item.quantity}</p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <button
-                              onClick={() => changeQty(item.productId, -1)}
+                              onClick={() => changeQty(item.productId, item.variationId, -1)}
                               className="w-6 h-6 rounded flex items-center justify-center hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                             >
                               <Minus className="w-3 h-3" />
                             </button>
                             <span className="text-sm font-bold text-[var(--color-text-primary)] w-5 text-center">{item.quantity}</span>
                             <button
-                              onClick={() => changeQty(item.productId, 1)}
+                              onClick={() => changeQty(item.productId, item.variationId, 1)}
                               className="w-6 h-6 rounded flex items-center justify-center hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
                             <button
-                              onClick={() => removeItem(item.productId)}
+                              onClick={() => removeItem(item.productId, item.variationId)}
                               className="w-6 h-6 rounded flex items-center justify-center hover:bg-red-500/10 text-[var(--color-text-muted)] hover:text-red-400 transition-colors ml-1"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -607,6 +690,7 @@ export default function AdminSales() {
                                     >
                                       <span className="text-[var(--color-text-secondary)]">
                                         {item.productName}
+                                        {item.variationName && <span className="text-[var(--color-neon-blue)] ml-1">· {item.variationName}</span>}
                                         {item.sku && <span className="text-[var(--color-text-muted)] ml-1">({item.sku})</span>}
                                       </span>
                                       <span className="text-[var(--color-text-muted)]">

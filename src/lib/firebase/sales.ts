@@ -47,11 +47,12 @@ export async function getSales(startDate?: Date, endDate?: Date, force = false):
 export async function createSale(
   data: Omit<Sale, "id" | "createdAt">,
 ): Promise<string> {
-  // Firestore rejects `undefined` — sanitize optional fields
-  const cleanItems = data.items.map(item => {
-    const { sku, ...rest } = item;
-    return sku !== undefined && sku !== "" ? { ...rest, sku } : rest;
-  });
+  // Firestore rejects `undefined` — remove campos opcionais vazios de cada item.
+  const cleanItems = data.items.map(item =>
+    Object.fromEntries(
+      Object.entries(item).filter(([, v]) => v !== undefined && v !== ""),
+    ) as typeof item,
+  );
 
   const payload: Record<string, unknown> = {
     sellerId: data.sellerId,
@@ -78,6 +79,9 @@ export async function createSale(
         quantity: item.quantity,
         reason: `Venda PDV ${saleRef}`,
         userId: data.sellerId,
+        ...(item.variationId
+          ? { variationId: item.variationId, variationName: item.variationName }
+          : {}),
       })
     )
   );
@@ -89,7 +93,7 @@ export async function createSale(
 export function exportSalesCSV(sales: Sale[], filename?: string): void {
   const headers = [
     "Data", "Hora", "ID", "Vendedor",
-    "Produto", "SKU", "Categoria", "Qtd",
+    "Produto", "Variação", "SKU", "Categoria", "Qtd",
     "Preço Unit.", "Subtotal", "Total da Venda",
     "Pagamento", "Observações",
   ];
@@ -106,6 +110,7 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
         sale.id.slice(-8).toUpperCase(),
         sale.sellerName,
         item.productName,
+        item.variationName ?? "",
         item.sku ?? "",
         item.category,
         String(item.quantity),

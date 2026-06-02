@@ -50,7 +50,7 @@ service cloud.firestore {
       allow create, delete: if isAdmin() || isSeller();
       allow update: if isAdmin()
                     || isSeller()
-                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'updatedAt']));
+                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'variations', 'updatedAt']));
     }
 
     // ── Orders ────────────────────────────────────────────────
