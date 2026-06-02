@@ -11,7 +11,7 @@ const INITIAL_STATUS: Partial<Record<CreatePaymentInput["method"], PaymentStatus
 /**
  * Gateway manual da Fase 1: não processa cobrança automaticamente. Apenas
  * registra a intenção de pagamento e o status inicial; a baixa é feita
- * manualmente pelo admin (ou, no futuro, por um webhook do Asaas).
+ * manualmente pelo admin (o método "mercadopago" usa o gateway automático).
  */
 export const manualGateway: PaymentGateway = {
   provider: "manual",

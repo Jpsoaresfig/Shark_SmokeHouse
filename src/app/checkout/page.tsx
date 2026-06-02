@@ -9,7 +9,7 @@ import {
   MapPin, ChevronRight, Package, CheckCircle,
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, Banknote, Plus, Star,
-  Copy, Check, User, LogIn, MessageCircle,
+  Copy, Check, User, LogIn, MessageCircle, Wallet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStat
 import { getProducts } from "@/lib/firebase/products";
 import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
-import { manualGateway } from "@/lib/payments";
+import { manualGateway, mercadopagoGateway } from "@/lib/payments";
 import { formatCurrency } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
 import type { Address, PaymentMethod } from "@/types";
@@ -55,9 +55,10 @@ const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente díg
 
 /* ── Payment options ─────────────────────────────────────── */
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
-  { value: "pix_manual",  label: "PIX",          desc: "Pague na hora e envie o comprovante", icon: QrCode        },
-  { value: "on_delivery", label: "Na Entrega",   desc: "Pague ao motoboy no recebimento",     icon: Banknote      },
-  { value: "whatsapp",    label: "Via WhatsApp", desc: "Combine com a nossa equipe",          icon: MessageCircle },
+  { value: "mercadopago", label: "Mercado Pago",  desc: "Pague via PIX na hora (confirmação automática)", icon: Wallet        },
+  { value: "pix_manual",  label: "PIX manual",    desc: "Pague e envie o comprovante pelo WhatsApp",       icon: QrCode        },
+  { value: "on_delivery", label: "Na Entrega",    desc: "Pague ao motoboy no recebimento",                 icon: Banknote      },
+  { value: "whatsapp",    label: "Via WhatsApp",  desc: "Combine com a nossa equipe",                      icon: MessageCircle },
 ];
 
 /* Monta o link do WhatsApp com o resumo do pedido. */
@@ -87,12 +88,36 @@ function buildProofLink(orderId: string, total: number) {
 function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; payment: PaymentMethod; waLink: string; total: number }) {
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
+  const [mpLoading, setMpLoading] = useState(false);
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
 
   const copy = async () => {
     await navigator.clipboard.writeText(pixKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  /* Redireciona o cliente para o Checkout Pro do Mercado Pago. */
+  const payWithMercadoPago = async () => {
+    setMpLoading(true);
+    try {
+      const res = await fetch("/api/payments/mercadopago/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.initPoint) {
+        toast.error(data?.error ?? "Não foi possível iniciar o pagamento. Tente novamente.");
+        setMpLoading(false);
+        return;
+      }
+      window.location.href = data.initPoint as string;
+    } catch (err) {
+      console.error("[checkout] mercadopago", err);
+      toast.error("Não foi possível iniciar o pagamento. Tente novamente.");
+      setMpLoading(false);
+    }
   };
 
   /* Cliente responde se efetuou ou não a compra combinada pelo WhatsApp. */
@@ -137,6 +162,38 @@ function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; p
         <p className="text-xs font-mono text-[var(--color-neon-blue)] mb-8">
           #{orderId.slice(-8).toUpperCase()}
         </p>
+
+        {payment === "mercadopago" && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="rounded-2xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]/20 p-5 mb-6 text-left"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Wallet className="w-4 h-4 text-[var(--color-neon-blue)]" />
+              <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pague com Mercado Pago</span>
+            </div>
+
+            {/* Valor a pagar */}
+            <div className="flex items-center justify-between gap-2 p-3 mb-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
+              <span className="text-xs font-medium text-[var(--color-text-secondary)]">Valor a pagar</span>
+              <span className="text-xl font-black text-[var(--color-neon-blue)]">{formatCurrency(total)}</span>
+            </div>
+
+            <p className="text-xs text-[var(--color-text-muted)] mb-4">
+              Você será levado ao ambiente seguro do Mercado Pago para pagar via PIX. Assim que o pagamento for confirmado, seu pedido é liberado automaticamente.
+            </p>
+            <Button variant="premium" className="w-full" onClick={payWithMercadoPago} disabled={mpLoading}>
+              {mpLoading
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <><Wallet className="w-4 h-4" /> Pagar com Mercado Pago</>}
+            </Button>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-2 text-center">
+              Você também pode pagar depois em <span className="text-[var(--color-neon-blue)]">Meus Pedidos</span>.
+            </p>
+          </motion.div>
+        )}
 
         {payment === "whatsapp" && (
           <motion.div
@@ -430,7 +487,8 @@ export default function CheckoutPage() {
             zipCode: zip.trim(),
           };
 
-      const paymentInfo = manualGateway.createPayment({
+      const gateway = payment === "mercadopago" ? mercadopagoGateway : manualGateway;
+      const paymentInfo = gateway.createPayment({
         method: payment,
         amount: effectiveTotal,
         pixKey,
@@ -707,7 +765,7 @@ export default function CheckoutPage() {
                   <h2 className="text-sm font-bold text-[var(--color-text-primary)]">Forma de Pagamento</h2>
                 </div>
 
-                <div className="grid sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                   {PAYMENT_OPTIONS.map(({ value, label, desc, icon: Icon }) => (
                     <button
                       key={value}
@@ -728,6 +786,18 @@ export default function CheckoutPage() {
                   ))}
                 </div>
 
+                {payment === "mercadopago" && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    className="mt-3 overflow-hidden"
+                  >
+                    <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)]">
+                      <span className="font-medium text-[var(--color-neon-blue)]">Mercado Pago: </span>
+                      Após confirmar o pedido, você será levado ao Mercado Pago para pagar via PIX. O pedido é liberado automaticamente assim que o pagamento cair.
+                    </div>
+                  </motion.div>
+                )}
                 {payment === "pix_manual" && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}

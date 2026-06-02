@@ -41,7 +41,7 @@ export function getAdminAuth(): Auth {
 
 let cachedDb: Firestore | null = null;
 /** Firestore via Admin SDK — escritas confiáveis do servidor (ex.: webhook do
- *  Asaas), ignorando as regras de segurança do cliente. */
+ *  Mercado Pago), ignorando as regras de segurança do cliente. */
 export function getAdminDb(): Firestore {
   if (!cachedDb) cachedDb = getFirestore(getAdminApp());
   return cachedDb;

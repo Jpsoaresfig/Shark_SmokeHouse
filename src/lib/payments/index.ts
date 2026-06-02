@@ -1,19 +1,15 @@
 /**
  * Camada de abstração de pagamentos.
  *
- * Os métodos da Fase 1 são todos processados pelo gateway "manual"
- * (`./manual`). A entidade `Order` guarda um `PaymentInfo` agnóstico de
- * provedor, de modo que a futura integração com o Asaas seja plugada aqui sem
- * refatorar a lógica de negócio:
+ * A entidade `Order` guarda um `PaymentInfo` agnóstico de provedor. Cada gateway
+ * implementa a interface `PaymentGateway`:
  *
- *   - Um `asaasGateway` implementaria a mesma interface `PaymentGateway`,
- *     retornando um `PaymentInfo` com `provider: "asaas"` e o id da cobrança em
- *     `providerRef`.
- *   - O webhook do Asaas chamaria `applyPaymentStatus(order.payment, "paid", …)`
- *     — exatamente a mesma transição usada hoje pela baixa manual do admin.
- *
- * Assim, trocar manual → automático é só escolher o gateway na criação e ligar
- * o webhook às transições já existentes.
+ *   - `manualGateway` (`./manual`): métodos com baixa manual do admin
+ *     (PIX manual, na entrega, WhatsApp).
+ *   - `mercadopagoGateway` (`./mercadopago`): pagamento online via Checkout Pro.
+ *     A rota de servidor cria a preferência e o webhook do Mercado Pago chama
+ *     `applyPaymentStatus(order.payment, "paid", …)` — a mesma transição usada
+ *     pela baixa manual.
  */
 import type { Order, PaymentInfo, PaymentEvent, PaymentMethod, PaymentProvider, PaymentStatus } from "@/types";
 
@@ -36,7 +32,7 @@ export interface PaymentGateway {
  * Aplica uma transição de status ao pagamento, registrando o evento no
  * histórico. Função pura — a persistência é responsabilidade do chamador
  * (ver `updatePaymentStatus` em lib/firebase/orders.ts). É também o ponto que
- * um webhook do Asaas usaria para confirmar/estornar uma cobrança.
+ * o webhook do Mercado Pago usa para confirmar/estornar uma cobrança.
  */
 export function applyPaymentStatus(
   payment: PaymentInfo,
@@ -91,4 +87,4 @@ export function resolveOrderPayment(order: Order): PaymentInfo {
 }
 
 export { manualGateway } from "./manual";
-export { asaasGateway, isAsaasConfigured } from "./asaas";
+export { mercadopagoGateway } from "./mercadopago";

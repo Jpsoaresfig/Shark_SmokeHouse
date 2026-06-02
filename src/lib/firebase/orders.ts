@@ -178,8 +178,8 @@ export async function updateOrderStatus(
 }
 
 /**
- * Atualiza o status financeiro (baixa manual do admin ou, no futuro, webhook do
- * Asaas). Grava em `payment.status`, acrescenta um evento no `payment.history` e,
+ * Atualiza o status financeiro (baixa manual do admin ou webhook do
+ * Mercado Pago). Grava em `payment.status`, acrescenta um evento no `payment.history` e,
  * quando `paid`, registra `paidAt`/`confirmedBy`. Espelha o campo legado
  * `paymentStatus` para compatibilidade.
  */

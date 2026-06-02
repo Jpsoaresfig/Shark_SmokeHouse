@@ -1,7 +1,8 @@
 /** Rótulos e variantes de badge para método e status de pagamento. */
 
 export const PAYMENT_METHOD_LABELS: Record<string, string> = {
-  pix_manual: "PIX",
+  pix_manual: "PIX (comprovante)",
+  mercadopago: "Mercado Pago (PIX)",
   on_delivery: "Na Entrega",
   whatsapp: "Via WhatsApp",
   loyalty: "Pontos (Fidelidade)",

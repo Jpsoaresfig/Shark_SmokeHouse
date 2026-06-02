@@ -94,15 +94,18 @@ export type OrderStatus =
   | "delivered"
   | "cancelled";
 
-/* Gateway que processa o pagamento. Hoje só "manual"; futuramente "asaas". */
-export type PaymentProvider = "manual" | "asaas";
+/* Gateway que processa o pagamento: "manual" (baixa pelo admin) ou
+   "mercadopago" (cobrança automática via Checkout Pro + webhook). */
+export type PaymentProvider = "manual" | "mercadopago";
 
 export type PaymentMethod =
-  /* Fase 1 — gateways manuais */
+  /* Gateways manuais — baixa feita pelo admin */
   | "pix_manual"   // PIX com validação externa (comprovante via WhatsApp)
   | "on_delivery"  // pagamento na entrega (cobrança pelo motoboy)
   | "whatsapp"     // tratativa direta via WhatsApp
   | "loyalty"      // resgate pago com pontos de fidelidade
+  /* Gateway automático — Mercado Pago Checkout Pro (PIX) */
+  | "mercadopago"  // pagamento online via Mercado Pago (confirmação por webhook)
   /* legados — mantidos para pedidos antigos */
   | "online"
   | "on_arrival"
@@ -131,9 +134,9 @@ export interface PaymentEvent {
 }
 
 /**
- * Abstração de pagamento do pedido — modelada como gateway para permitir a
- * futura integração com o Asaas (webhooks/processamento automático) sem
- * refatoração profunda. Na Fase 1 todos os métodos usam o provider "manual".
+ * Abstração de pagamento do pedido — modelada como gateway. Os métodos manuais
+ * usam o provider "manual" (baixa pelo admin); o método "mercadopago" usa o
+ * provider "mercadopago" (cobrança automática via Checkout Pro + webhook).
  */
 export interface PaymentInfo {
   method: PaymentMethod;
@@ -141,7 +144,7 @@ export interface PaymentInfo {
   status: PaymentStatus;
   /** Snapshot do valor cobrado. */
   amount: number;
-  /** Referência da cobrança externa (ex.: id do Asaas). Vazio no manual. */
+  /** Referência da cobrança externa (ex.: id da preferência do Mercado Pago). Vazio no manual. */
   providerRef?: string;
   /** Snapshot da chave PIX exibida ao cliente (pix_manual). */
   pixKey?: string;
