@@ -2,7 +2,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  sendPasswordResetEmail,
   updateProfile,
   GoogleAuthProvider,
   signInWithPopup,
@@ -81,9 +80,17 @@ export async function logout(): Promise<void> {
 }
 
 export async function sendResetEmail(email: string): Promise<void> {
-  await sendPasswordResetEmail(auth, email, {
-    url: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/login`,
+  // Usa nosso e-mail customizado (HTML da marca via Resend) em vez do template
+  // padrão do Firebase. O link de redefinição é gerado no servidor (Admin SDK).
+  const res = await fetch("/api/auth/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
   });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error ?? "Não foi possível enviar o e-mail de redefinição.");
+  }
 }
 
 export async function resolveUserProfile(firebaseUser: User): Promise<UserProfile | null> {

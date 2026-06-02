@@ -1,0 +1,73 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { Resend } from "resend";
+import { getAdminAuth } from "@/lib/firebase/admin";
+import { passwordResetEmail } from "@/lib/email/passwordResetTemplate";
+
+export const runtime = "nodejs";
+
+/**
+ * Base URL para os links/imagens do e-mail.
+ * Prioridade: NEXT_PUBLIC_APP_URL (override explícito) → host da requisição
+ * (funciona em local e em produção automaticamente) → localhost.
+ */
+function getBaseUrl(request: NextRequest): string {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  if (envUrl) return envUrl;
+
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  if (host) {
+    const proto =
+      request.headers.get("x-forwarded-proto") ??
+      (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+    return `${proto}://${host}`;
+  }
+  return "http://localhost:3000";
+}
+
+export async function POST(request: NextRequest) {
+  const APP_URL = getBaseUrl(request);
+
+  let email: string;
+  try {
+    const body = await request.json();
+    email = String(body?.email ?? "").trim().toLowerCase();
+  } catch {
+    return NextResponse.json({ error: "Requisição inválida." }, { status: 400 });
+  }
+
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return NextResponse.json({ error: "E-mail inválido." }, { status: 400 });
+  }
+
+  try {
+    // Gera o link de redefinição. O continueUrl leva o usuário de volta ao login.
+    const resetLink = await getAdminAuth().generatePasswordResetLink(email, {
+      url: `${APP_URL}/login`,
+    });
+
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const from = process.env.RESEND_FROM ?? "Shark SmokeHouse <onboarding@resend.dev>";
+    const { subject, html, text } = passwordResetEmail({
+      resetLink,
+      appUrl: APP_URL,
+      logoUrl: `${APP_URL}/logo_shark_preta.jpeg`,
+    });
+
+    const { error } = await resend.emails.send({ from, to: email, subject, html, text });
+    if (error) {
+      console.error("Falha ao enviar e-mail (Resend):", error);
+      return NextResponse.json({ error: "Não foi possível enviar o e-mail." }, { status: 502 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    // Para não revelar quais e-mails existem (email enumeration), respondemos
+    // sucesso mesmo quando a conta não existe — apenas não enviamos nada.
+    const code = (err as { code?: string }).code;
+    if (code === "auth/user-not-found" || code === "auth/email-not-found") {
+      return NextResponse.json({ ok: true });
+    }
+    console.error("Erro ao gerar link de redefinição:", err);
+    return NextResponse.json({ error: "Erro ao processar o pedido." }, { status: 500 });
+  }
+}

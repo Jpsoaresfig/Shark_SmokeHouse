@@ -295,7 +295,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                     <Button
                       variant="premium"
                       size="lg"
-                      className="flex-1"
+                      className="flex-1 min-w-0 px-4 h-auto min-h-12 py-2 whitespace-normal leading-tight text-center text-sm sm:text-base sm:px-6"
                       onClick={handleAdd}
                       disabled={added || needsColor}
                     >

@@ -92,7 +92,9 @@ export function useAuth() {
     try {
       await sendResetEmail(email);
     } catch (err) {
-      throw parseFirebaseError(err);
+      // sendResetEmail já retorna uma mensagem amigável vinda da API.
+      const message = err instanceof Error ? err.message : "Não foi possível enviar o e-mail.";
+      throw { message } as AuthError;
     }
   }
 
