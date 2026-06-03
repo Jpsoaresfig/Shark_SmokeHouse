@@ -375,6 +375,28 @@ export default function AdminOrders() {
                   <span className="text-[var(--color-text-muted)]">Entrega</span>
                   <span className="text-[var(--color-text-secondary)]">{formatCurrency(selected.deliveryFee)}</span>
                 </div>
+                {(() => {
+                  // cardFee gravado nos pedidos novos; nos antigos, deriva pela diferença
+                  // para o resumo sempre fechar (subtotal + frete + cartão − desconto = total).
+                  const cardFee = selected.cardFee ?? Math.round(
+                    (selected.total - selected.subtotal - selected.deliveryFee + (selected.discount ?? 0)) * 100,
+                  ) / 100;
+                  if (Math.abs(cardFee) < 0.01) return null;
+                  return (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[var(--color-text-muted)]">{cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}</span>
+                      <span className="text-[var(--color-text-secondary)]">
+                        {cardFee > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFee))}
+                      </span>
+                    </div>
+                  );
+                })()}
+                {selected.discount ? (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[var(--color-text-muted)]">Desconto</span>
+                    <span className="text-[var(--color-success)]">−{formatCurrency(selected.discount)}</span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between text-sm font-bold mt-1">
                   <span className="text-[var(--color-text-primary)]">Total</span>
                   <span className="text-[var(--color-neon-blue)]">{formatCurrency(selected.total)}</span>
