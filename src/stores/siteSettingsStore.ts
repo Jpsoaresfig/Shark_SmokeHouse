@@ -17,6 +17,7 @@ const DEFAULT_PAYMENT: SiteSettings["payment"] = {
   pixName: "Shark Smokehouse",
   pixQrPayload: "",
   creditFeePercent: 0,
+  debitFeePercent: 0,
 };
 
 interface SiteSettingsStore {

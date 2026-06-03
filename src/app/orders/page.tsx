@@ -327,12 +327,33 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
                     <span>Subtotal</span>
                     <span>{formatCurrency(order.subtotal)}</span>
                   </div>
-                  <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
-                    <span>Entrega</span>
-                    <span className={order.deliveryFee === 0 ? "text-[var(--color-success)]" : ""}>
-                      {order.deliveryFee === 0 ? "Grátis" : formatCurrency(order.deliveryFee)}
-                    </span>
-                  </div>
+                  {(() => {
+                    const pickup = !order.deliveryAddress || order.deliveryAddress.id === "pickup"
+                      || order.deliveryAddress.label === "Retirada na loja" || !order.deliveryAddress.street;
+                    // cardFee gravado nos pedidos novos; nos antigos, deriva pela diferença
+                    // para o resumo sempre fechar (subtotal + frete + cartão − desconto = total).
+                    const cardFee = order.cardFee ?? Math.round(
+                      (order.total - order.subtotal - order.deliveryFee + (order.discount ?? 0)) * 100,
+                    ) / 100;
+                    return (
+                      <>
+                        <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
+                          <span>{pickup ? "Retirada" : "Taxa de entrega"}</span>
+                          <span className={order.deliveryFee === 0 ? "text-[var(--color-success)]" : ""}>
+                            {order.deliveryFee === 0 ? "Grátis" : formatCurrency(order.deliveryFee)}
+                          </span>
+                        </div>
+                        {Math.abs(cardFee) >= 0.01 && (
+                          <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
+                            <span>{cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}</span>
+                            <span className={cardFee > 0 ? "" : "text-[var(--color-success)]"}>
+                              {cardFee > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFee))}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                   {order.discount ? (
                     <div className="flex justify-between text-sm text-[var(--color-success)]">
                       <span>Desconto</span>
@@ -358,24 +379,34 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
                   })()}
                 </div>
 
-                {/* Delivery address */}
-                {order.deliveryAddress && (
-                  <div className="p-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
-                    <h4 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5" />
-                      Endereço de entrega
-                    </h4>
-                    <address className="not-italic text-sm text-[var(--color-text-secondary)] space-y-0.5">
-                      <p className="font-medium text-[var(--color-text-primary)]">
-                        {order.deliveryAddress.street}, {order.deliveryAddress.number}
-                        {order.deliveryAddress.complement && ` — ${order.deliveryAddress.complement}`}
-                      </p>
-                      <p>{order.deliveryAddress.neighborhood}</p>
-                      <p>{order.deliveryAddress.city}, {order.deliveryAddress.state}</p>
-                      <p>{order.deliveryAddress.zipCode}</p>
-                    </address>
-                  </div>
-                )}
+                {/* Recebimento — entrega (com endereço) ou retirada na loja */}
+                {(() => {
+                  const addr = order.deliveryAddress;
+                  const pickup = !addr || addr.id === "pickup" || addr.label === "Retirada na loja" || !addr.street;
+                  return (
+                    <div className="p-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
+                      <h4 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                        {pickup ? <Package className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
+                        {pickup ? "Retirada na loja" : "Endereço de entrega"}
+                      </h4>
+                      {pickup ? (
+                        <p className="text-sm text-[var(--color-text-secondary)]">
+                          Você vai retirar este pedido no balcão da loja.
+                        </p>
+                      ) : (
+                        <address className="not-italic text-sm text-[var(--color-text-secondary)] space-y-0.5">
+                          <p className="font-medium text-[var(--color-text-primary)]">
+                            {addr.street}, {addr.number}
+                            {addr.complement && ` — ${addr.complement}`}
+                          </p>
+                          <p>{addr.neighborhood}</p>
+                          <p>{addr.city}, {addr.state}</p>
+                          <p>{addr.zipCode}</p>
+                        </address>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Status history */}

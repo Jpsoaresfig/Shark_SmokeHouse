@@ -64,15 +64,34 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon
   { value: "whatsapp",    label: "Via WhatsApp",  desc: "Combine com a nossa equipe",                      icon: MessageCircle },
 ];
 
-/* Monta o link do WhatsApp com o resumo do pedido. */
-function buildWaLink(orderId: string, items: { name: string; quantity: number; price: number }[], total: number) {
+/* Monta o link do WhatsApp com o resumo completo do pedido. */
+function buildWaLink(orderId: string, d: {
+  items: { name: string; quantity: number; price: number; color?: string }[];
+  subtotal: number;
+  deliveryFee: number;
+  cardFee: number;
+  total: number;
+  fulfillment: "delivery" | "pickup";
+  paymentLabel: string;
+  address?: string;
+}) {
   const lines = [
     "Olá! Acabei de fazer um pedido na Shark Smokehouse 🦈",
     `Pedido #${orderId.slice(-8).toUpperCase()}`,
     "",
-    ...items.map((i) => `• ${i.quantity}x ${i.name} — ${formatCurrency(i.price * i.quantity)}`),
+    ...d.items.map((i) => `• ${i.quantity}x ${i.name}${i.color ? ` (${i.color})` : ""} — ${formatCurrency(i.price * i.quantity)}`),
     "",
-    `Total: ${formatCurrency(total)}`,
+    `Subtotal: ${formatCurrency(d.subtotal)}`,
+    d.fulfillment === "pickup"
+      ? "Retirada na loja: grátis"
+      : `Entrega: ${formatCurrency(d.deliveryFee)}`,
+    ...(d.cardFee ? [`Acréscimo cartão: ${d.cardFee > 0 ? "+" : "−"}${formatCurrency(Math.abs(d.cardFee))}`] : []),
+    `Total: ${formatCurrency(d.total)}`,
+    "",
+    `Recebimento: ${d.fulfillment === "pickup" ? "Retirada na loja" : "Entrega"}`,
+    ...(d.fulfillment === "delivery" && d.address ? [`Endereço: ${d.address}`] : []),
+    `Pagamento: ${d.paymentLabel}`,
+    "",
     "Gostaria de combinar o pagamento. 🙏",
   ];
   return `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(lines.join("\n"))}`;
@@ -376,7 +395,7 @@ export default function CheckoutPage() {
   const { user } = useAuthStore();
   const cartStore = useCartStore();
   const { items, subtotal, clearCart, closeCart } = cartStore;
-  const { pixKey, pixName, creditFeePercent } = useSitePayment();
+  const { pixKey, pixName, creditFeePercent, debitFeePercent } = useSitePayment();
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
@@ -505,11 +524,14 @@ export default function CheckoutPage() {
   const isPickup = fulfillment === "pickup";
   // Frete por bairro: na retirada é grátis; na entrega vem da área selecionada.
   const effectiveDeliveryFee = isPickup ? 0 : (selectedArea?.fee ?? 0);
-  // Diferença de preço no crédito (Lei nº 13.455/2017): só incide no cartão de
-  // crédito; positiva = acréscimo, negativa = desconto. Aplica sobre subtotal+frete.
-  const creditPct = payment === "credit" ? (creditFeePercent ?? 0) : 0;
-  const creditFeeAmount = Math.round((subtotal + effectiveDeliveryFee) * (creditPct / 100) * 100) / 100;
-  const effectiveTotal = subtotal + effectiveDeliveryFee + creditFeeAmount;
+  // Diferença de preço no cartão (Lei nº 13.455/2017): incide no crédito e no
+  // débito; positiva = acréscimo, negativa = desconto. Aplica sobre subtotal+frete.
+  const cardPct =
+    payment === "credit" ? (creditFeePercent ?? 0)
+    : payment === "debit" ? (debitFeePercent ?? 0)
+    : 0;
+  const cardFeeAmount = Math.round((subtotal + effectiveDeliveryFee) * (cardPct / 100) * 100) / 100;
+  const effectiveTotal = subtotal + effectiveDeliveryFee + cardFeeAmount;
 
   // Link de WhatsApp para quando o bairro não está na lista de entrega.
   const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
@@ -569,6 +591,7 @@ export default function CheckoutPage() {
         items,
         subtotal,
         deliveryFee: effectiveDeliveryFee,
+        cardFee: cardFeeAmount,
         total: effectiveTotal,
         status: "received",
         payment: paymentInfo,
@@ -599,7 +622,19 @@ export default function CheckoutPage() {
       }
 
       /* monta o link do WhatsApp e congela o total antes de limpar o carrinho */
-      setWaLink(buildWaLink(id, items, effectiveTotal));
+      const addressLine = isPickup
+        ? undefined
+        : `${address.street}, ${address.number}${address.complement ? `, ${address.complement}` : ""} — ${address.neighborhood}, ${address.city}/${address.state}${address.zipCode ? ` · ${address.zipCode}` : ""}`;
+      setWaLink(buildWaLink(id, {
+        items,
+        subtotal,
+        deliveryFee: effectiveDeliveryFee,
+        cardFee: cardFeeAmount,
+        total: effectiveTotal,
+        fulfillment,
+        paymentLabel: PAYMENT_OPTIONS.find((o) => o.value === payment)?.label ?? payment,
+        address: addressLine,
+      }));
       setPaidTotal(effectiveTotal);
 
       closeCart();
@@ -955,10 +990,10 @@ export default function CheckoutPage() {
                         <span className="font-medium text-[var(--color-neon-blue)]">Cartão na maquininha: </span>
                         o pagamento é feito na entrega ou na retirada.
                       </p>
-                      {payment === "credit" && creditPct !== 0 && (
+                      {cardPct !== 0 && (
                         <p className="text-[var(--color-text-secondary)]">
-                          {creditPct > 0 ? "Acréscimo" : "Desconto"} de <strong>{Math.abs(creditPct)}%</strong> no
-                          crédito ({creditPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(creditFeeAmount))}),
+                          {cardPct > 0 ? "Acréscimo" : "Desconto"} de <strong>{Math.abs(cardPct)}%</strong> no
+                          {payment === "credit" ? " crédito" : " débito"} ({cardPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}),
                           conforme a Lei nº 13.455/2017.
                         </p>
                       )}
@@ -966,13 +1001,25 @@ export default function CheckoutPage() {
                   </motion.div>
                 )}
 
-                {/* Aviso geral de preço diferenciado por forma de pagamento (Lei 13.455/2017) */}
-                <p className="mt-3 text-[11px] text-[var(--color-text-muted)] leading-relaxed">
-                  Em conformidade com a Lei nº 13.455/2017, o preço pode variar conforme a forma de pagamento.
-                  {creditFeePercent
-                    ? ` Cartão de crédito tem ${creditFeePercent > 0 ? "acréscimo" : "desconto"} de ${Math.abs(creditFeePercent)}%.`
-                    : ""}
-                </p>
+                {/* Aviso de preço diferenciado por forma de pagamento (Lei 13.455/2017) */}
+                <div className="mt-4 rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-3.5 text-xs leading-relaxed space-y-1.5">
+                  <p className="font-bold text-[var(--color-warning)]">⚠️ Atenção</p>
+                  <p className="text-[var(--color-text-secondary)]">
+                    Os valores podem sofrer alterações de acordo com a forma de pagamento, em
+                    conformidade com a Lei nº 13.455/2017.
+                  </p>
+                  <p className="text-[var(--color-text-secondary)]">
+                    💸 <strong>PIX e dinheiro:</strong> preço à vista.
+                  </p>
+                  <p className="text-[var(--color-text-secondary)]">
+                    💳 <strong>Débito e crédito:</strong> acréscimo sobre o valor do produto
+                    {creditFeePercent ? ` (crédito ${creditFeePercent > 0 ? "+" : "−"}${Math.abs(creditFeePercent)}%` : ""}
+                    {creditFeePercent && debitFeePercent ? ", " : ""}
+                    {!creditFeePercent && debitFeePercent ? " (" : ""}
+                    {debitFeePercent ? `débito ${debitFeePercent > 0 ? "+" : "−"}${Math.abs(debitFeePercent)}%` : ""}
+                    {creditFeePercent || debitFeePercent ? ")" : ""}.
+                  </p>
+                </div>
               </CardContent>
             </Card>
 
@@ -1077,13 +1124,13 @@ export default function CheckoutPage() {
                       O frete é calculado pelo seu bairro
                     </div>
                   )}
-                  {creditFeeAmount !== 0 && (
+                  {cardFeeAmount !== 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-[var(--color-text-secondary)]">
-                        {creditPct > 0 ? "Acréscimo" : "Desconto"} crédito ({Math.abs(creditPct)}%)
+                        {cardPct > 0 ? "Acréscimo" : "Desconto"} {payment === "credit" ? "crédito" : "débito"} ({Math.abs(cardPct)}%)
                       </span>
-                      <span className={creditPct > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
-                        {creditPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(creditFeeAmount))}
+                      <span className={cardPct > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
+                        {cardPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}
                       </span>
                     </div>
                   )}

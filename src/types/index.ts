@@ -211,6 +211,10 @@ export interface Order {
   subtotal: number;
   deliveryFee: number;
   discount?: number;
+  /** Acréscimo (ou desconto, se negativo) cobrado pela forma de pagamento em
+   *  cartão (crédito/débito), conforme a Lei nº 13.455/2017. Em R$. Garante que
+   *  subtotal + deliveryFee + cardFee − discount = total. Ausente = 0 (pedidos antigos). */
+  cardFee?: number;
   total: number;
   status: OrderStatus;
   /** Fonte canônica do pagamento (abstração de gateway). */
@@ -345,6 +349,9 @@ export interface SiteSettings {
     /** % aplicada ao pagar no CRÉDITO (Lei nº 13.455/2017 — preço diferenciado).
      *  Positivo = acréscimo; negativo = desconto; 0/ausente = sem diferença. */
     creditFeePercent?: number;
+    /** % aplicada ao pagar no DÉBITO (Lei nº 13.455/2017 — preço diferenciado).
+     *  Positivo = acréscimo; negativo = desconto; 0/ausente = sem diferença. */
+    debitFeePercent?: number;
   };
   updatedAt?: string;
 }

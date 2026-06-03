@@ -105,6 +105,9 @@ export default function AdminProducts() {
   const [catOpen, setCatOpen] = useState(false);
   const [catInput, setCatInput] = useState("");
   const [catSaving, setCatSaving] = useState(false);
+  /* id da categoria aguardando confirmação de remoção (confirmação inline). */
+  const [catConfirmId, setCatConfirmId] = useState<string | null>(null);
+  const [catDeletingId, setCatDeletingId] = useState<string | null>(null);
   const categoryLabel = useCallback(
     (slug: string) => categories.find(c => c.slug === slug)?.label ?? slug,
     [categories],
@@ -162,17 +165,16 @@ export default function AdminProducts() {
   }
 
   async function handleDeleteCategory(cat: Category) {
-    const inUse = products.filter(p => p.category === cat.slug).length;
-    if (inUse > 0) {
-      toast.error(`"${cat.label}" está em uso por ${inUse} produto${inUse !== 1 ? "s" : ""}. Mude a categoria deles antes de remover.`);
-      return;
-    }
+    setCatDeletingId(cat.id);
     try {
       await deleteCategory(cat.id);
       setCategories(await getCategories(true));
       toast.success("Categoria removida.");
     } catch {
       toast.error("Erro ao remover categoria.");
+    } finally {
+      setCatDeletingId(null);
+      setCatConfirmId(null);
     }
   }
 
@@ -758,7 +760,7 @@ export default function AdminProducts() {
       </Dialog>
 
       {/* Categories manager */}
-      <Dialog open={catOpen} onOpenChange={setCatOpen}>
+      <Dialog open={catOpen} onOpenChange={(v) => { setCatOpen(v); if (!v) setCatConfirmId(null); }}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Categorias de produtos</DialogTitle>
@@ -786,19 +788,50 @@ export default function AdminProducts() {
             ) : (
               categories.map(cat => {
                 const inUse = products.filter(p => p.category === cat.slug).length;
+                const confirming = catConfirmId === cat.id;
+                const deleting = catDeletingId === cat.id;
                 return (
-                  <div key={cat.id} className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{cat.label}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">{cat.slug} · {inUse} produto{inUse !== 1 ? "s" : ""}</p>
+                  <div key={cat.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{cat.label}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{cat.slug} · {inUse} produto{inUse !== 1 ? "s" : ""}</p>
+                      </div>
+                      {!confirming && (
+                        <button
+                          onClick={() => setCatConfirmId(cat.id)}
+                          title="Remover categoria"
+                          className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
-                    <button
-                      onClick={() => handleDeleteCategory(cat)}
-                      title={inUse > 0 ? "Categoria em uso — não pode remover" : "Remover categoria"}
-                      className={`p-2 rounded-lg transition-colors ${inUse > 0 ? "text-[var(--color-text-muted)] opacity-40 cursor-not-allowed" : "text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10"}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+
+                    {/* Confirmação inline — permite remover mesmo em uso (avisa) */}
+                    {confirming && (
+                      <div className="mt-2 pt-2 border-t border-[var(--color-border)] space-y-2">
+                        {inUse > 0 && (
+                          <p className="text-xs text-[var(--color-warning)]">
+                            ⚠️ {inUse} produto{inUse !== 1 ? "s" : ""} usa{inUse !== 1 ? "m" : ""} esta categoria e ficará{inUse !== 1 ? "ão" : ""} sem categoria. Você pode reatribuí-los depois.
+                          </p>
+                        )}
+                        <div className="flex items-center justify-end gap-2">
+                          <Button variant="secondary" size="sm" onClick={() => setCatConfirmId(null)} disabled={deleting}>
+                            Cancelar
+                          </Button>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            className="bg-red-500 hover:bg-red-600 text-white border-0"
+                            onClick={() => handleDeleteCategory(cat)}
+                            disabled={deleting}
+                          >
+                            {deleting ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : "Remover"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })

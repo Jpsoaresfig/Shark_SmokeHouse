@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
     pixName: "Shark Smokehouse",
     pixQrPayload: "",
     creditFeePercent: 0,
+    debitFeePercent: 0,
   },
 };
 
@@ -35,6 +36,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       pixName: data.payment?.pixName ?? DEFAULT_SETTINGS.payment.pixName,
       pixQrPayload: data.payment?.pixQrPayload ?? "",
       creditFeePercent: data.payment?.creditFeePercent ?? 0,
+      debitFeePercent: data.payment?.debitFeePercent ?? 0,
     },
   };
 }

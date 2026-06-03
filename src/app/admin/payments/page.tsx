@@ -17,6 +17,7 @@ export default function AdminPayments() {
   const [pixName, setPixName] = useState("");
   const [pixQrPayload, setPixQrPayload] = useState("");
   const [creditFee, setCreditFee] = useState(""); // % no crédito (vazio = sem diferença)
+  const [debitFee, setDebitFee] = useState("");   // % no débito (vazio = sem diferença)
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -30,6 +31,7 @@ export default function AdminPayments() {
       setPixName(s.payment.pixName);
       setPixQrPayload(s.payment.pixQrPayload ?? "");
       setCreditFee(s.payment.creditFeePercent ? String(s.payment.creditFeePercent) : "");
+      setDebitFee(s.payment.debitFeePercent ? String(s.payment.debitFeePercent) : "");
     } catch {
       toast.error("Não foi possível carregar as configurações de pagamento.");
     } finally {
@@ -52,6 +54,11 @@ export default function AdminPayments() {
       toast.error("Informe um número válido para a % do crédito (ex.: 3,5 ou -2).");
       return;
     }
+    const debitNum = debitFee.trim() === "" ? 0 : Number(debitFee.replace(",", "."));
+    if (!Number.isFinite(debitNum)) {
+      toast.error("Informe um número válido para a % do débito (ex.: 1,5 ou -2).");
+      return;
+    }
     setSaving(true);
     try {
       const payment = {
@@ -59,6 +66,7 @@ export default function AdminPayments() {
         pixName: pixName.trim(),
         pixQrPayload: pixQrPayload.trim(),
         creditFeePercent: feeNum,
+        debitFeePercent: debitNum,
       };
       await updateSiteSettings({ payment });
       /* mantém o store em sincronia para o checkout usar os dados novos na hora */
@@ -182,7 +190,7 @@ export default function AdminPayments() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <CreditCard className="w-4 h-4 text-[var(--color-neon-blue)]" />
-                Cartão de Crédito
+                Cartão (Crédito e Débito)
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-4 space-y-4">
@@ -190,20 +198,33 @@ export default function AdminPayments() {
                 <div className="h-12 rounded-lg bg-[var(--color-bg-overlay)] animate-pulse" />
               ) : (
                 <>
-                  <div className="relative max-w-xs">
-                    <Input
-                      label="Diferença de preço no crédito (%)"
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Ex.: 3,5 (deixe vazio se não cobra)"
-                      value={creditFee}
-                      onChange={(e) => setCreditFee(e.target.value)}
-                      icon={<Percent className="w-4 h-4" />}
-                    />
+                  <div className="grid sm:grid-cols-2 gap-3 max-w-md">
+                    <div className="relative">
+                      <Input
+                        label="Diferença no crédito (%)"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Ex.: 3,5 (vazio = não cobra)"
+                        value={creditFee}
+                        onChange={(e) => setCreditFee(e.target.value)}
+                        icon={<Percent className="w-4 h-4" />}
+                      />
+                    </div>
+                    <div className="relative">
+                      <Input
+                        label="Diferença no débito (%)"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Ex.: 1,5 (vazio = não cobra)"
+                        value={debitFee}
+                        onChange={(e) => setDebitFee(e.target.value)}
+                        icon={<Percent className="w-4 h-4" />}
+                      />
+                    </div>
                   </div>
                   <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)] space-y-1">
                     <p>
-                      Aplicada ao total quando o cliente escolhe <span className="font-medium text-[var(--color-neon-blue)]">Cartão de Crédito</span> no checkout.
+                      Aplicada ao total quando o cliente escolhe <span className="font-medium text-[var(--color-neon-blue)]">Cartão de Crédito</span> ou <span className="font-medium text-[var(--color-neon-blue)]">Débito</span> no checkout.
                       Use número <strong>positivo</strong> para acréscimo e <strong>negativo</strong> para desconto. Vazio = sem diferença.
                     </p>
                     <p>
