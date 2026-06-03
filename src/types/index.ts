@@ -9,6 +9,11 @@ export interface UserProfile {
   role: UserRole;
   phone?: string;
   cpf?: string;
+  /** Data de nascimento (ISO "YYYY-MM-DD"). Coletada no cadastro. */
+  birthDate?: string;
+  /** Quando a conta de um menor é liberada (ISO "YYYY-MM-DD" = 18º aniversário).
+   *  Presente apenas para quem se cadastrou menor de idade. */
+  blockedUntil?: string;
   addresses?: Address[];
   loyaltyPoints?: number;
   referralCode?: string;

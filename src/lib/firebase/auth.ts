@@ -23,11 +23,12 @@ export async function registerWithEmail(
   password: string,
   displayName: string,
   phone?: string,
-  referralCode?: string
+  referralCode?: string,
+  birthDate?: string
 ): Promise<UserProfile> {
   const { user } = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(user, { displayName });
-  const profile = await createUserProfile(user.uid, { email, displayName, phone });
+  const profile = await createUserProfile(user.uid, { email, displayName, phone, birthDate });
   setSessionCookie(user.uid);
   if (referralCode) {
     // Don't block/fail registration if the referral can't be processed,

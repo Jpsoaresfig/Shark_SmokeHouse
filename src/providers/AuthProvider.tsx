@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { resolveUserProfile } from "@/lib/firebase/auth";
+import { resolveUserProfile, logout as firebaseLogout } from "@/lib/firebase/auth";
+import { minorBlock } from "@/lib/age";
 import { useAuthStore } from "@/stores/authStore";
 import type { UserProfile } from "@/types";
 
@@ -37,8 +38,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let unsubscribe: (() => void) | undefined;
 
     // Step 1 — instantly hydrate from cache so UI never shows loading on return visits
+    // (exceto contas de menores bloqueadas — nunca hidrata uma sessão bloqueada).
     const cached = readCache();
-    if (cached) {
+    if (cached && !minorBlock(cached).blocked) {
       setUser(cached);
       setLoading(false);
     }
@@ -56,6 +58,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Firebase Auth has fully resolved — Firestore queries are now safe
         setFirebaseReady(true);
 
+        // Aplica o perfil, mas desloga contas de menores ainda bloqueadas.
+        const applyProfile = async (profile: UserProfile | null) => {
+          if (profile && minorBlock(profile).blocked) {
+            await firebaseLogout();
+            if (!mounted) return;
+            setUser(null);
+            writeCache(null);
+            return;
+          }
+          setUser(profile);
+          writeCache(profile);
+        };
+
         if (firebaseUser) {
           // Renew session cookie on every confirmed auth — keeps proxy happy
           refreshSessionCookie(firebaseUser.uid);
@@ -65,15 +80,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setLoading(false);
             resolveUserProfile(firebaseUser).then(profile => {
               if (!mounted || !profile) return;
-              setUser(profile);
-              writeCache(profile);
+              applyProfile(profile);
             });
           } else {
             // Different user (or no cache) — must fetch Firestore profile
             const profile = await resolveUserProfile(firebaseUser);
             if (!mounted) return;
-            setUser(profile);
-            writeCache(profile);
+            await applyProfile(profile);
             setLoading(false);
           }
         } else {

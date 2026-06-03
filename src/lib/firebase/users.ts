@@ -5,6 +5,7 @@ import {
 import { db } from "@/lib/firebase";
 import { generateReferralCode, registerReferralCode } from "./loyalty";
 import { cached, invalidate } from "@/lib/firebase/cache";
+import { isOfLegalAge, legalAgeDate } from "@/lib/age";
 import type { UserProfile, UserRole } from "@/types";
 
 const COLLECTION = "users";
@@ -12,12 +13,15 @@ const ADMIN_EMAIL = "admin@shark.com";
 
 export async function createUserProfile(
   uid: string,
-  data: { email: string; displayName: string; phone?: string }
+  data: { email: string; displayName: string; phone?: string; birthDate?: string }
 ): Promise<UserProfile> {
   const ref = doc(db, COLLECTION, uid);
   const isAdmin = data.email === ADMIN_EMAIL;
   // Every account gets a referral link, regardless of role.
   const referralCode = generateReferralCode();
+  // Menor de idade: conta criada, mas bloqueada até completar 18 anos.
+  const blockedUntil =
+    data.birthDate && !isOfLegalAge(data.birthDate) ? legalAgeDate(data.birthDate) : undefined;
   const profile: Omit<UserProfile, "updatedAt"> & { createdAt: unknown; updatedAt: unknown } = {
     uid,
     email: data.email,
@@ -27,6 +31,8 @@ export async function createUserProfile(
     loyaltyPoints: isAdmin ? 0 : 100,
     referralCode,
     addresses: [],
+    ...(data.birthDate ? { birthDate: data.birthDate } : {}),
+    ...(blockedUntil ? { blockedUntil } : {}),
     createdAt: serverTimestamp() as unknown as string,
     updatedAt: serverTimestamp() as unknown as string,
   };

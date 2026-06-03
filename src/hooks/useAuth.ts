@@ -9,6 +9,8 @@ import {
   logout as firebaseLogout,
   sendResetEmail,
 } from "@/lib/firebase/auth";
+import { minorBlock, formatBrDate, LEGAL_AGE } from "@/lib/age";
+import type { UserProfile } from "@/types";
 
 export interface AuthError {
   message: string;
@@ -46,14 +48,29 @@ export function useAuth() {
   const { user, loading, setUser } = useAuthStore();
   const router = useRouter();
 
+  /** Bloqueia o acesso de menores; desloga e lança erro com a data de liberação. */
+  async function enforceAgeOrThrow(profile: UserProfile) {
+    const block = minorBlock(profile);
+    if (block.blocked) {
+      await firebaseLogout();
+      setUser(null);
+      throw {
+        message: `É necessário ter ${LEGAL_AGE} anos para usar a Shark. Sua conta será liberada em ${formatBrDate(block.until!)}.`,
+        code: "age/minor",
+      } as AuthError;
+    }
+  }
+
   async function login(email: string, password: string) {
+    let profile: UserProfile;
     try {
-      const profile = await loginWithEmail(email, password);
-      setUser(profile);
-      redirectByRole(profile.role, router);
+      profile = await loginWithEmail(email, password);
     } catch (err) {
       throw parseFirebaseError(err);
     }
+    await enforceAgeOrThrow(profile);
+    setUser(profile);
+    redirectByRole(profile.role, router);
   }
 
   async function loginGoogle() {
@@ -71,15 +88,19 @@ export function useAuth() {
     password: string,
     displayName: string,
     phone?: string,
-    referralCode?: string
+    referralCode?: string,
+    birthDate?: string
   ) {
+    let profile: UserProfile;
     try {
-      const profile = await registerWithEmail(email, password, displayName, phone, referralCode);
-      setUser(profile);
-      router.push("/");
+      profile = await registerWithEmail(email, password, displayName, phone, referralCode, birthDate);
     } catch (err) {
       throw parseFirebaseError(err);
     }
+    // Conta criada; se for menor, bloqueia (com a data de liberação) e desloga.
+    await enforceAgeOrThrow(profile);
+    setUser(profile);
+    router.push("/");
   }
 
   async function logout() {

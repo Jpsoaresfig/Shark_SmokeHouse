@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail, Lock, User, Phone, Eye, EyeOff,
-  ArrowRight, CheckCircle, AlertCircle, Sparkles,
+  ArrowRight, CheckCircle, AlertCircle, Sparkles, Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,7 @@ function RegisterForm() {
     name: "",
     email: emailFromLogin,
     phone: "",
+    birthDate: "",
     password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -54,7 +55,7 @@ function RegisterForm() {
     setError("");
     setLoading(true);
     try {
-      await register(form.email, form.password, form.name, form.phone, refCode || undefined);
+      await register(form.email, form.password, form.name, form.phone, refCode || undefined, form.birthDate);
     } catch (err) {
       setError((err as AuthError).message);
     } finally {
@@ -169,6 +170,15 @@ function RegisterForm() {
           icon={<Phone className="w-4 h-4" />}
           value={form.phone}
           onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          required
+        />
+        <Input
+          type="date"
+          label="Data de nascimento"
+          icon={<Calendar className="w-4 h-4" />}
+          value={form.birthDate}
+          onChange={(e) => setForm({ ...form, birthDate: e.target.value })}
+          max={new Date().toISOString().slice(0, 10)}
           required
         />
         <div className="flex flex-col gap-1.5">
