@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Minus, Trash2, Search, ShoppingCart,
   History, Download, Receipt, TrendingUp, Package,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, User, X, Truck, CheckCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,11 +14,12 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
-import { getSales, createSale, exportSalesCSV } from "@/lib/firebase/sales";
+import { getSales, createSale, exportSalesCSV, markSaleDelivered, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
+import { getAllUsers } from "@/lib/firebase/users";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
-import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod } from "@/types";
+import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, UserProfile } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(v: any): Date {
@@ -28,17 +29,12 @@ function toDate(v: any): Date {
   return new Date(0);
 }
 
-const PAYMENT_OPTIONS: { value: SalePaymentMethod; label: string; color: string }[] = [
-  { value: "cash", label: "Dinheiro", color: "text-emerald-400" },
-  { value: "pix", label: "Pix", color: "text-[var(--color-neon-blue)]" },
-  { value: "card", label: "Cartão", color: "text-purple-400" },
+const PAYMENT_OPTIONS: { value: SalePaymentMethod; label: string }[] = [
+  { value: "cash", label: "Dinheiro" },
+  { value: "pix", label: "Pix" },
+  { value: "credit", label: "Crédito" },
+  { value: "debit", label: "Débito" },
 ];
-
-const PAYMENT_LABELS: Record<SalePaymentMethod, string> = {
-  cash: "Dinheiro",
-  pix: "Pix",
-  card: "Cartão",
-};
 
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
@@ -58,6 +54,15 @@ export default function AdminSales() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
+  /* Cliente vinculado + vendedor responsável + entrega posterior */
+  const [customer, setCustomer] = useState<UserProfile | null>(null);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [sellerId, setSellerId] = useState("");
+  const [deliveryLater, setDeliveryLater] = useState(false);
+
+  /* ── Usuários (clientes p/ vínculo, vendedores p/ atribuição) ── */
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const isAdmin = user?.role === "admin";
 
   /* ── History ── */
   const [sales, setSales] = useState<Sale[]>([]);
@@ -92,11 +97,43 @@ export default function AdminSales() {
     }
   }, []);
 
-  useEffect(() => { loadProducts(); }, [loadProducts]);
+  const loadUsers = useCallback(async () => {
+    try {
+      setUsers(await getAllUsers());
+    } catch {
+      // Sem permissão / offline: o PDV segue funcionando sem vínculo de cliente.
+      setUsers([]);
+    }
+  }, []);
+
+  useEffect(() => { loadProducts(); loadUsers(); }, [loadProducts, loadUsers]);
   useEffect(() => {
     if (tab === "history") loadHistory(startDate, endDate);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  // Vendedor responsável começa como o próprio usuário logado.
+  useEffect(() => {
+    if (user?.uid && !sellerId) setSellerId(user.uid);
+  }, [user, sellerId]);
+
+  /* ── Listas derivadas de usuários ── */
+  const sellers = useMemo(
+    () => users.filter(u => u.role === "seller" || u.role === "admin"),
+    [users],
+  );
+  const customerMatches = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return [];
+    return users
+      .filter(u => u.role === "customer")
+      .filter(u =>
+        u.displayName?.toLowerCase().includes(q) ||
+        u.email?.toLowerCase().includes(q) ||
+        u.phone?.replace(/\D/g, "").includes(q.replace(/\D/g, "")),
+      )
+      .slice(0, 6);
+  }, [users, customerQuery]);
 
   /* ── Derived ── */
   const filtered = useMemo(() => {
@@ -231,22 +268,38 @@ export default function AdminSales() {
       toast.error(`Estoque insuficiente para "${label}" (disponível: ${stock} un).`);
       return;
     }
+    // Resolve o vendedor responsável (admin pode atribuir a outro; vendedor é ele mesmo).
+    const seller = sellers.find(s => s.uid === sellerId);
+    const finalSellerId = isAdmin ? (seller?.uid ?? user.uid) : user.uid;
+    const finalSellerName = isAdmin
+      ? (seller?.displayName ?? user.displayName ?? "Vendedor")
+      : (user.displayName ?? "Vendedor");
     setSaving(true);
     setSavedId(null);
     try {
       const id = await createSale({
-        sellerId: user.uid,
-        sellerName: user.displayName ?? "Vendedor",
+        sellerId: finalSellerId,
+        sellerName: finalSellerName,
         items,
         total,
         paymentMethod: payment,
         notes: notes.trim() || undefined,
+        ...(customer ? { customerId: customer.uid, customerName: customer.displayName } : {}),
+        ...(deliveryLater ? { deliveryLater: true } : {}),
       });
       setSavedId(id.slice(-8).toUpperCase());
-      toast.success("Venda registrada com sucesso!");
+      const attributedToOther = finalSellerId !== user.uid;
+      toast.success(
+        attributedToOther
+          ? `Venda registrada para ${finalSellerName}!`
+          : "Venda registrada com sucesso!",
+      );
       setItems([]);
       setNotes("");
       setPayment("cash");
+      setCustomer(null);
+      setCustomerQuery("");
+      setDeliveryLater(false);
       await loadProducts();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -254,6 +307,23 @@ export default function AdminSales() {
       toast.error(`Erro ao registrar venda: ${msg}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  /* ── Entrega posterior: marcar como entregue ── */
+  const [deliveringId, setDeliveringId] = useState<string | null>(null);
+  async function handleMarkDelivered(saleId: string) {
+    setDeliveringId(saleId);
+    try {
+      await markSaleDelivered(saleId);
+      setSales(prev => prev.map(s =>
+        s.id === saleId ? { ...s, delivered: true, deliveredAt: new Date().toISOString() } : s,
+      ));
+      toast.success("Venda marcada como entregue.");
+    } catch {
+      toast.error("Não foi possível atualizar a entrega.");
+    } finally {
+      setDeliveringId(null);
     }
   }
 
@@ -478,10 +548,101 @@ export default function AdminSales() {
                     </div>
                   )}
 
+                  {/* Cliente vinculado (venda presencial) */}
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Cliente</label>
+                    {customer ? (
+                      <div className="flex items-center gap-2 rounded-lg border border-[var(--color-neon-blue)]/40 bg-[var(--color-neon-blue-glow)] px-3 py-2">
+                        <User className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{customer.displayName}</p>
+                          {(customer.phone || customer.email) && (
+                            <p className="text-xs text-[var(--color-text-muted)] truncate">{customer.phone || customer.email}</p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => { setCustomer(null); setCustomerQuery(""); }}
+                          className="w-6 h-6 rounded flex items-center justify-center text-[var(--color-text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0"
+                          aria-label="Remover cliente"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Input
+                          placeholder="Buscar cliente por nome, telefone ou e-mail..."
+                          icon={<Search className="w-4 h-4" />}
+                          value={customerQuery}
+                          onChange={e => setCustomerQuery(e.target.value)}
+                        />
+                        {customerQuery.trim() && (
+                          <div className="absolute z-20 mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden">
+                            {customerMatches.length === 0 ? (
+                              <p className="px-3 py-2.5 text-xs text-[var(--color-text-muted)]">Nenhum cliente encontrado.</p>
+                            ) : (
+                              customerMatches.map(c => (
+                                <button
+                                  key={c.uid}
+                                  onClick={() => { setCustomer(c); setCustomerQuery(""); }}
+                                  className="w-full text-left px-3 py-2 hover:bg-[var(--color-bg-hover)] transition-colors"
+                                >
+                                  <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{c.displayName}</p>
+                                  <p className="text-xs text-[var(--color-text-muted)] truncate">{c.phone || c.email}</p>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Vendedor responsável — admin atribui a venda a um vendedor */}
+                  {isAdmin && (
+                    <div>
+                      <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Vendedor</label>
+                      <select
+                        value={sellerId}
+                        onChange={e => setSellerId(e.target.value)}
+                        className={inputCls}
+                      >
+                        {user && !sellers.some(s => s.uid === user.uid) && (
+                          <option value={user.uid}>{user.displayName ?? "Eu"} (você)</option>
+                        )}
+                        {sellers.map(s => (
+                          <option key={s.uid} value={s.uid}>
+                            {s.displayName}{s.uid === user?.uid ? " (você)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Entrega posterior */}
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryLater(v => !v)}
+                    className={`w-full flex items-center gap-2.5 rounded-lg border px-3 py-2.5 transition-all ${
+                      deliveryLater
+                        ? "border-amber-500/40 bg-amber-500/10"
+                        : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] hover:border-amber-500/30"
+                    }`}
+                  >
+                    <Truck className={`w-4 h-4 shrink-0 ${deliveryLater ? "text-amber-400" : "text-[var(--color-text-muted)]"}`} />
+                    <div className="flex-1 text-left">
+                      <p className={`text-sm font-medium ${deliveryLater ? "text-amber-400" : "text-[var(--color-text-secondary)]"}`}>Entrega posterior</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">Cliente não vai retirar o produto agora</p>
+                    </div>
+                    <span className={`w-9 h-5 rounded-full shrink-0 transition-colors relative ${deliveryLater ? "bg-amber-500" : "bg-[var(--color-border)]"}`}>
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${deliveryLater ? "left-[1.125rem]" : "left-0.5"}`} />
+                    </span>
+                  </button>
+
                   {/* Payment method */}
                   <div>
                     <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Pagamento</label>
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
                       {PAYMENT_OPTIONS.map(opt => (
                         <button
                           key={opt.value}
@@ -661,10 +822,16 @@ export default function AdminSales() {
                               </div>
                               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                                 {sale.items.length} {sale.items.length === 1 ? "item" : "itens"} · {PAYMENT_LABELS[sale.paymentMethod]}
+                                {sale.customerName && ` · ${sale.customerName}`}
                                 {sale.notes && ` · ${sale.notes}`}
                               </p>
                             </div>
                             <div className="flex items-center gap-3 shrink-0">
+                              {sale.deliveryLater && (
+                                <Badge variant={sale.delivered ? "success" : "warning"} className="text-[10px] hidden sm:inline-flex">
+                                  {sale.delivered ? "Entregue" : "Entrega pendente"}
+                                </Badge>
+                              )}
                               <span className="font-bold text-[var(--color-neon-blue)]">{formatCurrency(sale.total)}</span>
                               {isOpen
                                 ? <ChevronUp className="w-4 h-4 text-[var(--color-text-muted)]" />
@@ -683,6 +850,32 @@ export default function AdminSales() {
                                 className="overflow-hidden"
                               >
                                 <div className="px-4 pb-4 border-t border-[var(--color-border)] pt-3 space-y-1.5">
+                                  {(sale.customerName || sale.deliveryLater) && (
+                                    <div className="flex items-center justify-between gap-2 flex-wrap pb-1.5 mb-1 border-b border-[var(--color-border)]/60">
+                                      {sale.customerName && (
+                                        <span className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)]">
+                                          <User className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+                                          Cliente: <strong className="text-[var(--color-text-primary)]">{sale.customerName}</strong>
+                                        </span>
+                                      )}
+                                      {sale.deliveryLater && !sale.delivered && (
+                                        <button
+                                          onClick={() => handleMarkDelivered(sale.id)}
+                                          disabled={deliveringId === sale.id}
+                                          className="flex items-center gap-1 px-2.5 h-7 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50 ml-auto"
+                                        >
+                                          {deliveringId === sale.id
+                                            ? <div className="w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+                                            : <><CheckCircle className="w-3 h-3" /> Marcar entregue</>}
+                                        </button>
+                                      )}
+                                      {sale.deliveryLater && sale.delivered && (
+                                        <span className="flex items-center gap-1 text-xs font-medium text-emerald-400 ml-auto">
+                                          <CheckCircle className="w-3.5 h-3.5" /> Entregue
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   {sale.items.map(item => (
                                     <div
                                       key={item.productId}

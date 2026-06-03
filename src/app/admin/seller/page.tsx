@@ -11,17 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { AdminTopNav } from "@/components/admin/AdminTopNav";
-import { getSales } from "@/lib/firebase/sales";
+import { getSales, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
 import { formatCurrency, toDate } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
-import type { Sale, SalePaymentMethod } from "@/types";
-
-const PAYMENT_LABELS: Record<SalePaymentMethod, string> = {
-  pix: "Pix",
-  card: "Cartão",
-  cash: "Dinheiro",
-};
+import type { Sale } from "@/types";
 
 export default function SellerDashboard() {
   const { user } = useAuthStore();

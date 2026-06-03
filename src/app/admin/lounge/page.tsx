@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   ChevronLeft, ChevronRight, Users, Clock, Phone, Mail,
   CheckCircle, XCircle, AlertCircle, CalendarDays, RefreshCw,
-  Trash2, MessageCircle,
+  Trash2, MessageCircle, Plus, Pencil,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,13 +15,21 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import {
-  getLoungeBookings, updateLoungeBookingStatus, deleteLoungeBooking, SLOT_TAKEN,
+  getLoungeBookings, updateLoungeBookingStatus, deleteLoungeBooking,
+  createLoungeBooking, updateLoungeBooking, getTakenSlots, SLOT_TAKEN,
 } from "@/lib/firebase/lounge";
+import { todayISO } from "@/lib/booking";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { LoungeBooking, BookingStatus } from "@/types";
+
+const TIME_SLOTS = [
+  "14:00", "15:00", "16:00", "17:00", "18:00",
+  "19:00", "20:00", "21:00", "22:00", "23:00",
+];
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MONTHS = [
@@ -73,6 +81,17 @@ export default function AdminLoungePage() {
   const [loading, setLoading]       = useState(true);
   const [actionId, setActionId]     = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<LoungeBooking | null>(null);
+
+  /* ── Criar / editar reserva ── */
+  const EMPTY_FORM = {
+    name: "", whatsapp: "", email: "", date: "", time: "",
+    guests: "1", notes: "", status: "approved" as BookingStatus,
+  };
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<LoungeBooking | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [savingForm, setSavingForm] = useState(false);
+  const [formTaken, setFormTaken] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -160,6 +179,85 @@ export default function AdminLoungePage() {
     }
   }
 
+  /* Abre o formulário em branco (nova reserva), opcionalmente já com a data selecionada. */
+  function openCreate() {
+    setEditing(null);
+    setForm({ ...EMPTY_FORM, date: selectedDate ?? "" });
+    setFormOpen(true);
+  }
+
+  /* Abre o formulário preenchido para editar uma reserva existente. */
+  function openEdit(b: LoungeBooking) {
+    setEditing(b);
+    setForm({
+      name: b.name,
+      whatsapp: b.whatsapp,
+      email: b.email ?? "",
+      date: b.date,
+      time: b.time,
+      guests: String(b.guestCount ?? 1),
+      notes: b.notes ?? "",
+      status: b.status,
+    });
+    setFormOpen(true);
+  }
+
+  /* Busca horários ocupados da data escolhida no formulário (para desabilitá-los).
+     Ao editar, o próprio horário da reserva continua disponível. */
+  useEffect(() => {
+    if (!formOpen || !form.date) { setFormTaken([]); return; }
+    let active = true;
+    getTakenSlots(form.date)
+      .then((taken) => {
+        if (!active) return;
+        const own = editing && editing.date === form.date ? editing.time : null;
+        setFormTaken(taken.filter((t) => t !== own));
+      })
+      .catch(() => { if (active) setFormTaken([]); });
+    return () => { active = false; };
+  }, [formOpen, form.date, editing]);
+
+  async function submitForm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.whatsapp.trim() || !form.date || !form.time) {
+      toast.error("Preencha nome, WhatsApp, data e horário.");
+      return;
+    }
+    setSavingForm(true);
+    try {
+      const payload = {
+        name: form.name.trim(),
+        whatsapp: form.whatsapp.trim(),
+        email: form.email.trim() || undefined,
+        date: form.date,
+        time: form.time,
+        guestCount: Number(form.guests) || 1,
+        notes: form.notes.trim() || undefined,
+      };
+      if (editing) {
+        await updateLoungeBooking(editing.id, payload, { oldDate: editing.date, oldTime: editing.time, status: editing.status });
+        toast.success("Reserva atualizada!");
+      } else {
+        await createLoungeBooking(payload, { status: form.status });
+        toast.success("Reserva criada!");
+      }
+      setFormOpen(false);
+      setEditing(null);
+      setForm(EMPTY_FORM);
+      await load();
+    } catch (err) {
+      if (err instanceof Error && err.message === SLOT_TAKEN) {
+        toast.error("Esse horário já está reservado. Escolha outro.");
+      } else if (err instanceof Error && err.message && !err.message.includes("Firebase")) {
+        toast.error(err.message);
+      } else {
+        toast.error("Não foi possível salvar a reserva.");
+      }
+    } finally {
+      setSavingForm(false);
+    }
+  }
+
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto">
@@ -172,14 +270,20 @@ export default function AdminLoungePage() {
               : `${bookings.length} reserva${bookings.length !== 1 ? "s" : ""} · ${pendingCount} pendente${pendingCount !== 1 ? "s" : ""}`
           }
           action={
-            <button
-              onClick={load}
-              disabled={loading}
-              className="flex items-center gap-2 px-3 h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/40 transition-all disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              <span className="hidden sm:inline">Atualizar</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={load}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 h-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/40 transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">Atualizar</span>
+              </button>
+              <Button variant="premium" size="sm" onClick={openCreate} className="h-10">
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">Nova reserva</span>
+              </Button>
+            </div>
           }
         />
 
@@ -463,6 +567,13 @@ export default function AdminLoungePage() {
                                       <RefreshCw className="w-3 h-3" /> Reabrir
                                     </button>
                                   )}
+                                  <button
+                                    disabled={isUpdating}
+                                    onClick={() => openEdit(booking)}
+                                    className="flex items-center gap-1 px-2.5 h-8 rounded-lg border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)] text-xs font-medium text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue)]/20 transition-colors disabled:opacity-50"
+                                  >
+                                    <Pencil className="w-3 h-3" /> Editar
+                                  </button>
                                   <a
                                     href={waLink(booking.whatsapp, booking.name, booking.date, booking.time)}
                                     target="_blank"
@@ -493,6 +604,136 @@ export default function AdminLoungePage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Create / edit booking */}
+      <Dialog open={formOpen} onOpenChange={(v) => { if (!v) { setFormOpen(false); setEditing(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar reserva" : "Nova reserva"}</DialogTitle>
+            <DialogDescription>
+              {editing
+                ? "Atualize os dados da reserva. Mudar a data ou horário troca o horário reservado."
+                : "Crie uma reserva manualmente (balcão/telefone)."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={submitForm} className="space-y-4">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input
+                label="Nome *"
+                placeholder="João Silva"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+              <Input
+                label="WhatsApp *"
+                placeholder="(83) 99999-9999"
+                value={form.whatsapp}
+                onChange={(e) => setForm({ ...form, whatsapp: e.target.value })}
+              />
+            </div>
+
+            <Input
+              label="E-mail (opcional)"
+              type="email"
+              placeholder="cliente@email.com"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Input
+                label="Data *"
+                type="date"
+                value={form.date}
+                min={todayISO()}
+                onChange={(e) => setForm({ ...form, date: e.target.value, time: "" })}
+              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-[var(--color-text-secondary)]">Pessoas</label>
+                <select
+                  value={form.guests}
+                  onChange={(e) => setForm({ ...form, guests: e.target.value })}
+                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                >
+                  {[1,2,3,4,5,6,7,8].map((n) => (
+                    <option key={n} value={n}>{n} pessoa{n > 1 ? "s" : ""}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Horários */}
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">Horário *</label>
+              <div className="grid grid-cols-5 gap-2">
+                {TIME_SLOTS.map((t) => {
+                  const taken = formTaken.includes(t);
+                  const active = form.time === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={taken}
+                      onClick={() => setForm({ ...form, time: t })}
+                      title={taken ? "Horário já reservado" : undefined}
+                      className={`h-10 rounded-lg text-xs font-medium transition-all ${
+                        taken
+                          ? "border border-[var(--color-border)] text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] line-through opacity-50 cursor-not-allowed"
+                          : active
+                            ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/40"
+                            : "border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)] bg-[var(--color-bg-overlay)]"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
+              </div>
+              {!form.date && (
+                <p className="text-xs text-[var(--color-text-muted)] mt-1.5">Escolha a data para ver os horários ocupados.</p>
+              )}
+            </div>
+
+            {/* Status — só na criação */}
+            {!editing && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-[var(--color-text-secondary)]">Situação</label>
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as BookingStatus })}
+                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                >
+                  <option value="approved">Confirmada</option>
+                  <option value="pending">Pendente</option>
+                </select>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-[var(--color-text-secondary)]">Observações (opcional)</label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Aniversário, preferências, etc."
+                rows={2}
+                className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
+              />
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button type="button" variant="secondary">Cancelar</Button>
+              </DialogClose>
+              <Button type="submit" variant="premium" disabled={savingForm || !form.time}>
+                {savingForm
+                  ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  : editing ? "Salvar alterações" : "Criar reserva"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirmation */}
       <Dialog open={!!deleteTarget} onOpenChange={(v) => !v && setDeleteTarget(null)}>

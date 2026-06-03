@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { QrCode, Save, RefreshCw, KeyRound, User, Copy, Check } from "lucide-react";
+import { QrCode, Save, RefreshCw, KeyRound, User, Copy, Check, CreditCard, Percent } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export default function AdminPayments() {
   const [pixKey, setPixKey] = useState("");
   const [pixName, setPixName] = useState("");
   const [pixQrPayload, setPixQrPayload] = useState("");
+  const [creditFee, setCreditFee] = useState(""); // % no crédito (vazio = sem diferença)
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -28,6 +29,7 @@ export default function AdminPayments() {
       setPixKey(s.payment.pixKey);
       setPixName(s.payment.pixName);
       setPixQrPayload(s.payment.pixQrPayload ?? "");
+      setCreditFee(s.payment.creditFeePercent ? String(s.payment.creditFeePercent) : "");
     } catch {
       toast.error("Não foi possível carregar as configurações de pagamento.");
     } finally {
@@ -45,17 +47,27 @@ export default function AdminPayments() {
       toast.error("Informe a chave PIX.");
       return;
     }
+    const feeNum = creditFee.trim() === "" ? 0 : Number(creditFee.replace(",", "."));
+    if (!Number.isFinite(feeNum)) {
+      toast.error("Informe um número válido para a % do crédito (ex.: 3,5 ou -2).");
+      return;
+    }
     setSaving(true);
     try {
-      const payment = { pixKey: key, pixName: pixName.trim(), pixQrPayload: pixQrPayload.trim() };
+      const payment = {
+        pixKey: key,
+        pixName: pixName.trim(),
+        pixQrPayload: pixQrPayload.trim(),
+        creditFeePercent: feeNum,
+      };
       await updateSiteSettings({ payment });
-      /* mantém o store em sincronia para o checkout usar a chave nova na hora */
+      /* mantém o store em sincronia para o checkout usar os dados novos na hora */
       useSiteSettingsStore.setState({ payment });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
-      toast.success("Chave PIX salva com sucesso!");
+      toast.success("Configurações de pagamento salvas!");
     } catch {
-      toast.error("Erro ao salvar a chave PIX. Tente novamente.");
+      toast.error("Erro ao salvar as configurações. Tente novamente.");
     } finally {
       setSaving(false);
     }
@@ -152,6 +164,52 @@ export default function AdminPayments() {
                   <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)]">
                     A chave e o QR Code são exibidos na tela de confirmação do pedido quando o
                     cliente escolhe <span className="font-medium text-[var(--color-neon-blue)]">PIX</span> no checkout.
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Cartão de crédito — preço diferenciado (Lei nº 13.455/2017) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="mt-6"
+        >
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                Cartão de Crédito
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-4 space-y-4">
+              {loading ? (
+                <div className="h-12 rounded-lg bg-[var(--color-bg-overlay)] animate-pulse" />
+              ) : (
+                <>
+                  <div className="relative max-w-xs">
+                    <Input
+                      label="Diferença de preço no crédito (%)"
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Ex.: 3,5 (deixe vazio se não cobra)"
+                      value={creditFee}
+                      onChange={(e) => setCreditFee(e.target.value)}
+                      icon={<Percent className="w-4 h-4" />}
+                    />
+                  </div>
+                  <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)] space-y-1">
+                    <p>
+                      Aplicada ao total quando o cliente escolhe <span className="font-medium text-[var(--color-neon-blue)]">Cartão de Crédito</span> no checkout.
+                      Use número <strong>positivo</strong> para acréscimo e <strong>negativo</strong> para desconto. Vazio = sem diferença.
+                    </p>
+                    <p>
+                      O valor é informado ao cliente no checkout, conforme a <strong>Lei nº 13.455/2017</strong>
+                      {" "}(que permite preço diferente por forma de pagamento, desde que informado).
+                    </p>
                   </div>
                 </>
               )}

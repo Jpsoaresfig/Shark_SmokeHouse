@@ -9,7 +9,7 @@ import {
   MapPin, ChevronRight, Package, CheckCircle,
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, Banknote, Plus, Star,
-  Copy, Check, User, LogIn, MessageCircle, Wallet,
+  Copy, Check, User, LogIn, MessageCircle, Wallet, CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +58,9 @@ const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente díg
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
   { value: "mercadopago", label: "Mercado Pago",  desc: "Pague via PIX na hora (confirmação automática)", icon: Wallet        },
   { value: "pix_manual",  label: "PIX manual",    desc: "Pague e envie o comprovante pelo WhatsApp",       icon: QrCode        },
-  { value: "on_delivery", label: "Na Entrega",    desc: "Pague ao motoboy no recebimento",                 icon: Banknote      },
+  { value: "debit",       label: "Cartão Débito", desc: "Na maquininha (entrega ou retirada)",             icon: CreditCard    },
+  { value: "credit",      label: "Cartão Crédito",desc: "Na maquininha (entrega ou retirada)",             icon: CreditCard    },
+  { value: "on_delivery", label: "Dinheiro",      desc: "Pague em dinheiro na entrega/retirada",           icon: Banknote      },
   { value: "whatsapp",    label: "Via WhatsApp",  desc: "Combine com a nossa equipe",                      icon: MessageCircle },
 ];
 
@@ -326,8 +328,28 @@ function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; p
               <span className="text-sm font-bold text-[var(--color-text-primary)]">Pagamento na entrega</span>
             </div>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Você pagará <strong className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</strong> ao
-              motoboy no momento do recebimento. Tenha o valor (ou a maquininha) à mão. 🛵
+              Você pagará <strong className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</strong> em
+              dinheiro no momento da entrega ou retirada. 🛵
+            </p>
+          </motion.div>
+        )}
+
+        {(payment === "credit" || payment === "debit") && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-5 mb-6 text-left"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <CreditCard className="w-4 h-4 text-[var(--color-text-secondary)]" />
+              <span className="text-sm font-bold text-[var(--color-text-primary)]">
+                Pagamento no {payment === "credit" ? "crédito" : "débito"}
+              </span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Você pagará <strong className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</strong> na
+              maquininha no momento da entrega ou retirada. 💳
             </p>
           </motion.div>
         )}
@@ -354,7 +376,7 @@ export default function CheckoutPage() {
   const { user } = useAuthStore();
   const cartStore = useCartStore();
   const { items, subtotal, clearCart, closeCart } = cartStore;
-  const { pixKey, pixName } = useSitePayment();
+  const { pixKey, pixName, creditFeePercent } = useSitePayment();
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
@@ -483,7 +505,11 @@ export default function CheckoutPage() {
   const isPickup = fulfillment === "pickup";
   // Frete por bairro: na retirada é grátis; na entrega vem da área selecionada.
   const effectiveDeliveryFee = isPickup ? 0 : (selectedArea?.fee ?? 0);
-  const effectiveTotal = subtotal + effectiveDeliveryFee;
+  // Diferença de preço no crédito (Lei nº 13.455/2017): só incide no cartão de
+  // crédito; positiva = acréscimo, negativa = desconto. Aplica sobre subtotal+frete.
+  const creditPct = payment === "credit" ? (creditFeePercent ?? 0) : 0;
+  const creditFeeAmount = Math.round((subtotal + effectiveDeliveryFee) * (creditPct / 100) * 100) / 100;
+  const effectiveTotal = subtotal + effectiveDeliveryFee + creditFeeAmount;
 
   // Link de WhatsApp para quando o bairro não está na lista de entrega.
   const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
@@ -918,6 +944,35 @@ export default function CheckoutPage() {
                     </div>
                   </motion.div>
                 )}
+                {(payment === "credit" || payment === "debit") && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    className="mt-3 overflow-hidden"
+                  >
+                    <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)] space-y-1">
+                      <p>
+                        <span className="font-medium text-[var(--color-neon-blue)]">Cartão na maquininha: </span>
+                        o pagamento é feito na entrega ou na retirada.
+                      </p>
+                      {payment === "credit" && creditPct !== 0 && (
+                        <p className="text-[var(--color-text-secondary)]">
+                          {creditPct > 0 ? "Acréscimo" : "Desconto"} de <strong>{Math.abs(creditPct)}%</strong> no
+                          crédito ({creditPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(creditFeeAmount))}),
+                          conforme a Lei nº 13.455/2017.
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Aviso geral de preço diferenciado por forma de pagamento (Lei 13.455/2017) */}
+                <p className="mt-3 text-[11px] text-[var(--color-text-muted)] leading-relaxed">
+                  Em conformidade com a Lei nº 13.455/2017, o preço pode variar conforme a forma de pagamento.
+                  {creditFeePercent
+                    ? ` Cartão de crédito tem ${creditFeePercent > 0 ? "acréscimo" : "desconto"} de ${Math.abs(creditFeePercent)}%.`
+                    : ""}
+                </p>
               </CardContent>
             </Card>
 
@@ -1020,6 +1075,16 @@ export default function CheckoutPage() {
                     <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] rounded-lg px-3 py-2">
                       <Truck className="w-3 h-3 shrink-0" />
                       O frete é calculado pelo seu bairro
+                    </div>
+                  )}
+                  {creditFeeAmount !== 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[var(--color-text-secondary)]">
+                        {creditPct > 0 ? "Acréscimo" : "Desconto"} crédito ({Math.abs(creditPct)}%)
+                      </span>
+                      <span className={creditPct > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
+                        {creditPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(creditFeeAmount))}
+                      </span>
                     </div>
                   )}
                   <Separator />

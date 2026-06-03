@@ -5,6 +5,8 @@ import type { CreatePaymentInput, PaymentGateway } from "./index";
 const INITIAL_STATUS: Partial<Record<CreatePaymentInput["method"], PaymentStatus>> = {
   pix_manual: "awaiting_proof",   // aguardando o comprovante via WhatsApp
   on_delivery: "due_on_delivery", // a cobrar pelo motoboy na entrega
+  credit: "due_on_delivery",      // cartão na maquininha (entrega/retirada)
+  debit: "due_on_delivery",       // cartão na maquininha (entrega/retirada)
   whatsapp: "in_negotiation",     // tratativa direta com a equipe
 };
 

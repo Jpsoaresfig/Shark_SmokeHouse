@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, updateDoc, deleteDoc,
+  collection, getDocs, updateDoc, deleteDoc, deleteField,
   doc, serverTimestamp, query, orderBy, where, runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -36,7 +36,8 @@ export async function getTakenSlots(date: string): Promise<string[]> {
  * gravadas numa transação atômica; se o slot já existir, lança `SLOT_TAKEN`.
  */
 export async function createLoungeBooking(
-  data: Omit<LoungeBooking, "id" | "status" | "createdAt">
+  data: Omit<LoungeBooking, "id" | "status" | "createdAt">,
+  opts: { status?: BookingStatus } = {},
 ): Promise<string> {
   const invalid = validateBooking(data);
   if (invalid) throw new Error(invalid);
@@ -50,6 +51,7 @@ export async function createLoungeBooking(
   const slotRef = doc(db, SLOTS, slotId(data.date, data.time));
   const bookingRef = doc(collection(db, COL));
 
+  // As regras exigem status "pending" na criação; a reserva sempre nasce pending.
   await runTransaction(db, async (tx) => {
     const slot = await tx.get(slotRef);
     if (slot.exists()) throw new Error(SLOT_TAKEN);
@@ -57,7 +59,54 @@ export async function createLoungeBooking(
     tx.set(bookingRef, { ...clean, status: "pending" as BookingStatus, createdAt: serverTimestamp() });
   });
 
+  // Admin pode já criar a reserva confirmada — atualiza logo após (update é admin-only).
+  if (opts.status && opts.status !== "pending") {
+    await updateDoc(bookingRef, { status: opts.status, updatedAt: serverTimestamp() });
+  }
+
   return bookingRef.id;
+}
+
+/**
+ * Admin-only: edita os dados de uma reserva. Quando a data/horário muda, reclama
+ * o novo slot atomicamente (lança `SLOT_TAKEN` se ocupado) e libera o antigo.
+ * Campos opcionais vazios (email, notes, guestCount) são removidos do documento.
+ */
+export async function updateLoungeBooking(
+  id: string,
+  data: Omit<LoungeBooking, "id" | "status" | "createdAt">,
+  opts: { oldDate: string; oldTime: string; status?: BookingStatus },
+): Promise<void> {
+  const invalid = validateBooking(data);
+  if (invalid) throw new Error(invalid);
+
+  const ref = doc(db, COL, id);
+  const payload: Record<string, unknown> = {
+    name: data.name.trim(),
+    whatsapp: data.whatsapp.trim(),
+    date: data.date,
+    time: data.time,
+    email: data.email?.trim() ? data.email.trim() : deleteField(),
+    notes: data.notes?.trim() ? data.notes.trim() : deleteField(),
+    guestCount: data.guestCount != null ? data.guestCount : deleteField(),
+    updatedAt: serverTimestamp(),
+  };
+
+  // Reservas canceladas não ocupam slot, então não há trava a mover.
+  const slotChanged =
+    opts.status !== "cancelled" && (data.date !== opts.oldDate || data.time !== opts.oldTime);
+  if (slotChanged) {
+    const newSlotRef = doc(db, SLOTS, slotId(data.date, data.time));
+    await runTransaction(db, async (tx) => {
+      const slot = await tx.get(newSlotRef);
+      if (slot.exists()) throw new Error(SLOT_TAKEN);
+      tx.set(newSlotRef, { date: data.date, time: data.time, createdAt: serverTimestamp() });
+      tx.update(ref, payload);
+    });
+    await releaseSlot(opts.oldDate, opts.oldTime);
+  } else {
+    await updateDoc(ref, payload);
+  }
 }
 
 /** Remove a trava do slot, liberando o horário para novas reservas. */

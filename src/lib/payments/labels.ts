@@ -4,6 +4,8 @@ export const PAYMENT_METHOD_LABELS: Record<string, string> = {
   pix_manual: "PIX (comprovante)",
   mercadopago: "Mercado Pago (PIX)",
   on_delivery: "Na Entrega",
+  credit: "Cartão de Crédito",
+  debit: "Cartão de Débito",
   whatsapp: "Via WhatsApp",
   loyalty: "Pontos (Fidelidade)",
   /* legados */

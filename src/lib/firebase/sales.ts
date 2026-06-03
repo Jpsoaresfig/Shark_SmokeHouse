@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, addDoc, query, orderBy,
+  collection, getDocs, addDoc, updateDoc, doc, query, orderBy,
   where, serverTimestamp, Timestamp,
   QueryConstraint,
 } from "firebase/firestore";
@@ -10,11 +10,14 @@ import type { Sale, SalePaymentMethod } from "@/types";
 
 const COL = "sales";
 
-const PAYMENT_LABELS: Record<SalePaymentMethod, string> = {
+export const SALE_PAYMENT_LABELS: Record<SalePaymentMethod, string> = {
   pix: "Pix",
-  card: "Cartão",
+  credit: "Crédito",
+  debit: "Débito",
   cash: "Dinheiro",
+  card: "Cartão", // legado
 };
+const PAYMENT_LABELS = SALE_PAYMENT_LABELS;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(value: any): Date {
@@ -65,6 +68,16 @@ export async function createSale(
   if (data.notes !== undefined && data.notes !== "") {
     payload.notes = data.notes;
   }
+  // Cliente vinculado (venda presencial).
+  if (data.customerId) {
+    payload.customerId = data.customerId;
+    payload.customerName = data.customerName ?? "";
+  }
+  // Entrega posterior: registra o pedido como pendente de entrega.
+  if (data.deliveryLater) {
+    payload.deliveryLater = true;
+    payload.delivered = false;
+  }
 
   const ref = await addDoc(collection(db, COL), payload);
   // Baixa o estoque registrando uma movimentação por item (aparece no histórico
@@ -90,12 +103,21 @@ export async function createSale(
   return ref.id;
 }
 
+/** Marca uma venda com entrega posterior como entregue. */
+export async function markSaleDelivered(id: string): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    delivered: true,
+    deliveredAt: new Date().toISOString(),
+  });
+  invalidate("sales");
+}
+
 export function exportSalesCSV(sales: Sale[], filename?: string): void {
   const headers = [
-    "Data", "Hora", "ID", "Vendedor",
+    "Data", "Hora", "ID", "Vendedor", "Cliente",
     "Produto", "Variação", "SKU", "Categoria", "Qtd",
     "Preço Unit.", "Subtotal", "Total da Venda",
-    "Pagamento", "Observações",
+    "Pagamento", "Entrega", "Observações",
   ];
   const rows: string[][] = [headers];
 
@@ -103,12 +125,16 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
     const d = toDate(sale.createdAt);
     const dateStr = d.toLocaleDateString("pt-BR");
     const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const deliveryStr = sale.deliveryLater
+      ? (sale.delivered ? "Entregue" : "Entrega pendente")
+      : "Retirada na hora";
     for (const item of sale.items) {
       rows.push([
         dateStr,
         timeStr,
         sale.id.slice(-8).toUpperCase(),
         sale.sellerName,
+        sale.customerName ?? "",
         item.productName,
         item.variationName ?? "",
         item.sku ?? "",
@@ -118,6 +144,7 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
         item.subtotal.toFixed(2).replace(".", ","),
         sale.total.toFixed(2).replace(".", ","),
         PAYMENT_LABELS[sale.paymentMethod],
+        deliveryStr,
         sale.notes ?? "",
       ]);
     }

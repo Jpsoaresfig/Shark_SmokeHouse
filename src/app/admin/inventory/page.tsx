@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Wrench, Package } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Wrench, Package, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatDateTime } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
 import { getStockMovements, addStockMovement } from "@/lib/firebase/inventory";
+import { getAllUsers } from "@/lib/firebase/users";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Product, StockMovement, MovementType } from "@/types";
@@ -24,15 +25,18 @@ const MOVEMENT_CONFIG: Record<MovementType, { label: string; icon: React.Element
 
 const inputCls = "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
-const EMPTY_FORM = { productId: "", type: "in" as MovementType, quantity: 1, reason: "" };
+const EMPTY_FORM = { productId: "", variationId: "", type: "in" as MovementType, quantity: 1, reason: "" };
 
 export default function AdminInventory() {
   const { user } = useAuthStore();
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  /* Quais produtos com grade estão expandidos na lista de estoque. */
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +44,11 @@ export default function AdminInventory() {
       const [prods, movs] = await Promise.all([getProducts(), getStockMovements()]);
       setProducts(prods);
       setMovements(movs);
+      // Resolve os nomes de quem movimentou (best-effort; sem permissão é ignorado).
+      try {
+        const users = await getAllUsers();
+        setUserNames(Object.fromEntries(users.map(u => [u.uid, u.displayName])));
+      } catch { /* segue sem nomes */ }
     } catch {
       toast.error("Não foi possível carregar os dados de estoque.");
     } finally {
@@ -50,16 +59,27 @@ export default function AdminInventory() {
   useEffect(() => { load(); }, [load]);
 
   function set(key: keyof typeof form, value: unknown) {
+    // Trocar de produto zera a variação selecionada (grades diferentes).
+    if (key === "productId") {
+      setForm(f => ({ ...f, productId: value as string, variationId: "" }));
+      return;
+    }
     setForm(f => ({ ...f, [key]: value }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.productId || !form.quantity || !form.reason) return;
+    const product = products.find(p => p.id === form.productId);
+    if (!product) return;
+    const hasVars = (product.variations?.length ?? 0) > 0;
+    if (hasVars && !form.variationId) {
+      toast.error("Selecione a variação do produto.");
+      return;
+    }
     setSaving(true);
     try {
-      const product = products.find(p => p.id === form.productId);
-      if (!product) return;
+      const variation = product.variations?.find(v => v.id === form.variationId);
       await addStockMovement({
         productId: form.productId,
         productName: product.name,
@@ -67,6 +87,7 @@ export default function AdminInventory() {
         quantity: Number(form.quantity),
         reason: form.reason,
         userId: user!.uid,
+        ...(variation ? { variationId: variation.id, variationName: variation.name } : {}),
       });
       toast.success("Movimentação registrada!");
       setForm(EMPTY_FORM);
@@ -80,6 +101,10 @@ export default function AdminInventory() {
 
   const lowStock = products.filter(p => p.active && p.stock <= p.minStock);
   const selected = products.find(p => p.id === form.productId);
+  const selectedHasVars = (selected?.variations?.length ?? 0) > 0;
+  const selectedVariation = selected?.variations?.find(v => v.id === form.variationId);
+  /* Estoque-base para o preview (variação selecionada ou produto simples). */
+  const previewStock = selectedHasVars ? (selectedVariation?.stock ?? 0) : (selected?.stock ?? 0);
 
   return (
     <div className="min-h-screen pt-24 pb-20 px-4 sm:px-6 lg:px-8">
@@ -148,12 +173,30 @@ export default function AdminInventory() {
                         <p className="text-sm text-[var(--color-text-muted)]">Nenhum produto cadastrado.</p>
                       </div>
                     ) : (
-                      products.map((p, i) => (
+                      products.map((p, i) => {
+                        const vars = p.variations ?? [];
+                        const hasVars = vars.length > 0;
+                        const isOpen = !!expandedProducts[p.id];
+                        return (
                         <div key={p.id}>
-                          <div className="flex items-center justify-between py-2.5">
+                          <button
+                            type="button"
+                            disabled={!hasVars}
+                            onClick={() => hasVars && setExpandedProducts(prev => ({ ...prev, [p.id]: !prev[p.id] }))}
+                            className={`w-full flex items-center justify-between py-2.5 text-left rounded-lg ${hasVars ? "hover:bg-[var(--color-bg-hover)] -mx-2 px-2 transition-colors" : ""}`}
+                          >
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">{p.name}</p>
-                              <p className="text-xs text-[var(--color-text-muted)]">SKU: {p.sku || "—"}</p>
+                              <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate flex items-center gap-1.5">
+                                {p.name}
+                                {hasVars && (
+                                  isOpen
+                                    ? <ChevronUp className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" />
+                                    : <ChevronDown className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" />
+                                )}
+                              </p>
+                              <p className="text-xs text-[var(--color-text-muted)]">
+                                {hasVars ? `${vars.length} variaç${vars.length === 1 ? "ão" : "ões"}` : `SKU: ${p.sku || "—"}`}
+                              </p>
                             </div>
                             <div className="flex items-center gap-3 shrink-0">
                               {p.stock <= p.minStock
@@ -164,10 +207,29 @@ export default function AdminInventory() {
                                 {p.stock} un.
                               </span>
                             </div>
-                          </div>
+                          </button>
+
+                          {/* Variantes / grade do produto */}
+                          {hasVars && isOpen && (
+                            <div className="pl-3 ml-1 mb-2 border-l-2 border-[var(--color-border)] space-y-1.5">
+                              {vars.map(v => (
+                                <div key={v.id} className="flex items-center justify-between gap-2 py-1">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-medium text-[var(--color-text-secondary)] truncate">{v.name}</p>
+                                    <p className="text-[10px] text-[var(--color-text-muted)]">SKU: {v.sku || "—"}</p>
+                                  </div>
+                                  <span className={`text-xs font-bold shrink-0 ${v.stock <= 0 ? "text-red-400" : "text-[var(--color-text-primary)]"}`}>
+                                    {v.stock} un.
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {i < products.length - 1 && <Separator />}
                         </div>
-                      ))
+                        );
+                      })
                     )}
                   </CardContent>
                 </Card>
@@ -187,6 +249,7 @@ export default function AdminInventory() {
                         const cfg = MOVEMENT_CONFIG[m.type];
                         const Icon = cfg.icon;
                         const isPositive = m.type === "in" || m.type === "adjustment";
+                        const who = userNames[m.userId];
                         return (
                           <div key={m.id}>
                             <div className="flex items-center gap-3 py-2.5">
@@ -194,9 +257,14 @@ export default function AdminInventory() {
                                 <Icon className="w-4 h-4" />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">{m.productName}</p>
-                                <p className="text-xs text-[var(--color-text-muted)]">
-                                  {m.reason} · {m.createdAt ? formatDateTime(m.createdAt) : ""}
+                                <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">
+                                  {m.productName}
+                                  {m.variationName && <span className="text-[var(--color-neon-blue)]"> · {m.variationName}</span>}
+                                </p>
+                                <p className="text-xs text-[var(--color-text-muted)] truncate">
+                                  {m.reason}
+                                  {who && <> · por <span className="text-[var(--color-text-secondary)]">{who}</span></>}
+                                  {m.createdAt && ` · ${formatDateTime(m.createdAt)}`}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
@@ -239,6 +307,24 @@ export default function AdminInventory() {
                       </select>
                     </div>
 
+                    {/* Variação — só quando o produto tem grade */}
+                    {selectedHasVars && (
+                      <div>
+                        <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Variação *</label>
+                        <select
+                          value={form.variationId}
+                          onChange={e => set("variationId", e.target.value)}
+                          required
+                          className={inputCls}
+                        >
+                          <option value="">Selecionar variação</option>
+                          {selected!.variations!.map(v => (
+                            <option key={v.id} value={v.id}>{v.name} (estoque: {v.stock})</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div>
                       <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Tipo *</label>
                       <select
@@ -275,16 +361,19 @@ export default function AdminInventory() {
                       />
                     </div>
 
-                    {selected && (
+                    {selected && (!selectedHasVars || selectedVariation) && (
                       <div className="rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] p-3">
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">Estoque após movimentação</p>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-1">
+                          Estoque após movimentação
+                          {selectedVariation && <span className="text-[var(--color-neon-blue)]"> · {selectedVariation.name}</span>}
+                        </p>
                         <p className="text-lg font-black text-[var(--color-text-primary)]">
                           {form.type === "in" || form.type === "adjustment"
-                            ? selected.stock + Number(form.quantity || 0)
-                            : Math.max(0, selected.stock - Number(form.quantity || 0))
+                            ? previewStock + Number(form.quantity || 0)
+                            : Math.max(0, previewStock - Number(form.quantity || 0))
                           } <span className="text-sm font-normal text-[var(--color-text-muted)]">un.</span>
                         </p>
-                        <p className="text-xs text-[var(--color-text-muted)]">Atual: {selected.stock} un.</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">Atual: {previewStock} un.</p>
                       </div>
                     )}
 
@@ -292,7 +381,7 @@ export default function AdminInventory() {
                       type="submit"
                       variant="premium"
                       className="w-full"
-                      disabled={saving || !form.productId || !form.quantity || !form.reason}
+                      disabled={saving || !form.productId || !form.quantity || !form.reason || (selectedHasVars && !form.variationId)}
                     >
                       {saving
                         ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

@@ -146,6 +146,8 @@ export type PaymentMethod =
   /* Gateways manuais — baixa feita pelo admin */
   | "pix_manual"   // PIX com validação externa (comprovante via WhatsApp)
   | "on_delivery"  // pagamento na entrega (cobrança pelo motoboy)
+  | "credit"       // cartão de crédito na maquininha (entrega/retirada)
+  | "debit"        // cartão de débito na maquininha (entrega/retirada)
   | "whatsapp"     // tratativa direta via WhatsApp
   | "loyalty"      // resgate pago com pontos de fidelidade
   /* Gateway automático — Mercado Pago Checkout Pro (PIX) */
@@ -340,12 +342,17 @@ export interface SiteSettings {
     pixName: string;
     /** Payload PIX "copia e cola" (BR Code) — renderizado como QR Code no checkout. */
     pixQrPayload?: string;
+    /** % aplicada ao pagar no CRÉDITO (Lei nº 13.455/2017 — preço diferenciado).
+     *  Positivo = acréscimo; negativo = desconto; 0/ausente = sem diferença. */
+    creditFeePercent?: number;
   };
   updatedAt?: string;
 }
 
 /* ── Sale ────────────────────────────────────────────────── */
-export type SalePaymentMethod = "pix" | "card" | "cash";
+/** Formas de pagamento do PDV. "card" é legado (vendas antigas, antes de
+ *  separar em crédito/débito) — mantido só para exibição do histórico. */
+export type SalePaymentMethod = "pix" | "credit" | "debit" | "cash" | "card";
 
 export interface SaleItem {
   productId: string;
@@ -368,6 +375,14 @@ export interface Sale {
   total: number;
   paymentMethod: SalePaymentMethod;
   notes?: string;
+  /** Cliente vinculado à venda presencial (opcional — busca no cadastro). */
+  customerId?: string;
+  customerName?: string;
+  /** Venda marcada para "Entrega Posterior" (produto não retirado na hora). */
+  deliveryLater?: boolean;
+  /** Quando uma venda com entrega posterior já foi entregue. */
+  delivered?: boolean;
+  deliveredAt?: string;
   createdAt: string;
 }
 

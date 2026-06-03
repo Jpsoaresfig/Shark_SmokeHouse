@@ -24,7 +24,9 @@ service cloud.firestore {
 
     // ── Users ─────────────────────────────────────────────────
     match /users/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
+      // Dono e admin sempre; vendedor também lê (PDV: busca de cliente p/ vincular
+      // à venda presencial e atribuição de venda a um vendedor).
+      allow read: if isOwner(uid) || isAdmin() || isSeller();
       allow create: if isOwner(uid);
       // Owner: atualiza o próprio perfil (menos o campo role). Inclui o débito
       // dos próprios pontos no resgate e o bônus de quem foi indicado.
