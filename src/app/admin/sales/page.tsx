@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Minus, Trash2, Search, ShoppingCart,
   History, Download, Receipt, TrendingUp, Package,
-  ChevronDown, ChevronUp, User, X, Truck, CheckCircle,
+  ChevronDown, ChevronUp, User, X, Truck, CheckCircle, Percent,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -122,6 +122,18 @@ export default function AdminSales() {
     () => users.filter(u => u.role === "seller" || u.role === "admin"),
     [users],
   );
+  /* Mapa uid → vendedor, para resolver a % de comissão de cada venda no histórico. */
+  const sellerById = useMemo(
+    () => new Map(users.map(u => [u.uid, u])),
+    [users],
+  );
+  /** Comissão de uma venda a partir da taxa atual do vendedor (mesma regra do
+   *  painel do vendedor). Retorna null quando não há taxa definida. */
+  const saleCommission = useCallback((sale: Sale): { rate: number; amount: number } | null => {
+    const rate = sellerById.get(sale.sellerId)?.commissionRate;
+    if (rate == null || rate <= 0) return null;
+    return { rate, amount: sale.total * (rate / 100) };
+  }, [sellerById]);
   const customerMatches = useMemo(() => {
     const q = customerQuery.trim().toLowerCase();
     if (!q) return [];
@@ -823,6 +835,10 @@ export default function AdminSales() {
                               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                                 {sale.items.length} {sale.items.length === 1 ? "item" : "itens"} · {PAYMENT_LABELS[sale.paymentMethod]}
                                 {sale.customerName && ` · ${sale.customerName}`}
+                                {(() => {
+                                  const c = saleCommission(sale);
+                                  return c ? <span className="text-emerald-400/80"> · Comissão {formatCurrency(c.amount)} ({c.rate}%)</span> : null;
+                                })()}
                                 {sale.notes && ` · ${sale.notes}`}
                               </p>
                             </div>
@@ -892,6 +908,25 @@ export default function AdminSales() {
                                       </span>
                                     </div>
                                   ))}
+
+                                  {/* Comissão do vendedor sobre esta venda (taxa atual do perfil) */}
+                                  {(() => {
+                                    const c = saleCommission(sale);
+                                    return (
+                                      <div className="flex items-center justify-between text-sm pt-1.5 mt-1 border-t border-[var(--color-border)]/60">
+                                        <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
+                                          <Percent className="w-3.5 h-3.5 text-emerald-400" />
+                                          Comissão {sale.sellerName}
+                                          {c && <span className="text-[var(--color-text-muted)]">({c.rate}%)</span>}
+                                        </span>
+                                        {c ? (
+                                          <span className="font-semibold text-emerald-400">{formatCurrency(c.amount)}</span>
+                                        ) : (
+                                          <span className="text-xs text-[var(--color-text-muted)]">sem comissão definida</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               </motion.div>
                             )}
