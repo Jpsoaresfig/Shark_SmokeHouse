@@ -11,7 +11,7 @@ import { formatCurrency } from "@/lib/utils";
 
 export function CartDrawer() {
   const cartStore = useCartStore();
-  const { items, isOpen, closeCart, removeItem, updateQuantity, subtotal, deliveryFee, total } = cartStore;
+  const { items, isOpen, closeCart, removeItem, updateQuantity, subtotal, total } = cartStore;
 
   return (
     <AnimatePresence>
@@ -168,15 +168,11 @@ export function CartDrawer() {
                   </div>
                   <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
                     <span>Entrega</span>
-                    <span className={deliveryFee === 0 ? "text-[var(--color-success)]" : ""}>
-                      {deliveryFee === 0 ? "Grátis" : formatCurrency(deliveryFee)}
-                    </span>
+                    <span className="text-[var(--color-text-muted)]">calculada no checkout</span>
                   </div>
-                  {deliveryFee > 0 && (
-                    <p className="text-xs text-[var(--color-text-muted)]">
-                      Frete grátis acima de {formatCurrency(150)}
-                    </p>
-                  )}
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    O frete depende do seu bairro e aparece ao finalizar o pedido.
+                  </p>
                   <Separator />
                   <div className="flex justify-between font-semibold text-[var(--color-text-primary)]">
                     <span>Total</span>

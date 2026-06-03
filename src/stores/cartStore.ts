@@ -4,9 +4,6 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { CartItem, Product } from "@/types";
 
-const DELIVERY_FEE = 8;
-const FREE_DELIVERY_THRESHOLD = 150;
-
 interface CartTotals {
   subtotal: number;
   itemCount: number;
@@ -14,15 +11,14 @@ interface CartTotals {
   total: number;
 }
 
-/* Deriva os totais a partir dos itens. Mantido como cálculo explícito porque
-   getters no objeto de estado do Zustand são destruídos pelo Object.assign
-   interno do `set` (ficam congelados no valor inicial). */
+/* Deriva os totais a partir dos itens. O frete agora é por bairro, calculado no
+   checkout (não dá para saber no carrinho), então aqui deliveryFee = 0 e o total
+   é o subtotal. Mantido como cálculo explícito porque getters no objeto de estado
+   do Zustand são destruídos pelo Object.assign interno do `set`. */
 function deriveTotals(items: CartItem[]): CartTotals {
   const subtotal = items.reduce((acc, i) => acc + i.price * i.quantity, 0);
   const itemCount = items.reduce((acc, i) => acc + i.quantity, 0);
-  const deliveryFee = subtotal === 0 || subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
-  const total = subtotal + deliveryFee;
-  return { subtotal, itemCount, deliveryFee, total };
+  return { subtotal, itemCount, deliveryFee: 0, total: subtotal };
 }
 
 interface CartStore extends CartTotals {

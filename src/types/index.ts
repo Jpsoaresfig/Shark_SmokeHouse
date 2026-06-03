@@ -41,6 +41,18 @@ export interface Address {
 /** Slug da categoria do produto. Dinâmica — gerenciada no admin (coleção `categories`). */
 export type ProductCategory = string;
 
+/** Área de entrega (bairro) com taxa de frete própria. */
+export interface DeliveryArea {
+  id: string;
+  /** Nome do bairro/cidade. */
+  name: string;
+  /** Taxa de frete em R$. */
+  fee: number;
+  /** Agrupamento: "João Pessoa" | "Região Metropolitana" (livre). */
+  region?: string;
+  active?: boolean;
+}
+
 /** Categoria de produto cadastrável pelo admin. */
 export interface Category {
   id: string;

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Package, ShoppingBag,
   Warehouse, Receipt, Users, MoreHorizontal, QrCode,
-  CalendarDays, PartyPopper, MessageSquareWarning,
+  CalendarDays, PartyPopper, MessageSquareWarning, Bike,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { useState } from "react";
@@ -21,6 +21,7 @@ const ADMIN_LINKS = [
 
 const ADMIN_MORE_LINKS = [
   { href: "/admin/users",    label: "Usuários",    icon: Users          },
+  { href: "/admin/delivery", label: "Frete",       icon: Bike           },
   { href: "/admin/sections", label: "Seções",      icon: LayoutDashboard },
   { href: "/admin/events",   label: "Eventos",     icon: PartyPopper    },
   { href: "/admin/payments", label: "Pagamentos",  icon: QrCode         },

@@ -25,9 +25,10 @@ import { getProducts } from "@/lib/firebase/products";
 import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
 import { manualGateway, mercadopagoGateway } from "@/lib/payments";
+import { getDeliveryAreas, normalizeArea } from "@/lib/firebase/delivery";
 import { formatCurrency } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
-import type { Address, PaymentMethod } from "@/types";
+import type { Address, PaymentMethod, DeliveryArea } from "@/types";
 
 /* ── CEP lookup ──────────────────────────────────────────── */
 async function fetchCep(zip: string) {
@@ -352,8 +353,30 @@ export default function CheckoutPage() {
   const router = useRouter();
   const { user } = useAuthStore();
   const cartStore = useCartStore();
-  const { items, subtotal, deliveryFee, total, clearCart, closeCart } = cartStore;
+  const { items, subtotal, clearCart, closeCart } = cartStore;
   const { pixKey, pixName } = useSitePayment();
+
+  /* Áreas de entrega (frete por bairro) */
+  const [areas, setAreas] = useState<DeliveryArea[]>([]);
+  const [selectedAreaId, setSelectedAreaId] = useState("");
+  useEffect(() => { getDeliveryAreas().then(setAreas).catch(() => {}); }, []);
+  const selectedArea = areas.find(a => a.id === selectedAreaId) ?? null;
+  /** Tenta casar um nome de bairro (CEP/endereço salvo) com uma área cadastrada:
+      primeiro exato, depois parcial (um nome contido no outro), preferindo o
+      nome de área mais específico (mais longo). */
+  const matchArea = useCallback((name: string) => {
+    const target = normalizeArea(name);
+    if (!target) return null;
+    const exact = areas.find(a => normalizeArea(a.name) === target);
+    if (exact) return exact;
+    const partial = areas
+      .filter(a => {
+        const n = normalizeArea(a.name);
+        return n.length >= 4 && (target.includes(n) || n.includes(target));
+      })
+      .sort((a, b) => b.name.length - a.name.length);
+    return partial[0] ?? null;
+  }, [areas]);
 
   /* form state */
   const [phone, setPhone] = useState(user?.phone ?? "");
@@ -395,6 +418,15 @@ export default function CheckoutPage() {
     setState(addr.state);
   }, []);
 
+  /* Quando as áreas carregam (ou o bairro é preenchido pelo CEP/endereço salvo),
+     tenta selecionar automaticamente a área de entrega correspondente. */
+  useEffect(() => {
+    if (areas.length && neighborhood && !selectedAreaId) {
+      const m = matchArea(neighborhood);
+      if (m) setSelectedAreaId(m.id);
+    }
+  }, [areas, neighborhood, selectedAreaId, matchArea]);
+
   /* auto-select default address */
   useEffect(() => {
     const def = savedAddresses.find((a) => a.isDefault) ?? savedAddresses[0];
@@ -406,6 +438,7 @@ export default function CheckoutPage() {
     const masked = maskCep(raw);
     setZip(masked);
     setSelectedSavedId(null);
+    setSelectedAreaId(""); // re-casa a área com o novo bairro do CEP
     const clean = masked.replace(/\D/g, "");
     if (clean.length !== 8) return;
     setCepLoading(true);
@@ -448,14 +481,20 @@ export default function CheckoutPage() {
   }
 
   const isPickup = fulfillment === "pickup";
-  // Na retirada não há frete; o total é apenas o subtotal.
-  const effectiveDeliveryFee = isPickup ? 0 : deliveryFee;
-  const effectiveTotal = isPickup ? subtotal : total;
+  // Frete por bairro: na retirada é grátis; na entrega vem da área selecionada.
+  const effectiveDeliveryFee = isPickup ? 0 : (selectedArea?.fee ?? 0);
+  const effectiveTotal = subtotal + effectiveDeliveryFee;
+
+  // Link de WhatsApp para quando o bairro não está na lista de entrega.
+  const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
+    `Olá! Gostaria de fazer um pedido para entrega${neighborhood ? ` no bairro ${neighborhood}` : ""}, que não aparece na lista do site. Pode me ajudar com o frete?`,
+  )}`;
 
   const canSubmit =
     (phone.trim() || user.phone) &&
     (isPickup ||
-      (street.trim() && number.trim() && neighborhood.trim() && city.trim() && state.trim() && zip.trim()));
+      // Entrega exige endereço completo E um bairro atendido (área selecionada).
+      (street.trim() && number.trim() && city.trim() && state.trim() && zip.trim() && !!selectedArea));
 
   async function handlePlaceOrder() {
     if (!canSubmit || !user) return;
@@ -483,7 +522,7 @@ export default function CheckoutPage() {
             street: street.trim(),
             number: number.trim(),
             complement: complement.trim() || undefined,
-            neighborhood: neighborhood.trim(),
+            neighborhood: selectedArea?.name ?? neighborhood.trim(),
             city: city.trim(),
             state: state.trim(),
             zipCode: zip.trim(),
@@ -723,12 +762,47 @@ export default function CheckoutPage() {
                     onChange={(e) => { setComplement(e.target.value); setSelectedSavedId(null); }}
                   />
 
-                  <Input
-                    label="Bairro *"
-                    placeholder="Centro"
-                    value={neighborhood}
-                    onChange={(e) => { setNeighborhood(e.target.value); setSelectedSavedId(null); }}
-                  />
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium text-[var(--color-text-secondary)]">Bairro (entrega) *</label>
+                    <select
+                      value={selectedAreaId}
+                      onChange={(e) => {
+                        const a = areas.find(x => x.id === e.target.value);
+                        setSelectedAreaId(e.target.value);
+                        if (a) setNeighborhood(a.name);
+                        setSelectedSavedId(null);
+                      }}
+                      className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                    >
+                      <option value="">Selecione seu bairro…</option>
+                      {Array.from(new Set(areas.map(a => a.region ?? "Outros"))).map(reg => (
+                        <optgroup key={reg} label={reg}>
+                          {areas.filter(a => (a.region ?? "Outros") === reg).map(a => (
+                            <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.fee)}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                    {!selectedArea && (
+                      <>
+                        {neighborhood && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Bairro detectado pelo CEP: <strong className="text-[var(--color-text-secondary)]">{neighborhood}</strong>
+                            {" "}— selecione na lista acima ou fale no WhatsApp.
+                          </p>
+                        )}
+                        <a
+                          href={areaWaLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--color-success)] hover:underline mt-0.5"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          Não achou seu bairro? Fale no WhatsApp
+                        </a>
+                      </>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-[1fr_80px] gap-3">
                     <Input
@@ -925,9 +999,16 @@ export default function CheckoutPage() {
                     <span>{formatCurrency(subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
-                    <span className="text-[var(--color-text-secondary)]">{isPickup ? "Retirada" : "Entrega"}</span>
-                    <span className={effectiveDeliveryFee === 0 ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
-                      {effectiveDeliveryFee === 0 ? "Grátis" : formatCurrency(effectiveDeliveryFee)}
+                    <span className="text-[var(--color-text-secondary)]">
+                      {isPickup ? "Retirada" : "Entrega"}
+                      {!isPickup && selectedArea ? ` · ${selectedArea.name}` : ""}
+                    </span>
+                    <span className={isPickup ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
+                      {isPickup
+                        ? "Grátis"
+                        : selectedArea
+                        ? formatCurrency(effectiveDeliveryFee)
+                        : "Selecione o bairro"}
                     </span>
                   </div>
                   {isPickup ? (
@@ -935,10 +1016,10 @@ export default function CheckoutPage() {
                       <Package className="w-3 h-3 shrink-0" />
                       Retire seu pedido no balcão da loja
                     </div>
-                  ) : deliveryFee > 0 && (
+                  ) : !selectedArea && (
                     <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] rounded-lg px-3 py-2">
                       <Truck className="w-3 h-3 shrink-0" />
-                      Frete grátis acima de {formatCurrency(150)}
+                      O frete é calculado pelo seu bairro
                     </div>
                   )}
                   <Separator />
