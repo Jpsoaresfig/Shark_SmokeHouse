@@ -192,13 +192,30 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
 
                   {/* Badges overlay */}
                   <div className="absolute top-3 left-3 flex flex-col gap-1.5">
-                    {discount && <Badge variant="orange">-{discount}%</Badge>}
-                    {product.featured && (
-                      <Badge variant="premium" className="text-xs">
-                        <Star className="w-2.5 h-2.5" /> Destaque
+                    {discount && (
+                      <Badge
+                        variant="orange"
+                        className="border-0 bg-orange-500 text-white shadow-md shadow-black/30"
+                      >
+                        -{discount}%
                       </Badge>
                     )}
-                    {outOfStock && <Badge variant="destructive">Esgotado</Badge>}
+                    {product.featured && (
+                      <Badge
+                        variant="premium"
+                        className="text-xs border-0 bg-gradient-to-r from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] text-white shadow-md shadow-black/30"
+                      >
+                        <Star className="w-2.5 h-2.5 fill-white" /> Destaque
+                      </Badge>
+                    )}
+                    {outOfStock && (
+                      <Badge
+                        variant="destructive"
+                        className="border-0 bg-red-500 text-white shadow-md shadow-black/30"
+                      >
+                        Esgotado
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </div>
