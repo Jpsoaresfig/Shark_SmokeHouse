@@ -73,12 +73,21 @@ service cloud.firestore {
         resource.data.customerId == request.auth.uid ||
         isAdmin() ||
         isSeller() ||
-        (isMotoboy() && resource.data.motoboyId == request.auth.uid)
+        (isMotoboy() && resource.data.motoboyId == request.auth.uid) ||
+        // Pool de auto-atendimento: motoboys leem entregas ainda sem dono.
+        (isMotoboy() && resource.data.motoboyId == null)
       );
       allow create: if isAuth() && request.resource.data.customerId == request.auth.uid;
       allow update: if isAdmin()
         || isSeller()
         || (isMotoboy() && resource.data.motoboyId == request.auth.uid)
+        // Motoboy "pega" uma entrega sem dono, atribuindo-a a si mesmo. Só pode
+        // mexer em motoboyId/motoboyName/updatedAt e quando ainda não há dono.
+        || (isMotoboy()
+            && resource.data.motoboyId == null
+            && request.resource.data.motoboyId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['motoboyId', 'motoboyName', 'updatedAt']))
         || (isAuth() && resource.data.customerId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']))
         // Cliente respondendo "A compra foi efetuada?" (fluxo WhatsApp): pode

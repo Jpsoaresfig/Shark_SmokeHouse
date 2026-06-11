@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, getDoc, addDoc, updateDoc, onSnapshot,
+  collection, getDocs, getDoc, addDoc, updateDoc, onSnapshot, runTransaction,
   doc, serverTimestamp, query, orderBy, where, arrayUnion, increment, limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -168,6 +168,55 @@ export async function assignOrderMotoboy(
   invalidate("orders");
 }
 
+/**
+ * Pool de entregas disponíveis: pedidos sem motoboy atribuído (`motoboyId == null`).
+ * Os pedidos novos nascem com `motoboyId: null` (ver createOrder), então a query
+ * por igualdade casa com as regras do Firestore (que liberam a leitura do pool
+ * para motoboys). Filtros adicionais (status ativo, não-retirada) ficam na tela.
+ * Retorna a função para cancelar a escuta.
+ */
+export function subscribeAvailableDeliveries(
+  onChange: (orders: Order[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const q = query(collection(db, COL), where("motoboyId", "==", null));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Order))
+        .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+      onChange(orders);
+    },
+    (err) => onError?.(err),
+  );
+}
+
+/**
+ * Um motoboy "pega" uma entrega disponível, atribuindo-a a si mesmo. Usa uma
+ * transação para evitar corrida: se outro entregador pegou primeiro, lança erro.
+ */
+export async function claimOrderDelivery(
+  id: string,
+  motoboy: { uid: string; name: string },
+): Promise<void> {
+  const ref = doc(db, COL, id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Pedido não encontrado.");
+    const current = (snap.data() as Order).motoboyId;
+    if (current && current !== motoboy.uid) {
+      throw new Error("Esta entrega já foi aceita por outro entregador.");
+    }
+    tx.update(ref, {
+      motoboyId: motoboy.uid,
+      motoboyName: motoboy.name,
+      updatedAt: serverTimestamp(),
+    });
+  });
+  invalidate("orders");
+}
+
 export async function createOrder(
   data: Omit<Order, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {
@@ -176,6 +225,10 @@ export async function createOrder(
   // resgate de pontos (o redeemReward já baixou o estoque do produto/recompensa).
   const applyStock = !data.awaitingConfirmation && !data.isRedemption;
   const ref = await addDoc(collection(db, COL), {
+    // Nasce sem motoboy para aparecer no pool de entregas disponíveis; um valor
+    // explícito (null) é necessário para a query por igualdade do pool casar.
+    motoboyId: null,
+    motoboyName: null,
     ...stripUndefined(data),
     stockApplied: applyStock,
     createdAt: serverTimestamp(),
