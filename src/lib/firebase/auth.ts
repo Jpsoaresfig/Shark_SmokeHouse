@@ -5,6 +5,8 @@ import {
   updateProfile,
   GoogleAuthProvider,
   signInWithPopup,
+  verifyPasswordResetCode,
+  confirmPasswordReset,
   type User,
 } from "firebase/auth";
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -92,6 +94,20 @@ export async function sendResetEmail(email: string): Promise<void> {
     const data = await res.json().catch(() => null);
     throw new Error(data?.error ?? "Não foi possível enviar o e-mail de redefinição.");
   }
+}
+
+/**
+ * Valida o código de redefinição (oobCode) que veio no link do e-mail e
+ * retorna o e-mail associado. Lança se o código for inválido ou expirado —
+ * usado pela tela /reset-password para mostrar o estado certo antes do form.
+ */
+export async function verifyResetCode(oobCode: string): Promise<string> {
+  return verifyPasswordResetCode(auth, oobCode);
+}
+
+/** Confirma a nova senha usando o oobCode do link. */
+export async function confirmReset(oobCode: string, newPassword: string): Promise<void> {
+  await confirmPasswordReset(auth, oobCode, newPassword);
 }
 
 export async function resolveUserProfile(firebaseUser: User): Promise<UserProfile | null> {

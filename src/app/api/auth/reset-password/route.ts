@@ -40,10 +40,16 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Gera o link de redefinição. O continueUrl leva o usuário de volta ao login.
-    const resetLink = await getAdminAuth().generatePasswordResetLink(email, {
+    // Gera o link padrão do Firebase só para extrair o oobCode, e então monta
+    // o link apontando para a NOSSA tela de redefinição (/reset-password),
+    // com a identidade visual da Shark — em vez do handler hospedado do Firebase.
+    const fbLink = await getAdminAuth().generatePasswordResetLink(email, {
       url: `${APP_URL}/login`,
     });
+    const oobCode = new URL(fbLink).searchParams.get("oobCode");
+    const resetLink = oobCode
+      ? `${APP_URL}/reset-password?oobCode=${encodeURIComponent(oobCode)}`
+      : fbLink; // fallback defensivo caso o formato do link mude
 
     const resend = new Resend(process.env.RESEND_API_KEY);
     const from = process.env.RESEND_FROM ?? "Shark SmokeHouse <onboarding@resend.dev>";
