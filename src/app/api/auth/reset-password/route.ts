@@ -9,16 +9,23 @@ export const runtime = "nodejs";
  * Base URL para os links/imagens do e-mail.
  * Prioridade: NEXT_PUBLIC_APP_URL (override explícito) → host da requisição
  * (funciona em local e em produção automaticamente) → localhost.
+ *
+ * Defesa: se NEXT_PUBLIC_APP_URL apontar para localhost mas a requisição vier
+ * de um domínio real (ex.: o .env local foi importado por engano na Vercel),
+ * ignoramos o override e usamos o host real — assim os links nunca saem como
+ * localhost em produção.
  */
 function getBaseUrl(request: NextRequest): string {
-  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (envUrl) return envUrl;
-
   const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const hostIsLocal = !host || host.startsWith("localhost") || host.startsWith("127.");
+
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+  const envIsLocal = !!envUrl && /localhost|127\.|0\.0\.0\.0/.test(envUrl);
+  if (envUrl && !(envIsLocal && !hostIsLocal)) return envUrl;
+
   if (host) {
     const proto =
-      request.headers.get("x-forwarded-proto") ??
-      (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+      request.headers.get("x-forwarded-proto") ?? (hostIsLocal ? "http" : "https");
     return `${proto}://${host}`;
   }
   return "http://localhost:3000";
