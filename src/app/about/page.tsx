@@ -70,7 +70,7 @@ const offerings = [
 
 const hashtags = [
   "#SharkSmokehouse", "#Tabacaria", "#Vibe",
-  "#JoaoPessoa", "#EmBreve", "#EstiloDeVida",
+  "#JoaoPessoa", "#Lounge", "#EstiloDeVida",
   "#SmokeShop",
 ];
 
@@ -96,7 +96,7 @@ export default function AboutPage() {
             className="text-eyebrow text-[var(--color-neon-blue)] mb-6"
           >
             <Anchor className="w-3 h-3 inline mr-1.5 align-middle" />
-            Em breve — João Pessoa, PB
+            Mangabeira — João Pessoa, PB
           </motion.p>
 
           {/* Display headline — Bodoni Moda */}
@@ -128,7 +128,8 @@ export default function AboutPage() {
             transition={{ duration: 0.6, delay: 0.25 }}
             className="text-xl text-[var(--color-text-secondary)] max-w-2xl mx-auto leading-relaxed font-light mb-4"
           >
-            Um espaço pensado para você, com tudo que precisa em um só lugar. 💨🦈
+            Tudo o que você procura em uma tabacaria, em um só lugar. Variedade, qualidade
+            e um ambiente preparado para proporcionar a melhor experiência. 💨🦈
           </motion.p>
 
           <motion.p
@@ -218,7 +219,8 @@ export default function AboutPage() {
               <div className="glass rounded-2xl border border-[var(--color-neon-blue)]/20 bg-[var(--color-neon-blue-glow)] p-8 text-center">
                 <Waves className="w-8 h-8 text-[var(--color-neon-blue)] mx-auto mb-4" />
                 <p className="text-xl text-[var(--color-text-primary)] font-semibold leading-relaxed max-w-2xl mx-auto">
-                  &ldquo;Fica ligado porque o melhor ainda vem por aí… prepare-se para embarcar.&rdquo;
+                  &ldquo;Aqui, cada detalhe foi pensado para proporcionar uma experiência única,
+                  do atendimento aos produtos que fazem parte do seu momento.&rdquo;
                 </p>
                 <div className="flex items-center justify-center gap-2 mt-4 text-[var(--color-neon-blue)] text-sm font-medium">
                   <Anchor className="w-4 h-4" />
@@ -349,10 +351,9 @@ export default function AboutPage() {
                 <div className="space-y-3">
                   {[
                     { day: "Segunda-feira", hours: "Fechado", closed: true },
-                    { day: "Terça a Quinta", hours: "14h às 00h", closed: false },
-                    { day: "Sexta-feira", hours: "14h às 02h", closed: false },
-                    { day: "Sábado", hours: "12h às 02h", closed: false },
-                    { day: "Domingo", hours: "12h às 23h", closed: false },
+                    { day: "Terça a Sexta", hours: "13h às 21h", closed: false },
+                    { day: "Sábado e Domingo", hours: "14h às 21h", closed: false },
+                    { day: "Lounge (Ter. a Dom.)", hours: "20h às 22h", closed: false },
                   ].map((item) => (
                     <div key={item.day} className="flex items-center justify-between text-sm">
                       <span className="text-[var(--color-text-muted)]">{item.day}</span>

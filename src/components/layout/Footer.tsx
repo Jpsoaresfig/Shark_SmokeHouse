@@ -1,38 +1,52 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { MessageCircle, MapPin, Phone, Clock } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/ui/Logo";
 import { useSiteSections } from "@/stores/siteSettingsStore";
+import { getCategories } from "@/lib/firebase/categories";
+import type { Category } from "@/types";
 
 export function Footer() {
   const sections = useSiteSections();
 
-  const footerLinks = {
-    loja: [
-      { href: "/catalog", label: "Catálogo" },
-      { href: "/catalog?category=cigars", label: "Charutos" },
-      { href: "/catalog?category=hookah", label: "Narguilé" },
-      { href: "/catalog?category=accessories", label: "Acessórios" },
-      { href: "/catalog?category=beverages", label: "Bebidas" },
-    ],
-    empresa: [
-      { href: "/about", label: "Sobre Nós" },
-      ...(sections.lounge
-        ? [{ href: "/lounge", label: "Lounge Agendamento" }]
-        : []),
-      { href: "/events", label: "Eventos" },
-      { href: "/account", label: "Clube Fidelidade" },
-    ],
-    suporte: [
-      { href: "/faq", label: "Perguntas Frequentes" },
-      { href: "/orders", label: "Acompanhar Pedido" },
-      { href: "/contact", label: "Fale Conosco" },
-      { href: "/privacy", label: "Privacidade" },
-      { href: "/terms", label: "Termos de Uso" },
-    ],
-  };
+  // Categorias reais cadastradas no admin — os links da coluna "Loja" nunca
+  // ficam quebrados quando as categorias mudam.
+  const [categories, setCategories] = useState<Category[]>([]);
+  useEffect(() => {
+    getCategories().then(setCategories).catch(() => {});
+  }, []);
+
+  const footerLinks: { title: string; links: { href: string; label: string }[] }[] = [
+    {
+      title: "Loja",
+      links: [
+        { href: "/catalog", label: "Catálogo" },
+        ...categories.slice(0, 8).map(c => ({
+          href: `/catalog?category=${c.slug}`,
+          label: c.label,
+        })),
+      ],
+    },
+    {
+      title: "Experiências",
+      links: [
+        ...(sections.lounge ? [{ href: "/lounge", label: "Lounge" }] : []),
+        { href: "/events", label: "Eventos" },
+      ],
+    },
+    {
+      title: "Institucional",
+      links: [
+        { href: "/about", label: "Sobre Nós" },
+        { href: "/account", label: "Clube de Fidelidade" },
+        { href: "/contact", label: "Contato" },
+        { href: "/orders", label: "Acompanhar Pedido" },
+      ],
+    },
+  ];
 
   return (
     <footer className="bg-[var(--color-bg-surface)] border-t border-[var(--color-border)] mt-auto">
@@ -44,7 +58,9 @@ export function Footer() {
               <Logo variant="black" size="md" />
             </div>
             <p className="text-sm text-[var(--color-text-muted)] leading-relaxed max-w-xs mb-6">
-              A tabacaria premium que une sofisticação, cultura e experiência única para os apreciadores do bom gosto.
+              Na Shark Smoke House, você encontra produtos selecionados, atendimento de
+              qualidade e um ambiente pensado para quem valoriza conforto e bons momentos.
+              Tudo isso em um espaço que se tornou referência em João Pessoa.
             </p>
             {/* Contact info */}
             <div className="space-y-2.5">
@@ -61,9 +77,12 @@ export function Footer() {
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
                 <span>(83) 99902-0606</span>
               </div>
-              <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
-                <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>Seg – Dom: 14h às 02h</span>
+              <div className="flex items-start gap-2.5 text-sm text-[var(--color-text-secondary)]">
+                <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
+                <span>
+                  Ter – Sex: 13h às 21h<br />
+                  Sáb – Dom: 14h às 21h
+                </span>
               </div>
             </div>
             {/* Social */}
@@ -89,13 +108,13 @@ export function Footer() {
           </div>
 
           {/* Links */}
-          {(Object.entries(footerLinks) as [string, { href: string; label: string }[]][]).map(([section, links]) => (
-            <div key={section}>
+          {footerLinks.map((section) => (
+            <div key={section.title}>
               <h4 className="text-xs font-semibold tracking-widest uppercase text-[var(--color-text-muted)] mb-4">
-                {section.charAt(0).toUpperCase() + section.slice(1)}
+                {section.title}
               </h4>
               <ul className="space-y-2.5">
-                {links.map((link) => (
+                {section.links.map((link) => (
                   <li key={link.href}>
                     <Link
                       href={link.href}
@@ -113,7 +132,11 @@ export function Footer() {
         <Separator className="mb-6" />
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--color-text-muted)]">
-          <p>© {new Date().getFullYear()} Shark SmokeHouse. Todos os direitos reservados.</p>
+          <p className="flex items-center gap-3 flex-wrap justify-center">
+            <span>© {new Date().getFullYear()} Shark SmokeHouse. Todos os direitos reservados.</span>
+            <Link href="/privacy" className="hover:text-[var(--color-neon-blue)] transition-colors">Privacidade</Link>
+            <Link href="/terms" className="hover:text-[var(--color-neon-blue)] transition-colors">Termos de Uso</Link>
+          </p>
           <p className="flex items-center gap-1.5">
             <span className="text-[var(--color-warning)]">⚠</span>
             Venda proibida para menores de 18 anos. Fumar prejudica a saúde.

@@ -132,6 +132,42 @@ export function subscribeOrdersByCustomer(
   );
 }
 
+/**
+ * Escuta em tempo real os pedidos atribuídos a um motoboy. Filtra só por
+ * `motoboyId` (sem `orderBy`, dispensando índice composto) e ordena por data
+ * no cliente. Usado pelo painel /motoboy.
+ */
+export function subscribeOrdersByMotoboy(
+  motoboyId: string,
+  onChange: (orders: Order[]) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  const q = query(collection(db, COL), where("motoboyId", "==", motoboyId));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const orders = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Order))
+        .sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime());
+      onChange(orders);
+    },
+    (err) => onError?.(err),
+  );
+}
+
+/** Atribui (ou remove, com null) o motoboy responsável pela entrega do pedido. */
+export async function assignOrderMotoboy(
+  id: string,
+  motoboy: { uid: string; name: string } | null,
+): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    motoboyId: motoboy?.uid ?? null,
+    motoboyName: motoboy?.name ?? null,
+    updatedAt: serverTimestamp(),
+  });
+  invalidate("orders");
+}
+
 export async function createOrder(
   data: Omit<Order, "id" | "createdAt" | "updatedAt">
 ): Promise<string> {

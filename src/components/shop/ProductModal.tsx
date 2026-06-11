@@ -31,17 +31,21 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
 
   if (!product) return null;
 
-  const images = product.images.length > 0 ? product.images : [];
+  // Variações (grade) têm prioridade sobre o `colors` legado.
+  const variations = product.variations ?? [];
+  const hasVariations = variations.length > 0;
+  const selectedVar = variations.find(v => v.id === selectedVarId) ?? null;
+
+  // Variação com foto própria: a foto dela vira a principal enquanto selecionada.
+  const baseImages = product.images.length > 0 ? product.images : [];
+  const images = selectedVar?.image
+    ? [selectedVar.image, ...baseImages.filter(u => u !== selectedVar.image)]
+    : baseImages;
   const hasImages = images.length > 0;
   const hasMultiple = images.length > 1;
   const discount = product.compareAtPrice
     ? Math.round((1 - product.price / product.compareAtPrice) * 100)
     : null;
-
-  // Variações (grade) têm prioridade sobre o `colors` legado.
-  const variations = product.variations ?? [];
-  const hasVariations = variations.length > 0;
-  const selectedVar = variations.find(v => v.id === selectedVarId) ?? null;
   const colors = product.colors ?? [];
   const hasColors = !hasVariations && colors.length > 0;
 
@@ -62,6 +66,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
         color: selectedVar.name,      // exibido no carrinho/pedido
         variationId: selectedVar.id,
         variationSku: selectedVar.sku,
+        image: selectedVar.image,     // foto da variação (quando houver)
       });
     } else {
       addItem(product, qty, { color: selectedColor || undefined });
@@ -278,8 +283,8 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                             key={v.id}
                             type="button"
                             disabled={vOut}
-                            onClick={() => { setSelectedVarId(v.id); setQty(1); }}
-                            className={`px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
+                            onClick={() => { setSelectedVarId(v.id); setQty(1); setImgIndex(0); }}
+                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
                               vOut
                                 ? "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] line-through opacity-50 cursor-not-allowed"
                                 : selected
@@ -287,6 +292,15 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                                 : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/40"
                             }`}
                           >
+                            {v.image && (
+                              <Image
+                                src={v.image}
+                                alt=""
+                                width={24}
+                                height={24}
+                                className="w-6 h-6 rounded-md object-cover shrink-0"
+                              />
+                            )}
                             {v.name}
                             {vOut && <span className="ml-1 text-[10px]">(esgotado)</span>}
                           </button>

@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     const { subject, html, text } = passwordResetEmail({
       resetLink,
       appUrl: APP_URL,
-      logoUrl: `${APP_URL}/logo_shark_preta.jpeg`,
+      logoUrl: `${APP_URL}/logo_nova_preta_sq.jpeg`,
     });
 
     const { error } = await resend.emails.send({ from, to: email, subject, html, text });

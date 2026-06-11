@@ -90,23 +90,12 @@ describe("frete (deliveryFee)", () => {
     expect(store().total).toBe(0);
   });
 
-  it("cobra R$8 quando o subtotal está abaixo de R$150", () => {
-    store().addItem(makeProduct({ price: 100 }), 1); // subtotal 100
-    expect(store().deliveryFee).toBe(8);
-    expect(store().total).toBe(108);
-  });
-
-  it("zera o frete no limite de R$150 (frete grátis)", () => {
-    store().addItem(makeProduct({ price: 150 }), 1);
-    expect(store().subtotal).toBe(150);
+  // O frete é por bairro e calculado no CHECKOUT — no carrinho é sempre 0 e o
+  // total é igual ao subtotal (ver comentário em deriveTotals).
+  it("não cobra frete no carrinho (frete por bairro é do checkout)", () => {
+    store().addItem(makeProduct({ price: 100 }), 1);
     expect(store().deliveryFee).toBe(0);
-    expect(store().total).toBe(150);
-  });
-
-  it("mantém frete grátis acima do limite", () => {
-    store().addItem(makeProduct({ price: 200 }), 1);
-    expect(store().deliveryFee).toBe(0);
-    expect(store().total).toBe(200);
+    expect(store().total).toBe(100);
   });
 });
 

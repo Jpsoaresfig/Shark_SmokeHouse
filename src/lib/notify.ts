@@ -70,7 +70,7 @@ export function showSystemNotification(title: string, body: string): void {
   try {
     new Notification(title, {
       body,
-      icon: "/logo_shark_preta.jpeg",
+      icon: "/logo_nova_preta_sq.jpeg",
       tag: "shark-novo-pedido",
       renotify: true,
     } as NotificationOptions);

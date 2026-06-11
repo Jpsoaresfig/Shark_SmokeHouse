@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
-  Bell, BellOff, Search, X, Banknote,
+  Bell, BellOff, Search, X, Banknote, Bike,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,14 +16,15 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus } from "@/lib/firebase/orders";
+import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus, assignOrderMotoboy } from "@/lib/firebase/orders";
 import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { awardPurchasePoints } from "@/lib/firebase/loyalty";
+import { getAllUsers } from "@/lib/firebase/users";
 import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
-import type { Order, OrderStatus, PaymentStatus } from "@/types";
+import type { Order, OrderStatus, PaymentStatus, UserProfile } from "@/types";
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; badge: "secondary" | "warning" | "default" | "purple" | "orange" | "success" | "destructive"; icon: React.ElementType }> = {
   received:         { label: "Recebido",         badge: "secondary",    icon: Clock },
@@ -69,6 +70,48 @@ export default function AdminOrders() {
   const [payNote, setPayNote] = useState("");
   const [payingStatus, setPayingStatus] = useState<PaymentStatus | null>(null);
   const { soundOn, toggleSound, announce } = useNewOrderAlerts();
+
+  /* Motoboys cadastrados — para atribuir a entrega do pedido. */
+  const [motoboys, setMotoboys] = useState<UserProfile[]>([]);
+  const [assigningMotoboy, setAssigningMotoboy] = useState(false);
+  const [awardingPoints, setAwardingPoints] = useState(false);
+  useEffect(() => {
+    getAllUsers()
+      .then(users => setMotoboys(users.filter(u => u.role === "motoboy")))
+      .catch(() => { /* sem motoboys cadastrados — o seletor fica vazio */ });
+  }, []);
+
+  /** Atribui (ou remove) o motoboy responsável pela entrega do pedido aberto. */
+  async function handleAssignMotoboy(uid: string) {
+    if (!selected) return;
+    setAssigningMotoboy(true);
+    try {
+      const m = motoboys.find(u => u.uid === uid);
+      await assignOrderMotoboy(selected.id, m ? { uid: m.uid, name: m.displayName } : null);
+      setSelected({ ...selected, motoboyId: m?.uid, motoboyName: m?.displayName });
+      toast.success(m ? `Entrega atribuída a ${m.displayName}!` : "Motoboy removido do pedido.");
+    } catch {
+      toast.error("Erro ao atribuir o motoboy.");
+    } finally {
+      setAssigningMotoboy(false);
+    }
+  }
+
+  /** Credita os pontos de um pedido entregue pelo motoboy (que não pode creditar). */
+  async function handleAwardPoints() {
+    if (!selected || selected.pointsAwarded || !(selected.pointsEarned ?? 0)) return;
+    setAwardingPoints(true);
+    try {
+      await awardPurchasePoints(selected.customerId, selected.pointsEarned!, selected.id);
+      await markOrderPointsAwarded(selected.id);
+      setSelected({ ...selected, pointsAwarded: true });
+      toast.success(`${selected.pointsEarned!.toLocaleString("pt-BR")} pontos creditados ao cliente!`);
+    } catch {
+      toast.error("Erro ao creditar os pontos.");
+    } finally {
+      setAwardingPoints(false);
+    }
+  }
 
   // Escuta os pedidos em tempo real: a lista atualiza sozinha (sem refresh) e
   // cada pedido novo dispara toast + som + notificação do sistema.
@@ -305,6 +348,12 @@ export default function AdminOrders() {
                               Resgate · {order.pointsRedeemed ?? 0} pts
                             </Badge>
                           )}
+                          {order.motoboyName && (
+                            <Badge variant="secondary" className="text-xs">
+                              <Bike className="w-3 h-3" />
+                              {order.motoboyName}
+                            </Badge>
+                          )}
                           <Badge variant={cfg.badge} className="sm:hidden text-xs">
                             <Icon className="w-3 h-3" />
                             {cfg.label}
@@ -418,15 +467,62 @@ export default function AdminOrders() {
                         Cliente vai retirar o pedido no balcão da loja.
                       </p>
                     ) : (
-                      <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
-                        {addr.street}, {addr.number}{addr.complement ? `, ${addr.complement}` : ""}<br />
-                        {addr.neighborhood} — {addr.city}/{addr.state}
-                        {addr.zipCode ? <> · {addr.zipCode}</> : null}
-                      </p>
+                      <>
+                        <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                          {addr.street}, {addr.number}{addr.complement ? `, ${addr.complement}` : ""}<br />
+                          {addr.neighborhood} — {addr.city}/{addr.state}
+                          {addr.zipCode ? <> · {addr.zipCode}</> : null}
+                        </p>
+
+                        {/* Motoboy responsável pela entrega */}
+                        <div className="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3">
+                          <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                            <Bike className="w-3.5 h-3.5" /> Motoboy
+                          </p>
+                          {motoboys.length === 0 ? (
+                            <p className="text-xs text-[var(--color-text-muted)]">
+                              Nenhum motoboy cadastrado. Crie um usuário com o papel
+                              &ldquo;Motoboy&rdquo; em <strong>Usuários</strong>.
+                            </p>
+                          ) : (
+                            <select
+                              value={selected.motoboyId ?? ""}
+                              onChange={e => handleAssignMotoboy(e.target.value)}
+                              disabled={assigningMotoboy}
+                              className={inputCls}
+                            >
+                              <option value="">Sem motoboy atribuído</option>
+                              {motoboys.map(m => (
+                                <option key={m.uid} value={m.uid}>{m.displayName}</option>
+                              ))}
+                            </select>
+                          )}
+                          {selected.motoboyName && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                              O pedido aparece no painel de entregas de <strong className="text-[var(--color-text-secondary)]">{selected.motoboyName}</strong>.
+                            </p>
+                          )}
+                        </div>
+                      </>
                     )}
                   </div>
                 );
               })()}
+
+              {/* Pontos pendentes (entrega confirmada pelo motoboy não credita sozinha) */}
+              {selected.status === "delivered" && !selected.pointsAwarded && (selected.pointsEarned ?? 0) > 0 && (
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5">
+                  <div className="flex items-center gap-2 text-sm text-[var(--color-warning)]">
+                    <Star className="w-4 h-4 shrink-0" />
+                    {selected.pointsEarned!.toLocaleString("pt-BR")} pontos pendentes de crédito.
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={handleAwardPoints} disabled={awardingPoints}>
+                    {awardingPoints
+                      ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                      : "Creditar pontos"}
+                  </Button>
+                </div>
+              )}
 
               {/* Observações do pedido (inclui o troco, quando pagamento na entrega) */}
               {selected.notes && (

@@ -140,12 +140,13 @@ export function StoreProducts() {
           className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 mb-12"
         >
           <div>
-            <Badge variant="default" className="mb-3">Nossa Loja</Badge>
+            <Badge variant="default" className="mb-3">Catálogo Completo</Badge>
             <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
               Nossos <span className="text-neon">Produtos</span>
             </h2>
             <p className="text-[var(--color-text-secondary)] mt-2 max-w-md">
-              Confira os produtos disponíveis na nossa loja, prontos para você.
+              Tudo o que você procura em uma tabacaria, em um só lugar. Variedade,
+              qualidade e um ambiente preparado para proporcionar a melhor experiência.
             </p>
           </div>
           <Button variant="outline" asChild>

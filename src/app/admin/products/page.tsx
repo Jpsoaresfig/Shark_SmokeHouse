@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
-import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star, X, Tag } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Search, ToggleLeft, ToggleRight, Star, X, Tag, ImageIcon, Loader2, FileSpreadsheet } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,8 @@ import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/
 import {
   getCategories, ensureCategoriesSeeded, createCategory, deleteCategory,
 } from "@/lib/firebase/categories";
-import { CloudinaryUpload } from "@/components/ui/CloudinaryUpload";
+import { CloudinaryUpload, uploadToCloudinary } from "@/components/ui/CloudinaryUpload";
+import { ImportSpreadsheetDialog } from "@/components/admin/ImportSpreadsheetDialog";
 import { toast } from "@/stores/toastStore";
 import type { Product, ProductCategory, Category } from "@/types";
 
@@ -27,6 +28,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   tags: [], images: [], stock: 0, minStock: 5,
   sku: "", featured: false, active: true, loyaltyPoints: undefined,
   pointsEarned: undefined, colors: [], variations: [],
+  brand: "", size: "", costPrice: undefined, taxPercent: undefined,
 };
 
 const inputCls =
@@ -38,6 +40,7 @@ export default function AdminProducts() {
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(EMPTY);
@@ -82,6 +85,43 @@ export default function AdminProducts() {
     setForm(f => ({
       ...f,
       variations: (f.variations ?? []).map(v => v.id === id ? { ...v, stock } : v),
+    }));
+  }
+
+  /* Foto própria por variação: input de arquivo único compartilhado — guarda em
+     varImgTargetRef qual variação receberá a imagem enviada. */
+  const varImgInputRef = useRef<HTMLInputElement>(null);
+  const varImgTargetRef = useRef<string | null>(null);
+  const [varImgUploading, setVarImgUploading] = useState<string | null>(null);
+
+  function pickVariationImage(id: string) {
+    varImgTargetRef.current = id;
+    varImgInputRef.current?.click();
+  }
+
+  async function handleVariationImage(file: File | undefined) {
+    const id = varImgTargetRef.current;
+    if (!file || !id) return;
+    setVarImgUploading(id);
+    try {
+      const url = await uploadToCloudinary(file);
+      setForm(f => ({
+        ...f,
+        variations: (f.variations ?? []).map(v => v.id === id ? { ...v, image: url } : v),
+      }));
+    } catch {
+      toast.error("Erro ao enviar a imagem da variação.");
+    } finally {
+      setVarImgUploading(null);
+      varImgTargetRef.current = null;
+      if (varImgInputRef.current) varImgInputRef.current.value = "";
+    }
+  }
+
+  function removeVariationImage(id: string) {
+    setForm(f => ({
+      ...f,
+      variations: (f.variations ?? []).map(v => v.id === id ? { ...v, image: undefined } : v),
     }));
   }
 
@@ -201,6 +241,10 @@ export default function AdminProducts() {
       pointsEarned: p.pointsEarned,
       colors: p.colors ?? [],
       variations: p.variations ?? [],
+      brand: p.brand ?? "",
+      size: p.size ?? "",
+      costPrice: p.costPrice,
+      taxPercent: p.taxPercent,
     });
     setOpen(true);
   }
@@ -222,6 +266,7 @@ export default function AdminProducts() {
       // permitir limpar a grade de um produto que antes tinha variações.
       const cleanVariations = (form.variations ?? []).map(v => ({
         id: v.id, name: v.name.trim(), sku: v.sku.trim(), stock: Number(v.stock) || 0,
+        ...(v.image ? { image: v.image } : {}), // sem undefined (Firestore rejeita)
       }));
       const usesVariations = cleanVariations.length > 0;
       const payload = {
@@ -233,6 +278,10 @@ export default function AdminProducts() {
         variations: cleanVariations,
         loyaltyPoints: loyaltyEnabled && form.loyaltyPoints ? Number(form.loyaltyPoints) : undefined,
         pointsEarned: earnEnabled && form.pointsEarned ? Number(form.pointsEarned) : undefined,
+        brand: form.brand?.trim() || undefined,
+        size: form.size?.trim() || undefined,
+        costPrice: form.costPrice ? Number(form.costPrice) : undefined,
+        taxPercent: form.taxPercent ? Number(form.taxPercent) : undefined,
       };
       if (editing) {
         await updateProduct(editing.id, payload);
@@ -286,9 +335,12 @@ export default function AdminProducts() {
           title="Produtos"
           subtitle={`${products.length} cadastrado${products.length !== 1 ? "s" : ""}`}
           action={
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button variant="secondary" onClick={openCategories}>
                 <Tag className="w-4 h-4" /> Categorias
+              </Button>
+              <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                <FileSpreadsheet className="w-4 h-4" /> Importar planilha
               </Button>
               <Button variant="premium" onClick={openAdd}>
                 <Plus className="w-4 h-4" /> Adicionar Produto
@@ -452,6 +504,36 @@ export default function AdminProducts() {
               value={form.sku}
               onChange={e => set("sku", e.target.value)}
               placeholder="Ex: CHR-001"
+            />
+            <Input
+              label="Marca"
+              value={form.brand ?? ""}
+              onChange={e => set("brand", e.target.value)}
+              placeholder="Ex: Zomo, Adalya"
+            />
+            <Input
+              label="Tamanho/Quantidade"
+              value={form.size ?? ""}
+              onChange={e => set("size", e.target.value)}
+              placeholder="Ex: 50g, caixa c/ 10"
+            />
+            <Input
+              label="Custo unidade (R$) — interno"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.costPrice ?? ""}
+              onChange={e => set("costPrice", e.target.value || undefined)}
+              placeholder="Nunca aparece pro cliente"
+            />
+            <Input
+              label="Imposto (%) — interno"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.taxPercent ?? ""}
+              onChange={e => set("taxPercent", e.target.value || undefined)}
+              placeholder="Nunca aparece pro cliente"
             />
             <Input
               label="Preço *"
@@ -631,6 +713,33 @@ export default function AdminProducts() {
                 <div className="space-y-2 mb-3">
                   {variations.map(v => (
                     <div key={v.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-2">
+                      {/* Foto própria da variação (opcional) */}
+                      <button
+                        type="button"
+                        onClick={() => pickVariationImage(v.id)}
+                        disabled={varImgUploading !== null}
+                        title={v.image ? "Trocar a foto desta variação" : "Adicionar foto a esta variação"}
+                        className="relative w-10 h-10 rounded-lg overflow-hidden border border-dashed border-[var(--color-border)] hover:border-[var(--color-neon-blue)] flex items-center justify-center shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] transition-colors group"
+                      >
+                        {varImgUploading === v.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-[var(--color-neon-blue)]" />
+                        ) : v.image ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={v.image} alt={v.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon className="w-4 h-4" />
+                        )}
+                      </button>
+                      {v.image && varImgUploading !== v.id && (
+                        <button
+                          type="button"
+                          onClick={() => removeVariationImage(v.id)}
+                          title="Remover a foto desta variação"
+                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] shrink-0 -ml-1"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{v.name}</p>
                         <p className="text-xs text-[var(--color-text-muted)] truncate">Cód.: {v.sku}</p>
@@ -690,7 +799,17 @@ export default function AdminProducts() {
               </div>
               <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
                 Com variações, o cliente escolhe a opção no site e o leitor bipa o código de cada uma no PDV.
+                Clique no quadradinho de imagem para dar uma foto própria à variação — ela é exibida quando o cliente a escolhe.
               </p>
+
+              {/* input compartilhado para a foto das variações */}
+              <input
+                ref={varImgInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={e => handleVariationImage(e.target.files?.[0])}
+              />
             </div>
 
             {/* Cores/estampas disponíveis (opcional, legado — prefira Variações) */}
@@ -758,6 +877,15 @@ export default function AdminProducts() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Importação por planilha CSV */}
+      <ImportSpreadsheetDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        products={products}
+        categories={categories}
+        onDone={async () => { await load(); await loadCategories(); }}
+      />
 
       {/* Categories manager */}
       <Dialog open={catOpen} onOpenChange={(v) => { setCatOpen(v); if (!v) setCatConfirmId(null); }}>

@@ -138,12 +138,12 @@ export function FeaturedProducts() {
           className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 mb-12"
         >
           <div>
-            <Badge variant="default" className="mb-3">Seleção Premium</Badge>
+            <Badge variant="default" className="mb-3">Produtos Selecionados</Badge>
             <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
               Produtos em <span className="text-neon">Destaque</span>
             </h2>
             <p className="text-[var(--color-text-secondary)] mt-2 max-w-md">
-              Curadoria exclusiva dos melhores produtos para os verdadeiros apreciadores.
+              Qualidade e variedade para sua melhor experiência.
             </p>
           </div>
           <Button variant="outline" asChild>

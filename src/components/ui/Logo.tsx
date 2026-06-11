@@ -23,10 +23,10 @@ export function Logo({
   className,
 }: LogoProps) {
   const px = sizes[size];
-  const src =
-    variant === "white"
-      ? "/logo_shark_branca.jpeg"
-      : "/logo_shark_preta.jpeg";
+  // Logo nova (fundo preto, recorte quadrado central) — usada em ambas as
+  // variantes: como o componente corta em círculo, funciona em qualquer fundo.
+  void variant;
+  const src = "/logo_nova_preta_sq.jpeg";
 
   const img = (
     <div

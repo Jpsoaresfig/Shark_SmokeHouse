@@ -7,12 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
 const features = [
-  "Ambiente exclusivo e climatizado",
-  "Mais de 50 opções de essências premium",
-  "Bebidas selecionadas",
-  "Atendimento personalizado",
-  "Música ao vivo nas sextas e sábados",
-  "Reserva de mesa garantida",
+  "Ambiente confortável",
+  "Grande variedade de essências",
+  "Bebidas disponíveis no local",
+  "Atendimento atencioso e personalizado",
+  "Espaço ideal para encontros e confraternizações",
+  "Reservas disponíveis",
 ];
 
 export function LoungeSection() {
@@ -77,12 +77,18 @@ export function LoungeSection() {
           >
             <Badge variant="purple" className="mb-4">Experiência Exclusiva</Badge>
             <h2 className="text-4xl sm:text-5xl font-black text-[var(--color-text-primary)] mb-4 leading-tight">
-              Narguilé Lounge
+              Lounge Shark
               <br />
-              <span className="text-neon">Premium</span>
+              <span className="text-neon">Smoke House</span>
             </h2>
-            <p className="text-[var(--color-text-secondary)] text-lg mb-8 leading-relaxed">
-              Reserve sua mesa no ambiente mais sofisticado da cidade. Uma experiência sensorial completa para você e seus convidados.
+            <p className="text-[var(--color-text-secondary)] text-lg mb-4 leading-relaxed">
+              Um ambiente confortável, acolhedor e preparado para quem gosta de aproveitar
+              o melhor do universo do narguilé em boa companhia.
+            </p>
+            <p className="text-[var(--color-text-secondary)] mb-8 leading-relaxed">
+              Seja para encontrar os amigos, comemorar uma ocasião especial ou simplesmente
+              relaxar após um dia corrido, o Lounge da Shark Smoke House oferece o espaço
+              ideal para transformar qualquer momento em uma boa lembrança.
             </p>
 
             {/* Features */}
@@ -102,10 +108,14 @@ export function LoungeSection() {
               ))}
             </div>
 
+            <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+              Venha conhecer o espaço e viver a experiência Shark Smoke House.
+            </p>
+
             {/* Hours */}
             <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)] mb-8 p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)]">
               <Clock className="w-4 h-4 text-[var(--color-neon-blue)]" />
-              <span>Aberto de <strong className="text-[var(--color-text-primary)]">Terça a Domingo</strong>, das <strong className="text-[var(--color-text-primary)]">14h às 02h</strong></span>
+              <span>Aberto de <strong className="text-[var(--color-text-primary)]">Terça a Domingo</strong>, das <strong className="text-[var(--color-text-primary)]">20h às 22h</strong></span>
             </div>
 
             <div className="flex gap-3">

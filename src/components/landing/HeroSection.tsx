@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
 import { useSiteSections } from "@/stores/siteSettingsStore";
 
-const statsData = [
-  { value: "500+", label: "Produtos Premium" },
-  { value: "5★",  label: "Avaliação Média" },
-  { value: "1h",  label: "Entrega Expressa" },
-  { value: "10k+",label: "Clientes Satisfeitos" },
+const featuresData = [
+  { title: "Catálogo Completo",      desc: "Tudo o que você procura em um só lugar" },
+  { title: "Produtos Selecionados",  desc: "Qualidade e variedade para sua melhor experiência" },
+  { title: "Compra Rápida",          desc: "Encontre o que procura em poucos cliques" },
+  { title: "Atendimento Humanizado", desc: "Suporte rápido quando você precisar" },
 ];
 
 export function HeroSection() {
@@ -91,8 +91,8 @@ export function HeroSection() {
             transition={{ duration: 0.7, delay: 0.3 }}
             className="text-lg text-[var(--color-text-secondary)] max-w-xl mx-auto mb-10 leading-relaxed font-light"
           >
-            A seleção mais exclusiva de charutos, narguilés e acessórios premium.
-            Uma experiência que vai além do produto.
+            Uma seleção especial de produtos para transformar qualquer ocasião
+            em uma experiência memorável.
           </motion.p>
 
           <motion.div
@@ -117,22 +117,22 @@ export function HeroSection() {
             )}
           </motion.div>
 
-          {/* Stats row */}
+          {/* Features row */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.5 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-px border border-[var(--color-border)] bg-[var(--color-border)] max-w-2xl mx-auto overflow-hidden"
+            className="grid grid-cols-2 md:grid-cols-4 gap-px border border-[var(--color-border)] bg-[var(--color-border)] max-w-4xl mx-auto overflow-hidden"
           >
-            {statsData.map((stat) => (
+            {featuresData.map((feature) => (
               <div
-                key={stat.label}
-                className="bg-[var(--color-bg-elevated)] px-6 py-5 text-center"
+                key={feature.title}
+                className="bg-[var(--color-bg-elevated)] px-5 py-5 text-center"
               >
-                <p className="text-xl font-bold text-[var(--color-neon-blue)] mb-1 font-display">
-                  {stat.value}
+                <p className="text-sm font-bold text-[var(--color-neon-blue)] mb-1 font-display">
+                  {feature.title}
                 </p>
-                <p className="text-eyebrow text-[var(--color-text-muted)]">{stat.label}</p>
+                <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">{feature.desc}</p>
               </div>
             ))}
           </motion.div>

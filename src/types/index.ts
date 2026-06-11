@@ -81,6 +81,14 @@ export interface Product {
   weight?: number;
   featured?: boolean;
   active: boolean;
+  /** Marca do produto (ex.: "Zomo", "Adalya"). Visível no admin e na importação. */
+  brand?: string;
+  /** Tamanho/quantidade da embalagem (ex.: "50g", "Caixa c/ 10"). */
+  size?: string;
+  /** Custo de aquisição por unidade (R$). USO INTERNO — nunca exibido ao cliente. */
+  costPrice?: number;
+  /** Imposto (%) sobre o produto. USO INTERNO — nunca exibido ao cliente. */
+  taxPercent?: number;
   /** Cores disponíveis (nomes) para o cliente escolher. Mesma peça, mesmo preço.
    *  @deprecated Use `variations` (com SKU e estoque por variação). Mantido para
    *  produtos antigos. */
@@ -107,6 +115,9 @@ export interface ProductVariation {
   sku: string;
   /** Estoque próprio desta variação. */
   stock: number;
+  /** Foto própria da variação (opcional). Quando o cliente escolhe a variação,
+   *  esta imagem é exibida no lugar da principal e vai para o carrinho. */
+  image?: string;
 }
 
 /* ── Cart ────────────────────────────────────────────────── */
