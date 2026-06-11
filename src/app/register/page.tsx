@@ -243,10 +243,10 @@ function RegisterForm() {
 
 export default function RegisterPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-20">
+    <div className="relative min-h-screen overflow-hidden flex items-center justify-center px-4 py-20">
       <div className="absolute inset-0 bg-gradient-to-br from-[#08080f] via-[#0a0f1e] to-[#08080f]" />
       <div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full"
+        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] max-w-[120vw] h-[600px] rounded-full"
         style={{ background: "radial-gradient(ellipse, rgba(37,99,255,0.07) 0%, transparent 70%)" }}
       />
 
