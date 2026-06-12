@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseBrNumber, parseProductsCsv } from "./csvImport";
+import { parseCsv, parseBrNumber, parseProductsCsv, parseProductsRows } from "./csvImport";
 
 const HEADER =
   "ESTOQUE;SKU;CATEGORIA;MARCA;DESCRIÇÃO DO PRODUTO;COR/AROMA/SABOR;TAMANHO/QUANTIDADE;CUSTO UNIDADE (R$);IMPOSTO (%);PREÇO PIX/DINHEIRO (R$);PONTOS GANHOS;PONTOS RESGATE";
@@ -86,6 +86,28 @@ describe("parseProductsCsv", () => {
     expect(error).toMatch(/Cabeçalho não reconhecido/);
   });
 
+  it("aceita o cabeçalho real da loja com a coluna 'Nome' (vinda do .xlsx)", () => {
+    // Reproduz as linhas que o SheetJS entrega ao ler a planilha do Excel:
+    // coluna chama-se "Nome" (não "DESCRIÇÃO DO PRODUTO") e valores já formatados.
+    const rows = [
+      ["ESTOQUE", "SKU", "CATEGORIA", "MARCA", "Nome", "TAMANHO/QUANTIDADE",
+       "CUSTO UNIDADE (R$)", "IMPOSTO (%)", "PREÇO PIX/DINHEIRO (R$)", "PONTOS GANHOS", "PONTOS RESGATE"],
+      ["1", "8901751386325", "INCENSO", "-", "INCENSO VARIADOS - CRAVO", "7",
+       "R$ 1,40", "18%", "R$ 3,50", "1,75", "350"],
+    ];
+    const { products, error } = parseProductsRows(rows);
+    expect(error).toBeUndefined();
+    expect(products[0]).toMatchObject({
+      name: "INCENSO VARIADOS - CRAVO",
+      category: "INCENSO",
+      price: 3.5,
+      costPrice: 1.4,
+      taxPercent: 18,
+      stock: 1,
+      sku: "8901751386325",
+    });
+  });
+
   it("aceita cabeçalhos sem acento e em qualquer ordem", () => {
     const csv = [
       "PRECO PIX/DINHEIRO (R$);DESCRICAO DO PRODUTO;ESTOQUE",
@@ -94,5 +116,19 @@ describe("parseProductsCsv", () => {
     const { products, error } = parseProductsCsv(csv);
     expect(error).toBeUndefined();
     expect(products[0]).toMatchObject({ name: "Carvão de Coco", price: 19.9, stock: 25 });
+  });
+
+  it("encontra o cabeçalho quando há título/linhas em branco acima", () => {
+    // planilha real costuma ter um título mesclado e uma linha vazia antes das colunas.
+    const rows = [
+      ["TABELA DE PRODUTOS - SHARK TABACARIA", "", "", "", "", ""],
+      ["", "", "", "", "", ""],
+      ["ESTOQUE", "SKU", "CATEGORIA", "MARCA", "Nome", "PREÇO PIX/DINHEIRO (R$)"],
+      ["1", "789", "INCENSO", "-", "INCENSO CRAVO", "R$ 3,50"],
+    ];
+    const { products, error } = parseProductsRows(rows);
+    expect(error).toBeUndefined();
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({ name: "INCENSO CRAVO", price: 3.5, stock: 1 });
   });
 });

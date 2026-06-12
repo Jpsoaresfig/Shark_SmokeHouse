@@ -104,6 +104,20 @@ export function mapHeaders(headerCells: string[]): Partial<Record<ColumnKey, num
   return map;
 }
 
+/**
+ * Procura a linha de cabeçalho — pode não ser a primeira (planilhas costumam ter
+ * um título mesclado, uma linha em branco ou um logo acima das colunas).
+ * Retorna o índice da linha que tem pelo menos DESCRIÇÃO + PREÇO, ou -1.
+ */
+function findHeaderRow(rows: string[][]): number {
+  const limit = Math.min(rows.length, 20); // o cabeçalho está sempre no topo
+  for (let i = 0; i < limit; i++) {
+    const m = mapHeaders(rows[i]);
+    if (m.name !== undefined && m.price !== undefined) return i;
+  }
+  return -1;
+}
+
 /* ── Números pt-BR ───────────────────────────────────────── */
 
 /** "R$ 1.234,56" → 1234.56 · "12,5" → 12.5 · "12.5" → 12.5 · "" → undefined */
@@ -143,19 +157,25 @@ export interface ParseResult {
 }
 
 export function parseProductsCsv(text: string): ParseResult {
-  const rows = parseCsv(text);
+  return parseProductsRows(parseCsv(text));
+}
+
+/** Recebe as linhas já divididas em células (vindas de CSV ou de uma planilha
+ *  .xlsx) e agrupa em produtos. */
+export function parseProductsRows(rows: string[][]): ParseResult {
   if (rows.length < 2) {
     return { products: [], warnings: [], error: "Planilha vazia ou sem linhas de produto." };
   }
 
-  const headers = mapHeaders(rows[0]);
-  if (headers.name === undefined || headers.price === undefined) {
+  const headerRow = findHeaderRow(rows);
+  if (headerRow === -1) {
     return {
       products: [],
       warnings: [],
-      error: "Cabeçalho não reconhecido — a planilha precisa ter pelo menos as colunas DESCRIÇÃO DO PRODUTO e PREÇO PIX/DINHEIRO (R$).",
+      error: "Cabeçalho não reconhecido — a planilha precisa ter pelo menos as colunas DESCRIÇÃO DO PRODUTO (ou Nome) e PREÇO PIX/DINHEIRO (R$).",
     };
   }
+  const headers = mapHeaders(rows[headerRow]);
 
   const warnings: string[] = [];
   const cell = (row: string[], key: ColumnKey) =>
@@ -165,7 +185,7 @@ export function parseProductsCsv(text: string): ParseResult {
    *  diferentes viram variações do mesmo produto. */
   const groups = new Map<string, ParsedProduct>();
 
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerRow + 1; i < rows.length; i++) {
     const row = rows[i];
     const name = cell(row, "name");
     if (!name) {

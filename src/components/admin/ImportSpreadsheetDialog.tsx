@@ -9,7 +9,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, slugify } from "@/lib/utils";
-import { parseProductsCsv, type ParsedProduct } from "@/lib/csvImport";
+import { type ParsedProduct } from "@/lib/csvImport";
+import { parseProductsFile } from "@/lib/spreadsheetImport";
 import { createProduct, updateProduct } from "@/lib/firebase/products";
 import { createCategory, getCategories } from "@/lib/firebase/categories";
 import { toast } from "@/stores/toastStore";
@@ -73,8 +74,7 @@ export function ImportSpreadsheetDialog({
   async function handleFile(file: File | undefined) {
     if (!file) return;
     setFileName(file.name);
-    const text = await file.text();
-    const result = parseProductsCsv(text);
+    const result = await parseProductsFile(file);
     if (result.error) {
       toast.error(result.error);
       reset();
@@ -206,7 +206,7 @@ export function ImportSpreadsheetDialog({
         <DialogHeader>
           <DialogTitle>Importar produtos por planilha</DialogTitle>
           <DialogDescription>
-            Envie um arquivo <strong>.csv</strong> (no Excel/Google Sheets: Arquivo → Salvar como → CSV).
+            Envie a planilha do Excel (<strong>.xlsx</strong>) ou um arquivo <strong>.csv</strong>.
             Linhas com a mesma descrição e COR/AROMA/SABOR diferentes viram variações do mesmo produto.
           </DialogDescription>
         </DialogHeader>
@@ -220,8 +220,8 @@ export function ImportSpreadsheetDialog({
             >
               <FileSpreadsheet className="w-10 h-10" />
               <div>
-                <p className="text-sm font-semibold">Clique para escolher o arquivo .csv</p>
-                <p className="text-xs mt-0.5 opacity-70">Separado por ponto e vírgula (;) ou vírgula (,)</p>
+                <p className="text-sm font-semibold">Clique para escolher a planilha (.xlsx ou .csv)</p>
+                <p className="text-xs mt-0.5 opacity-70">Excel direto, ou CSV separado por ; ou ,</p>
               </div>
             </button>
             <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed">
@@ -324,7 +324,7 @@ export function ImportSpreadsheetDialog({
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
           className="hidden"
           onChange={e => handleFile(e.target.files?.[0])}
         />
