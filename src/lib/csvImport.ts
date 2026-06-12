@@ -109,13 +109,17 @@ export function mapHeaders(headerCells: string[]): Partial<Record<ColumnKey, num
  * um título mesclado, uma linha em branco ou um logo acima das colunas).
  * Retorna o índice da linha que tem pelo menos DESCRIÇÃO + PREÇO, ou -1.
  */
-function findHeaderRow(rows: string[][]): number {
-  const limit = Math.min(rows.length, 20); // o cabeçalho está sempre no topo
-  for (let i = 0; i < limit; i++) {
+export function findHeaderRow(rows: string[][]): number {
+  for (let i = 0; i < rows.length; i++) {
     const m = mapHeaders(rows[i]);
     if (m.name !== undefined && m.price !== undefined) return i;
   }
   return -1;
+}
+
+/** Primeira linha não-vazia (para diagnóstico de "cabeçalho não reconhecido"). */
+function firstNonEmptyRow(rows: string[][]): string[] | undefined {
+  return rows.find(r => r.some(c => c.trim().length > 0));
 }
 
 /* ── Números pt-BR ───────────────────────────────────────── */
@@ -169,10 +173,14 @@ export function parseProductsRows(rows: string[][]): ParseResult {
 
   const headerRow = findHeaderRow(rows);
   if (headerRow === -1) {
+    const found = firstNonEmptyRow(rows);
+    const preview = found
+      ? ` Colunas lidas: ${found.filter(c => c.trim()).map(c => `"${c.trim()}"`).join(", ")}.`
+      : " A planilha parece estar vazia.";
     return {
       products: [],
       warnings: [],
-      error: "Cabeçalho não reconhecido — a planilha precisa ter pelo menos as colunas DESCRIÇÃO DO PRODUTO (ou Nome) e PREÇO PIX/DINHEIRO (R$).",
+      error: "Cabeçalho não reconhecido — a planilha precisa ter pelo menos as colunas DESCRIÇÃO DO PRODUTO (ou Nome) e PREÇO PIX/DINHEIRO (R$)." + preview,
     };
   }
   const headers = mapHeaders(rows[headerRow]);
