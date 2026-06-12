@@ -42,11 +42,25 @@ async function readExcelRows(file: File): Promise<string[][]> {
   return firstRows ?? [];
 }
 
+/**
+ * Decodifica os bytes de um CSV respeitando o encoding.
+ * Excel pt-BR no Windows salva CSV como ANSI/Windows-1252 (não UTF-8), o que
+ * transforma "PREÇO"/"AÇÚCAR" em lixo se lido como UTF-8. Tentamos UTF-8 estrito
+ * e, se houver byte inválido, caímos para Windows-1252.
+ */
+export function decodeCsv(buf: ArrayBuffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder("windows-1252").decode(buf);
+  }
+}
+
 /** Faz o parse do arquivo enviado, detectando CSV vs Excel automaticamente. */
 export async function parseProductsFile(file: File): Promise<ParseResult> {
   if (isExcelFile(file)) {
     const rows = await readExcelRows(file);
     return parseProductsRows(rows);
   }
-  return parseProductsCsv(await file.text());
+  return parseProductsCsv(decodeCsv(await file.arrayBuffer()));
 }
