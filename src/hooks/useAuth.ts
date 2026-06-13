@@ -89,11 +89,12 @@ export function useAuth() {
     displayName: string,
     phone?: string,
     referralCode?: string,
-    birthDate?: string
+    birthDate?: string,
+    cpf?: string
   ) {
     let profile: UserProfile;
     try {
-      profile = await registerWithEmail(email, password, displayName, phone, referralCode, birthDate);
+      profile = await registerWithEmail(email, password, displayName, phone, referralCode, birthDate, cpf);
     } catch (err) {
       throw parseFirebaseError(err);
     }

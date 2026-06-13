@@ -122,3 +122,9 @@ export async function deleteCategory(id: string): Promise<void> {
   await deleteDoc(doc(db, COL, id));
   invalidate(COL);
 }
+
+/** Liga/desliga a campanha "Pontos em Dobro" da categoria (Task 3.5). */
+export async function setCategoryDoublePoints(id: string, doublePoints: boolean): Promise<void> {
+  await updateDoc(doc(db, COL, id), { doublePoints });
+  invalidate(COL);
+}

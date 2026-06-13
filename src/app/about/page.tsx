@@ -40,22 +40,22 @@ function FadeIn({
 const pillars = [
   {
     emoji: "🦈",
-    title: "Lifestyle",
-    desc: "Mais do que produtos — uma forma de viver. A Shark representa atitude, identidade e estilo de vida.",
+    title: "Atitude",
+    desc: "Mais do que produtos — uma forma de viver. A Shark é postura, presença e personalidade em cada detalhe.",
     color: "border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]",
     glow: "text-[var(--color-neon-blue)]",
   },
   {
     emoji: "💎",
-    title: "Exclusividade",
-    desc: "Seleção cuidadosa de produtos importados e nacionais para quem entende e exige o melhor.",
+    title: "Curadoria",
+    desc: "Seleção criteriosa de produtos importados e nacionais, escolhidos a dedo para quem entende e exige o melhor.",
     color: "border-purple-500/30 bg-purple-500/10",
     glow: "text-purple-400",
   },
   {
     emoji: "✨",
-    title: "Qualidade",
-    desc: "Do charuto premium ao acessório, tudo passa por critérios rigorosos antes de chegar até você.",
+    title: "Rigor",
+    desc: "Do charuto premium ao acessório, nada chega até você sem passar pelos nossos critérios de qualidade.",
     color: "border-amber-500/30 bg-amber-500/10",
     glow: "text-amber-400",
   },
@@ -138,7 +138,7 @@ export default function AboutPage() {
             transition={{ duration: 0.6, delay: 0.35 }}
             className="text-eyebrow text-[var(--color-text-muted)] mb-10"
           >
-            Lifestyle&nbsp;•&nbsp;Exclusividade&nbsp;•&nbsp;Qualidade
+            Atitude&nbsp;•&nbsp;Curadoria&nbsp;•&nbsp;Rigor
           </motion.p>
 
           {/* CTAs */}
@@ -196,10 +196,11 @@ export default function AboutPage() {
               <div className="glass rounded-2xl border border-[var(--color-border)] p-8 h-full">
                 <div className="text-4xl mb-4">🦈</div>
                 <p className="text-lg text-[var(--color-text-secondary)] leading-relaxed">
-                  A <strong className="text-[var(--color-text-primary)]">Shark Smokehouse</strong> não é
-                  só uma tabacaria — é <strong className="text-[var(--color-neon-blue)]">experiência</strong>,{" "}
-                  <strong className="text-[var(--color-neon-blue)]">estilo</strong> e{" "}
-                  <strong className="text-[var(--color-neon-blue)]">atitude</strong>.
+                  Fundada em <strong className="text-[var(--color-text-primary)]">2024</strong> em João Pessoa,
+                  a <strong className="text-[var(--color-text-primary)]">Shark Smokehouse</strong> não é
+                  só uma tabacaria — é <strong className="text-[var(--color-neon-blue)]">atitude</strong>,{" "}
+                  <strong className="text-[var(--color-neon-blue)]">curadoria</strong> e{" "}
+                  <strong className="text-[var(--color-neon-blue)]">rigor</strong>.
                 </p>
               </div>
             </FadeIn>

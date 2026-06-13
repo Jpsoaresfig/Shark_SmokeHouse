@@ -7,44 +7,28 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger,
 } from "@/components/ui/dialog";
 
-/* ── Níveis reais do clube (espelham os tiers do perfil) ──────────────
-   Benefícios são placeholders de marketing — serão definidos com os donos. */
-const TIERS = [
-  {
-    name: "Bronze",
-    color: "#cd7f32",
-    glow: "rgba(205,127,50,0.12)",
-    pointsRequired: 0,
-    benefits: ["5% de cashback", "Acesso antecipado a promoções", "Newsletter exclusiva"],
-  },
-  {
-    name: "Prata",
-    color: "#c0c0c0",
-    glow: "rgba(192,192,192,0.12)",
-    pointsRequired: 500,
-    benefits: ["10% de cashback", "Frete grátis nos pedidos", "Desconto no lounge", "Brinde mensal"],
-    popular: true,
-  },
-  {
-    name: "Ouro",
-    color: "#ffd700",
-    glow: "rgba(255,215,0,0.12)",
-    pointsRequired: 1000,
-    benefits: ["12% de cashback", "Personal shopper", "Eventos exclusivos"],
-  },
-  {
-    name: "Diamante",
-    color: "#00d4ff",
-    glow: "rgba(0,212,255,0.12)",
-    pointsRequired: 2500,
-    benefits: ["15% de cashback", "Acesso VIP ao lounge", "Kit boas-vindas premium", "Eventos exclusivos"],
-  },
-];
+import { LOYALTY_LEVELS, WELCOME_BONUS_POINTS } from "@/lib/loyalty/levels";
+
+/* ── Níveis reais do Clube Shark (engine única em lib/loyalty/levels) ── */
+const TIERS = LOYALTY_LEVELS.map((level) => ({
+  name: level.name,
+  color: level.color,
+  glow: level.glow.replace(/0\.2\d?\)$/, "0.12)"),
+  pointsRequired: level.min,
+  popular: level.name === "Hunter Shark",
+  benefits: [
+    `R$ 1,00 = ${level.earnRate} pontos`,
+    ...(level.birthdayBonus > 0
+      ? [`+${level.birthdayBonus} pontos no mês do aniversário`]
+      : []),
+    "Resgate de recompensas por pontos",
+  ],
+}));
 
 const HOW_IT_WORKS = [
-  { icon: UserPlus, label: "Ganhe 100 pontos só por se cadastrar" },
-  { icon: ShoppingBag, label: "Acumule pontos a cada compra que fizer" },
-  { icon: Users, label: "Indique amigos e ganhe 200 pontos por cadastro" },
+  { icon: UserPlus, label: `Ganhe ${WELCOME_BONUS_POINTS} pontos só por se cadastrar` },
+  { icon: ShoppingBag, label: "Acumule pontos a cada compra (taxa pelo seu nível)" },
+  { icon: Users, label: "Indique amigos: +50 pontos quando fizerem a 1ª compra" },
   { icon: Gift, label: "Troque seus pontos por recompensas exclusivas" },
 ];
 

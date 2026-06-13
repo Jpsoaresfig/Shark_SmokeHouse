@@ -1,9 +1,11 @@
 import {
   doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp,
-  collection, getDocs, query, orderBy, limit,
+  collection, getDocs, query, orderBy, limit, addDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { generateReferralCode, registerReferralCode } from "./loyalty";
+import { WELCOME_BONUS_POINTS } from "@/lib/loyalty/levels";
+import { isValidCpf, onlyDigits } from "@/lib/cpf";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { isOfLegalAge, legalAgeDate } from "@/lib/age";
 import type { UserProfile, UserRole } from "@/types";
@@ -13,10 +15,13 @@ const ADMIN_EMAIL = "admin@shark.com";
 
 export async function createUserProfile(
   uid: string,
-  data: { email: string; displayName: string; phone?: string; birthDate?: string }
+  data: { email: string; displayName: string; phone?: string; birthDate?: string; cpf?: string }
 ): Promise<UserProfile> {
   const ref = doc(db, COLLECTION, uid);
   const isAdmin = data.email === ADMIN_EMAIL;
+  // CPF é opcional, mas se vier deve ser válido (gate do Clube Shark).
+  const cpf = data.cpf ? onlyDigits(data.cpf) : "";
+  if (cpf && !isValidCpf(cpf)) throw new Error("CPF inválido.");
   // Every account gets a referral link, regardless of role.
   const referralCode = generateReferralCode();
   // Menor de idade: conta criada, mas bloqueada até completar 18 anos.
@@ -28,9 +33,10 @@ export async function createUserProfile(
     displayName: data.displayName,
     phone: data.phone ?? "",
     role: (isAdmin ? "admin" : "customer") as UserRole,
-    loyaltyPoints: isAdmin ? 0 : 100,
+    loyaltyPoints: isAdmin ? 0 : WELCOME_BONUS_POINTS,
     referralCode,
     addresses: [],
+    ...(cpf ? { cpf } : {}),
     ...(data.birthDate ? { birthDate: data.birthDate } : {}),
     ...(blockedUntil ? { blockedUntil } : {}),
     createdAt: serverTimestamp() as unknown as string,
@@ -38,6 +44,17 @@ export async function createUserProfile(
   };
   await setDoc(ref, profile);
   if (referralCode) await registerReferralCode(uid, referralCode);
+  // Lança o bônus de boas-vindas no ledger (não-admin) para que a validade de
+  // 180 dias seja rastreável por lote — o saldo inicial já reflete esses pontos.
+  if (!isAdmin && WELCOME_BONUS_POINTS > 0) {
+    await addDoc(collection(db, "loyaltyTransactions"), {
+      userId: uid,
+      type: "welcome",
+      points: WELCOME_BONUS_POINTS,
+      reason: "Bônus de boas-vindas",
+      createdAt: serverTimestamp(),
+    });
+  }
   return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 
@@ -74,10 +91,17 @@ export async function ensureReferralCode(profile: UserProfile): Promise<UserProf
 
 export async function updateUserProfile(
   uid: string,
-  data: Partial<Pick<UserProfile, "displayName" | "phone" | "photoURL" | "addresses">>
+  data: Partial<Pick<UserProfile, "displayName" | "phone" | "photoURL" | "addresses" | "cpf">>
 ): Promise<void> {
+  const payload = { ...data };
+  // CPF é opcional, mas se vier deve ser válido e é gravado só com dígitos.
+  if (payload.cpf !== undefined) {
+    const cpf = onlyDigits(payload.cpf);
+    if (cpf && !isValidCpf(cpf)) throw new Error("CPF inválido.");
+    payload.cpf = cpf;
+  }
   await updateDoc(doc(db, COLLECTION, uid), {
-    ...data,
+    ...payload,
     updatedAt: serverTimestamp(),
   });
 }

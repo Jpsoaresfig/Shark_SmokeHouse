@@ -9,7 +9,7 @@ import {
   MapPin, ChevronRight, Package, CheckCircle,
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, Banknote, Plus, Star,
-  Copy, Check, User, LogIn, MessageCircle, Wallet, CreditCard,
+  Copy, Check, User, LogIn, MessageCircle, Wallet, CreditCard, AlertCircle, Ticket,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,13 +22,18 @@ import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus } from "@/lib/firebase/orders";
 import { getProducts } from "@/lib/firebase/products";
+import { getCategories } from "@/lib/firebase/categories";
+import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
+import { evaluateCoupon, normalizeCouponCode } from "@/lib/coupons";
 import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
 import { manualGateway, mercadopagoGateway } from "@/lib/payments";
 import { getDeliveryAreas, normalizeArea } from "@/lib/firebase/delivery";
 import { formatCurrency } from "@/lib/utils";
+import { computeOrderPoints } from "@/lib/loyalty/levels";
+import { isValidCpf, formatCpf } from "@/lib/cpf";
 import { QRCodeSVG } from "qrcode.react";
-import type { Address, PaymentMethod, DeliveryArea } from "@/types";
+import type { Address, PaymentMethod, DeliveryArea, Coupon } from "@/types";
 
 /* ── CEP lookup ──────────────────────────────────────────── */
 async function fetchCep(zip: string) {
@@ -421,6 +426,14 @@ export default function CheckoutPage() {
 
   /* form state */
   const [phone, setPhone] = useState(user?.phone ?? "");
+  const [cpf, setCpf] = useState(user?.cpf ? formatCpf(user.cpf) : "");
+
+  /* coupon (Task 3.3) */
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [discount, setDiscount] = useState(0);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
   const [zip, setZip] = useState("");
   const [street, setStreet] = useState("");
   const [number, setNumber] = useState("");
@@ -445,7 +458,15 @@ export default function CheckoutPage() {
   const [paidTotal, setPaidTotal] = useState(0);
 
   const savedAddresses = user?.addresses ?? [];
-  const pointsToEarn = items.reduce((acc, i) => acc + (i.pointsEarned ?? 0) * i.quantity, 0);
+  // Estimativa de pontos pela engine do Clube Shark: taxa do nível atual sobre o
+  // subtotal de produtos, exigindo CPF. O crédito definitivo é recalculado na
+  // entrega (pode mudar se o nível do cliente subir até lá).
+  const pointsToEarn = computeOrderPoints({
+    eligibleReais: subtotal,
+    currentPoints: user?.loyaltyPoints ?? 0,
+    // Conta o CPF já salvo no perfil OU um válido digitado agora no checkout.
+    cpfPresent: !!(user?.cpf && user.cpf.trim()) || isValidCpf(cpf),
+  });
 
   /* fill form from saved address */
   const applySaved = useCallback((addr: Address) => {
@@ -531,7 +552,7 @@ export default function CheckoutPage() {
     : payment === "debit" ? (debitFeePercent ?? 0)
     : 0;
   const cardFeeAmount = Math.round((subtotal + effectiveDeliveryFee) * (cardPct / 100) * 100) / 100;
-  const effectiveTotal = subtotal + effectiveDeliveryFee + cardFeeAmount;
+  const effectiveTotal = Math.max(0, subtotal + effectiveDeliveryFee + cardFeeAmount - discount);
 
   // Link de WhatsApp para quando o bairro não está na lista de entrega.
   const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
@@ -544,8 +565,63 @@ export default function CheckoutPage() {
       // Entrega exige endereço completo E um bairro atendido (área selecionada).
       (street.trim() && number.trim() && city.trim() && state.trim() && zip.trim() && !!selectedArea));
 
+  async function applyCoupon() {
+    const code = normalizeCouponCode(couponInput);
+    if (!code || !user) return;
+    setCouponError("");
+    setCouponLoading(true);
+    try {
+      const coupon = await getCouponByCode(code);
+      if (!coupon) {
+        setCouponError("Cupom não encontrado.");
+        setAppliedCoupon(null); setDiscount(0);
+        return;
+      }
+      // Mapeia categoria de cada item (cupom pode ser restrito a categorias).
+      const products = await getProducts();
+      const catOf = new Map(products.map((p) => [p.id, p.category]));
+      const couponItems = items.map((i) => ({
+        categorySlug: catOf.get(i.productId) ?? "",
+        lineTotal: i.price * i.quantity,
+      }));
+      const cpfDigits = cpf.replace(/\D/g, "") || user.cpf || "";
+      const priorUses = coupon.usageLimitPerCpf != null && cpfDigits
+        ? await countCouponUsesForCpf(coupon.id, cpfDigits)
+        : 0;
+      const result = evaluateCoupon(coupon, {
+        items: couponItems,
+        cpf: cpfDigits || undefined,
+        priorUsesForCpf: priorUses,
+      });
+      if (!result.valid) {
+        setCouponError(result.message ?? "Cupom inválido.");
+        setAppliedCoupon(null); setDiscount(0);
+        return;
+      }
+      setAppliedCoupon(coupon);
+      setDiscount(result.discount);
+      toast.success(`Cupom ${coupon.code} aplicado!`);
+    } catch {
+      setCouponError("Não foi possível validar o cupom. Tente novamente.");
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setAppliedCoupon(null);
+    setDiscount(0);
+    setCouponInput("");
+    setCouponError("");
+  }
+
   async function handlePlaceOrder() {
     if (!canSubmit || !user) return;
+    // CPF é opcional, mas se preenchido precisa ser válido (gate do Clube Shark).
+    if (cpf.trim() && !isValidCpf(cpf)) {
+      toast.error("CPF inválido. Confira os números ou deixe o campo em branco.");
+      return;
+    }
     setPlacing(true);
     try {
       /* Revalida o estoque com dados frescos antes de finalizar. O helper soma a
@@ -557,6 +633,18 @@ export default function CheckoutPage() {
         toast.error(`Estoque insuficiente — ${describeShortages(shortages)}. Ajuste o carrinho para continuar.`);
         return;
       }
+
+      /* "Pontos em Dobro" (Task 3.5): congela o multiplicador de cada item NO
+         momento da compra — 2× quando o produto OU sua categoria está em campanha.
+         O crédito (na entrega) usa esse snapshot, então encerrar a campanha depois
+         não tira o benefício de quem já comprou. */
+      const cats = await getCategories();
+      const catDouble = new Map(cats.map((c) => [c.slug, !!c.doublePoints]));
+      const itemsForOrder = items.map((it) => {
+        const product = fresh.find((p) => p.id === it.productId);
+        const isDouble = !!product?.doublePoints || (!!product && (catDouble.get(product.category) ?? false));
+        return isDouble ? { ...it, pointsMultiplier: 2 } : it;
+      });
 
       const address: Address = isPickup
         ? {
@@ -588,10 +676,11 @@ export default function CheckoutPage() {
         customerId: user.uid,
         customerName: user.displayName ?? "Cliente",
         customerPhone: phone.trim() || user.phone || "",
-        items,
+        items: itemsForOrder,
         subtotal,
         deliveryFee: effectiveDeliveryFee,
         cardFee: cardFeeAmount,
+        discount: discount > 0 ? discount : undefined,
         total: effectiveTotal,
         status: "received",
         payment: paymentInfo,
@@ -619,6 +708,23 @@ export default function CheckoutPage() {
       /* save phone if changed */
       if (phone.trim() && phone.trim() !== user.phone) {
         await updateUserProfile(user.uid, { phone: phone.trim() });
+      }
+      /* salva o CPF no perfil se foi informado/alterado — habilita os pontos */
+      const cpfDigits = cpf.replace(/\D/g, "");
+      if (cpfDigits && cpfDigits !== user.cpf) {
+        await updateUserProfile(user.uid, { cpf: cpfDigits });
+      }
+
+      /* registra o uso do cupom (auditoria + limite por CPF — Task 3.3) */
+      if (appliedCoupon && discount > 0) {
+        await recordCouponRedemption({
+          couponId: appliedCoupon.id,
+          code: appliedCoupon.code,
+          cpf: cpfDigits || user.cpf || "",
+          userId: user.uid,
+          orderId: id,
+          discount,
+        }).catch((err) => console.error("Falha ao registrar uso do cupom:", err));
       }
 
       /* monta o link do WhatsApp e congela o total antes de limpar o carrinho */
@@ -692,7 +798,24 @@ export default function CheckoutPage() {
                     value={phone}
                     onChange={(e) => setPhone(maskPhone(e.target.value))}
                   />
+                  <Input
+                    label="CPF (opcional)"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="000.000.000-00"
+                    icon={<CreditCard className="w-4 h-4" />}
+                    value={cpf}
+                    onChange={(e) => setCpf(formatCpf(e.target.value))}
+                  />
                 </div>
+                {!cpf.trim() && (
+                  <div className="mt-3 flex items-start gap-2.5 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2.5">
+                    <AlertCircle className="w-4 h-4 text-[var(--color-warning)] shrink-0 mt-0.5" />
+                    <p className="text-xs text-[var(--color-warning)]">
+                      O preenchimento do CPF é estritamente necessário para o acúmulo e resgate de pontos no Clube Shark.
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1094,6 +1217,42 @@ export default function CheckoutPage() {
 
                 <Separator className="mb-4" />
 
+                {/* Cupom de desconto (Task 3.3) */}
+                <div className="mb-4">
+                  {appliedCoupon ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-success)]/30 bg-[var(--color-success)]/10 px-3 py-2.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Ticket className="w-4 h-4 text-[var(--color-success)] shrink-0" />
+                        <span className="text-sm font-medium text-[var(--color-success)] truncate">
+                          Cupom {appliedCoupon.code} aplicado
+                        </span>
+                      </div>
+                      <button onClick={removeCoupon} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error)] shrink-0">
+                        Remover
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+                          <input
+                            value={couponInput}
+                            onChange={(e) => { setCouponInput(normalizeCouponCode(e.target.value)); setCouponError(""); }}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } }}
+                            placeholder="Cupom de desconto"
+                            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-9 pr-3 py-2.5 text-sm uppercase text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] placeholder:normal-case focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                          />
+                        </div>
+                        <Button variant="secondary" onClick={applyCoupon} disabled={couponLoading || !couponInput.trim()}>
+                          {couponLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Aplicar"}
+                        </Button>
+                      </div>
+                      {couponError && <p className="text-xs text-[var(--color-error)] mt-1.5">{couponError}</p>}
+                    </>
+                  )}
+                </div>
+
                 {/* Totals */}
                 <div className="space-y-2 mb-4">
                   <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
@@ -1132,6 +1291,14 @@ export default function CheckoutPage() {
                       <span className={cardPct > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
                         {cardPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}
                       </span>
+                    </div>
+                  )}
+                  {discount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[var(--color-success)]">
+                        Desconto{appliedCoupon ? ` · ${appliedCoupon.code}` : ""}
+                      </span>
+                      <span className="text-[var(--color-success)]">−{formatCurrency(discount)}</span>
                     </div>
                   )}
                   <Separator />

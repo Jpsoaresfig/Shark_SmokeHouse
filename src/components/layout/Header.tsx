@@ -6,18 +6,21 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShoppingCart, Menu, X, LogOut, Star,
-  Package, BarChart3, User as UserIcon,
+  Package, BarChart3, User as UserIcon, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
 import { MyOrdersButton } from "@/components/shop/MyOrdersButton";
 import { useCartStore } from "@/stores/cartStore";
 import { useSiteSections } from "@/stores/siteSettingsStore";
+import { getCategories } from "@/lib/firebase/categories";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import type { Category } from "@/types";
 
 const allNavLinks = [
   { href: "/catalog", label: "Catálogo" },
+  { href: "/clube",   label: "Clube"    },
   { href: "/lounge",  label: "Lounge"   },
   { href: "/events",  label: "Eventos"  },
   { href: "/about",   label: "Sobre"    },
@@ -27,6 +30,8 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileCatsOpen, setMobileCatsOpen] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
   const pathname = usePathname();
 
   const itemCount = useCartStore((s) => s.itemCount);
@@ -37,6 +42,11 @@ export function Header() {
   const navLinks = allNavLinks.filter(
     (link) => link.href !== "/lounge" || sections.lounge
   );
+
+  /* Categorias para o menu cascata do Catálogo (Task 4.2) */
+  useEffect(() => {
+    getCategories().then(setCategories).catch(() => {});
+  }, []);
 
   /* Scroll listener */
   useEffect(() => {
@@ -91,15 +101,50 @@ export function Header() {
 
             {/* Desktop Nav */}
             <nav className="hidden md:flex items-center gap-8">
-              {navLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className="text-eyebrow text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] border-b-2 border-transparent hover:border-[var(--color-neon-blue)] pb-0.5 transition-all duration-200"
-                >
-                  {link.label}
-                </Link>
-              ))}
+              {navLinks.map((link) =>
+                link.href === "/catalog" && categories.length > 0 ? (
+                  // Menu cascata de categorias (Task 4.2) — abre no hover, via CSS,
+                  // sem recarregar a página; clicar numa categoria filtra o catálogo.
+                  <div key={link.href} className="relative group">
+                    <Link
+                      href={link.href}
+                      className="flex items-center gap-1 text-eyebrow text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)] border-b-2 border-transparent group-hover:border-[var(--color-neon-blue)] pb-0.5 transition-all duration-200"
+                    >
+                      {link.label}
+                      <ChevronDown className="w-3.5 h-3.5 transition-transform duration-200 group-hover:rotate-180" />
+                    </Link>
+                    {/* pt-3 cria a "ponte" de hover entre o link e o painel */}
+                    <div className="absolute left-1/2 -translate-x-1/2 top-full pt-3 opacity-0 invisible translate-y-1 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 transition-all duration-200">
+                      <div className="w-56 glass-strong rounded-xl border border-[var(--color-border)] shadow-[var(--shadow-elevated)] py-1.5 max-h-[70vh] overflow-y-auto">
+                        <Link
+                          href="/catalog"
+                          className="block px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                        >
+                          Todos os produtos
+                        </Link>
+                        <div className="border-t border-[var(--color-border)] my-1" />
+                        {categories.map((c) => (
+                          <Link
+                            key={c.id}
+                            href={`/catalog?cat=${c.slug}`}
+                            className="block px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                          >
+                            {c.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="text-eyebrow text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] border-b-2 border-transparent hover:border-[var(--color-neon-blue)] pb-0.5 transition-all duration-200"
+                  >
+                    {link.label}
+                  </Link>
+                ),
+              )}
             </nav>
 
             {/* Right actions */}
@@ -284,15 +329,55 @@ export function Header() {
                 {/* Navigation */}
                 <div className="space-y-0.5">
                   <p className="text-eyebrow text-[var(--color-text-muted)] px-3 mb-1.5">Navegação</p>
-                  {navLinks.map((link) => (
-                    <DrawerLink
-                      key={link.href}
-                      href={link.href}
-                      onClick={() => setMobileOpen(false)}
-                    >
-                      {link.label}
-                    </DrawerLink>
-                  ))}
+                  {navLinks.map((link) =>
+                    link.href === "/catalog" && categories.length > 0 ? (
+                      // Catálogo com cascata de categorias (Task 4.2) — expande no toque.
+                      <div key={link.href}>
+                        <div className="flex items-center">
+                          <DrawerLink href={link.href} onClick={() => setMobileOpen(false)} className="flex-1">
+                            {link.label}
+                          </DrawerLink>
+                          <button
+                            onClick={() => setMobileCatsOpen((v) => !v)}
+                            aria-label="Categorias"
+                            aria-expanded={mobileCatsOpen}
+                            className="w-11 h-12 flex items-center justify-center rounded-xl text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                          >
+                            <ChevronDown className={cn("w-4 h-4 transition-transform", mobileCatsOpen && "rotate-180")} />
+                          </button>
+                        </div>
+                        <AnimatePresence initial={false}>
+                          {mobileCatsOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              className="overflow-hidden"
+                            >
+                              {categories.map((c) => (
+                                <DrawerLink
+                                  key={c.id}
+                                  href={`/catalog?cat=${c.slug}`}
+                                  onClick={() => setMobileOpen(false)}
+                                  className="h-10 pl-7 text-[var(--color-text-muted)]"
+                                >
+                                  {c.label}
+                                </DrawerLink>
+                              ))}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    ) : (
+                      <DrawerLink
+                        key={link.href}
+                        href={link.href}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        {link.label}
+                      </DrawerLink>
+                    ),
+                  )}
                 </div>
 
                 {/* User-specific */}
@@ -376,18 +461,22 @@ function DropdownLink({
 }
 
 function DrawerLink({
-  href, icon: Icon, children, onClick,
+  href, icon: Icon, children, onClick, className,
 }: {
   href: string;
   icon?: React.ElementType;
   children: React.ReactNode;
   onClick?: () => void;
+  className?: string;
 }) {
   return (
     <Link
       href={href}
       onClick={onClick}
-      className="flex items-center gap-3 px-3 h-12 rounded-xl text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-hover)] transition-colors"
+      className={cn(
+        "flex items-center gap-3 px-3 h-12 rounded-xl text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-bg-hover)] active:bg-[var(--color-bg-hover)] transition-colors",
+        className,
+      )}
     >
       {Icon && <Icon className="w-4 h-4 shrink-0" />}
       <span className="truncate">{children}</span>

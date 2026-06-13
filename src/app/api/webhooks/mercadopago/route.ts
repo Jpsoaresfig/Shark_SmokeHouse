@@ -5,6 +5,7 @@ import {
   mapMercadoPagoStatus,
 } from "@/lib/payments/mercadopago";
 import { applyPaymentStatusAdmin, getOrderAdmin } from "@/lib/firebase/orders.server";
+import { qualifyReferralForPaidOrder } from "@/lib/firebase/referrals.server";
 
 export const runtime = "nodejs";
 
@@ -80,6 +81,18 @@ export async function POST(request: NextRequest) {
     const applied = await applyPaymentStatusAdmin(orderId, target, {
       note: `Mercado Pago: pagamento ${paymentId} (${payment.status})`,
     });
+
+    // Compra paga → libera a bonificação de indicação se for a 1ª compra do
+    // indicado (Task 3.2). Idempotente: só credita uma vez. Não derruba o webhook
+    // se falhar — a baixa do pagamento já foi aplicada acima.
+    if (applied && target === "paid") {
+      try {
+        const paidOrder = await getOrderAdmin(orderId);
+        if (paidOrder) await qualifyReferralForPaidOrder(paidOrder);
+      } catch (err) {
+        console.error("Webhook MP: falha ao qualificar indicação", { orderId, err });
+      }
+    }
 
     return NextResponse.json({ received: true, orderId, status: target, applied });
   } catch (err) {

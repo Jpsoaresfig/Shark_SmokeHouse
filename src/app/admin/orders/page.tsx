@@ -18,7 +18,7 @@ import {
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus, assignOrderMotoboy } from "@/lib/firebase/orders";
 import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
-import { awardPurchasePoints } from "@/lib/firebase/loyalty";
+import { awardPurchasePointsForOrder } from "@/lib/firebase/loyalty";
 import { getAllUsers } from "@/lib/firebase/users";
 import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
@@ -99,13 +99,17 @@ export default function AdminOrders() {
 
   /** Credita os pontos de um pedido entregue pelo motoboy (que não pode creditar). */
   async function handleAwardPoints() {
-    if (!selected || selected.pointsAwarded || !(selected.pointsEarned ?? 0)) return;
+    if (!selected || selected.pointsAwarded || selected.isRedemption) return;
     setAwardingPoints(true);
     try {
-      await awardPurchasePoints(selected.customerId, selected.pointsEarned!, selected.id);
+      const points = await awardPurchasePointsForOrder(selected);
       await markOrderPointsAwarded(selected.id);
       setSelected({ ...selected, pointsAwarded: true });
-      toast.success(`${selected.pointsEarned!.toLocaleString("pt-BR")} pontos creditados ao cliente!`);
+      toast.success(
+        points > 0
+          ? `${points.toLocaleString("pt-BR")} pontos creditados ao cliente!`
+          : "Pedido sem pontos: cliente sem CPF cadastrado.",
+      );
     } catch {
       toast.error("Erro ao creditar os pontos.");
     } finally {
@@ -175,15 +179,16 @@ export default function AdminOrders() {
     try {
       await updateOrderStatus(selected.id, newStatus, note || undefined);
 
-      // Credit loyalty points once the order is delivered (guarded against double-award).
-      if (
-        newStatus === "delivered" &&
-        !selected.pointsAwarded &&
-        (selected.pointsEarned ?? 0) > 0
-      ) {
-        await awardPurchasePoints(selected.customerId, selected.pointsEarned!, selected.id);
+      // Credita os pontos da compra na entrega (guardado contra crédito duplo).
+      // A engine recalcula pela taxa do nível atual e exige CPF (Task 3.7).
+      if (newStatus === "delivered" && !selected.pointsAwarded && !selected.isRedemption) {
+        const points = await awardPurchasePointsForOrder(selected);
         await markOrderPointsAwarded(selected.id);
-        toast.success(`Pedido entregue! ${selected.pointsEarned!.toLocaleString("pt-BR")} pontos creditados ao cliente.`);
+        toast.success(
+          points > 0
+            ? `Pedido entregue! ${points.toLocaleString("pt-BR")} pontos creditados ao cliente.`
+            : "Pedido entregue! (Sem pontos — cliente sem CPF cadastrado.)",
+        );
       } else {
         toast.success("Status do pedido atualizado!");
       }
@@ -509,12 +514,16 @@ export default function AdminOrders() {
                 );
               })()}
 
-              {/* Pontos pendentes (entrega confirmada pelo motoboy não credita sozinha) */}
-              {selected.status === "delivered" && !selected.pointsAwarded && (selected.pointsEarned ?? 0) > 0 && (
+              {/* Pontos pendentes (entrega confirmada pelo motoboy não credita sozinha).
+                  O valor exibido é a estimativa do checkout; o crédito recalcula pela
+                  taxa do nível atual e exige CPF (engine do Clube Shark). */}
+              {selected.status === "delivered" && !selected.pointsAwarded && !selected.isRedemption && (
                 <div className="flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5">
                   <div className="flex items-center gap-2 text-sm text-[var(--color-warning)]">
                     <Star className="w-4 h-4 shrink-0" />
-                    {selected.pointsEarned!.toLocaleString("pt-BR")} pontos pendentes de crédito.
+                    {(selected.pointsEarned ?? 0) > 0
+                      ? `≈ ${selected.pointsEarned!.toLocaleString("pt-BR")} pontos a creditar.`
+                      : "Pontos a creditar (conforme nível e CPF do cliente)."}
                   </div>
                   <Button variant="secondary" size="sm" onClick={handleAwardPoints} disabled={awardingPoints}>
                     {awardingPoints

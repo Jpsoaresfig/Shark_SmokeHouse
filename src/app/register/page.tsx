@@ -6,13 +6,14 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail, Lock, User, Phone, Eye, EyeOff,
-  ArrowRight, CheckCircle, AlertCircle, Sparkles, Calendar,
+  ArrowRight, CheckCircle, AlertCircle, Sparkles, Calendar, CreditCard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/ui/Logo";
 import { useAuth } from "@/hooks/useAuth";
 import type { AuthError } from "@/hooks/useAuth";
+import { isValidCpf, formatCpf } from "@/lib/cpf";
 
 function GoogleIcon() {
   return (
@@ -43,6 +44,7 @@ function RegisterForm() {
     email: emailFromLogin,
     phone: "",
     birthDate: "",
+    cpf: "",
     password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -53,9 +55,14 @@ function RegisterForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    // CPF é opcional, mas se preenchido precisa ser válido antes de prosseguir.
+    if (form.cpf.trim() && !isValidCpf(form.cpf)) {
+      setError("CPF inválido. Confira os números ou deixe o campo em branco.");
+      return;
+    }
     setLoading(true);
     try {
-      await register(form.email, form.password, form.name, form.phone, refCode || undefined, form.birthDate);
+      await register(form.email, form.password, form.name, form.phone, refCode || undefined, form.birthDate, form.cpf || undefined);
     } catch (err) {
       setError((err as AuthError).message);
     } finally {
@@ -95,7 +102,7 @@ function RegisterForm() {
                 Você foi convidado!
               </p>
               <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                Ganhe <strong>100 pontos</strong> de boas-vindas <strong>+ 100 pontos</strong> de bônus por indicação ao criar sua conta.
+                Ganhe seus <strong>pontos de boas-vindas</strong> ao criar a conta. E ao fazer sua <strong>1ª compra</strong>, quem te indicou também é recompensado.
               </p>
             </div>
           </motion.div>
@@ -181,6 +188,25 @@ function RegisterForm() {
           max={new Date().toISOString().slice(0, 10)}
           required
         />
+        <div className="flex flex-col gap-1.5">
+          <Input
+            type="text"
+            inputMode="numeric"
+            label="CPF (opcional)"
+            placeholder="000.000.000-00"
+            icon={<CreditCard className="w-4 h-4" />}
+            value={form.cpf}
+            onChange={(e) => setForm({ ...form, cpf: formatCpf(e.target.value) })}
+          />
+          {!form.cpf.trim() && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-[var(--color-warning)] shrink-0 mt-0.5" />
+              <p className="text-xs text-[var(--color-warning)]">
+                O preenchimento do CPF é estritamente necessário para o acúmulo e resgate de pontos no Clube Shark.
+              </p>
+            </div>
+          )}
+        </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-sm font-medium text-[var(--color-text-secondary)]">Senha</label>
           <div className="relative">

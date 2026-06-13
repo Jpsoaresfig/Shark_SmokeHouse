@@ -19,34 +19,13 @@ import {
 import { getUserProfile } from "@/lib/firebase/users";
 import { formatDateTime } from "@/lib/utils";
 import { LoyaltyProgramModal } from "@/components/account/LoyaltyProgramModal";
+import { getLevel, getNextLevel, getLevelProgress } from "@/lib/loyalty/levels";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
-/* ── Tier helpers ────────────────────────────────────────── */
-const TIERS = [
-  { name: "Bronze",   min: 0,    max: 499,  color: "#cd7f32", glow: "rgba(205,127,50,0.2)"  },
-  { name: "Prata",    min: 500,  max: 999,  color: "#c0c0c0", glow: "rgba(192,192,192,0.2)" },
-  { name: "Ouro",     min: 1000, max: 2499, color: "#ffd700", glow: "rgba(255,215,0,0.2)"   },
-  { name: "Diamante", min: 2500, max: Infinity, color: "#00d4ff", glow: "rgba(0,212,255,0.2)" },
-];
-
-function getTier(points: number) {
-  return TIERS.find((t) => points >= t.min && points <= t.max) ?? TIERS[0];
-}
-
-function getTierProgress(points: number) {
-  const tier = getTier(points);
-  const idx = TIERS.indexOf(tier);
-  if (idx === TIERS.length - 1) return 100;
-  const next = TIERS[idx + 1];
-  return Math.round(((points - tier.min) / (next.min - tier.min)) * 100);
-}
-
-function getNextTier(points: number) {
-  const tier = getTier(points);
-  const idx = TIERS.indexOf(tier);
-  if (idx === TIERS.length - 1) return null;
-  return TIERS[idx + 1];
-}
+/* ── Tier helpers (níveis reais do Clube Shark — engine única) ── */
+const getTier = getLevel;
+const getNextTier = getNextLevel;
+const getTierProgress = getLevelProgress;
 
 /* ── Transaction type label ──────────────────────────────── */
 const txLabels: Record<string, { label: string; positive: boolean }> = {
@@ -55,6 +34,7 @@ const txLabels: Record<string, { label: string; positive: boolean }> = {
   bonus:    { label: "Bônus",            positive: true  },
   welcome:  { label: "Boas-vindas",      positive: true  },
   redeemed: { label: "Resgate",          positive: false },
+  expired:  { label: "Pontos expirados", positive: false },
 };
 
 /* ── Referral link card ──────────────────────────────────── */
@@ -365,17 +345,19 @@ export default function AccountPage() {
 
             {/* Tier perks */}
             <div className="mt-5 flex flex-wrap gap-2">
-              {tier.name === "Diamante" && (
+              {!nextTier && (
                 <span className="text-xs px-3 py-1 rounded-full border border-[var(--color-neon-blue)]/40 text-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)]">
                   Nível máximo atingido!
                 </span>
               )}
               <span className="text-xs px-3 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)]">
-                +100 pts no cadastro
+                R$ 1 = {tier.earnRate} pts neste nível
               </span>
-              <span className="text-xs px-3 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)]">
-                +200 pts por indicação
-              </span>
+              {tier.birthdayBonus > 0 && (
+                <span className="text-xs px-3 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)]">
+                  +{tier.birthdayBonus} pts no mês do aniversário
+                </span>
+              )}
             </div>
           </div>
         </motion.div>

@@ -29,17 +29,14 @@ service cloud.firestore {
       allow read: if isOwner(uid) || isAdmin() || isSeller();
       allow create: if isOwner(uid);
       // Owner: atualiza o próprio perfil (menos o campo role). Inclui o débito
-      // dos próprios pontos no resgate e o bônus de quem foi indicado.
+      // dos próprios pontos no resgate.
       // Admin: tudo.
-      // Crédito de indicação: um usuário logado pode somar APENAS os pontos
-      // exatos da indicação (+200) na conta de OUTRO usuário (o indicador),
-      // mexendo só em loyaltyPoints/updatedAt. Isso impede que alguém dê pontos
-      // arbitrários a si mesmo (pontos valem recompensas/dinheiro).
+      // A bonificação de indicação NÃO é mais creditada pelo cliente: ela acontece
+      // no servidor (Admin SDK, via qualifyReferralForPaidOrder) somente após a 1ª
+      // compra paga do indicado — por isso não há regra cliente que permita somar
+      // pontos na conta de OUTRO usuário (fechando o vetor de abuso anterior).
       allow update: if (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
-                    || isAdmin()
-                    || (isAuth()
-                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['loyaltyPoints', 'updatedAt'])
-                        && request.resource.data.loyaltyPoints == resource.data.loyaltyPoints + 200);
+                    || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -128,6 +125,43 @@ service cloud.firestore {
       allow create, update: if isAdmin()
                             || (isAuth() && request.resource.data.uid == request.auth.uid);
       allow delete: if isAdmin();
+    }
+
+    // ── Referrals (vínculo indicador↔indicado) ────────────────
+    // Doc id = uid do indicado. Criado pelo próprio indicado no cadastro, sempre
+    // como "pending" e sem pontos — a bonificação ao indicador só é liberada na
+    // 1ª compra paga (Task 3.2), por caminho confiável (servidor/admin).
+    // Leitura: o indicado, o indicador ou um admin.
+    match /referrals/{referredUserId} {
+      allow read: if isAuth() && (
+        referredUserId == request.auth.uid ||
+        resource.data.referrerId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuth()
+                    && referredUserId == request.auth.uid
+                    && request.resource.data.referredUserId == request.auth.uid
+                    && request.resource.data.referrerId != request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.pointsAwarded == 0;
+      // A promoção para "qualified" + crédito de pontos é feita pelo admin/servidor.
+      allow update, delete: if isAdmin();
+    }
+
+    // ── Cupons de desconto (Task 3.3) ─────────────────────────
+    // Leitura por usuários logados (validação do código no checkout).
+    // Gerenciamento (criar/editar/excluir) restrito a admin/vendedor.
+    match /coupons/{code} {
+      allow read: if isAuth();
+      allow write: if isAdmin() || isSeller();
+    }
+
+    // Registros de uso do cupom: o cliente cria o próprio uso ao fechar o pedido;
+    // leitura liberada a logados (contagem por CPF no checkout). Edição/remoção admin.
+    match /couponRedemptions/{id} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
     // ── Lounge Bookings ───────────────────────────────────────

@@ -15,18 +15,20 @@ import {
 import { formatCurrency, slugify } from "@/lib/utils";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/firebase/products";
 import {
-  getCategories, ensureCategoriesSeeded, createCategory, deleteCategory,
+  getCategories, ensureCategoriesSeeded, createCategory, deleteCategory, setCategoryDoublePoints,
 } from "@/lib/firebase/categories";
 import { CloudinaryUpload, uploadToCloudinary } from "@/components/ui/CloudinaryUpload";
 import { ImportSpreadsheetDialog } from "@/components/admin/ImportSpreadsheetDialog";
 import { toast } from "@/stores/toastStore";
+import { computeRedemption, MIN_REDEMPTION_MARGIN, REDEMPTION_POINTS_PER_REAL } from "@/lib/loyalty/redemption";
 import type { Product, ProductCategory, Category } from "@/types";
 
 const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
   price: 0, compareAtPrice: undefined, category: "",
   tags: [], images: [], stock: 0, minStock: 5,
-  sku: "", featured: false, active: true, loyaltyPoints: undefined,
+  sku: "", featured: false, active: true, doublePoints: false, loyaltyPoints: undefined,
+  redeemDisabled: false, loyaltyPointsOverride: undefined,
   pointsEarned: undefined, colors: [], variations: [],
   brand: "", size: "", costPrice: undefined, taxPercent: undefined,
 };
@@ -44,7 +46,6 @@ export default function AdminProducts() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState(EMPTY);
-  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
   const [earnEnabled, setEarnEnabled] = useState(false);
   const [colorInput, setColorInput] = useState("");
   /* Campos da nova variação (grade) */
@@ -218,17 +219,28 @@ export default function AdminProducts() {
     }
   }
 
+  /** Liga/desliga a campanha "Pontos em Dobro" da categoria (Task 3.5). */
+  async function handleToggleCategoryDouble(cat: Category) {
+    const next = !cat.doublePoints;
+    setCategories(prev => prev.map(c => c.id === cat.id ? { ...c, doublePoints: next } : c));
+    try {
+      await setCategoryDoublePoints(cat.id, next);
+      toast.success(next ? `Pontos em dobro ativados em ${cat.label}.` : `Pontos em dobro desativados em ${cat.label}.`);
+    } catch {
+      setCategories(prev => prev.map(c => c.id === cat.id ? { ...c, doublePoints: !next } : c));
+      toast.error("Não foi possível alterar a campanha. Tente novamente.");
+    }
+  }
+
   function openAdd() {
     setEditing(null);
     setForm({ ...EMPTY, category: categories[0]?.slug ?? "" });
-    setLoyaltyEnabled(false);
     setEarnEnabled(false);
     setOpen(true);
   }
 
   function openEdit(p: Product) {
     setEditing(p);
-    setLoyaltyEnabled(!!p.loyaltyPoints);
     setEarnEnabled(!!p.pointsEarned);
     setForm({
       name: p.name, slug: p.slug, description: p.description,
@@ -237,7 +249,10 @@ export default function AdminProducts() {
       category: p.category, tags: p.tags ?? [],
       images: p.images, stock: p.stock, minStock: p.minStock,
       sku: p.sku ?? "", featured: p.featured ?? false, active: p.active,
+      doublePoints: p.doublePoints ?? false,
       loyaltyPoints: p.loyaltyPoints,
+      redeemDisabled: p.redeemDisabled ?? false,
+      loyaltyPointsOverride: p.loyaltyPointsOverride,
       pointsEarned: p.pointsEarned,
       colors: p.colors ?? [],
       variations: p.variations ?? [],
@@ -269,19 +284,32 @@ export default function AdminProducts() {
         ...(v.image ? { image: v.image } : {}), // sem undefined (Firestore rejeita)
       }));
       const usesVariations = cleanVariations.length > 0;
+      const priceNum = Number(form.price);
+      const costNum = form.costPrice ? Number(form.costPrice) : undefined;
+      const taxNum = form.taxPercent ? Number(form.taxPercent) : undefined;
+      const overrideNum = form.loyaltyPointsOverride ? Number(form.loyaltyPointsOverride) : undefined;
+      // Motor de resgate (Task 3.6): deriva o custo EFETIVO em pontos a partir da
+      // margem/fórmula/overwrite e persiste só quando elegível, para o cliente não
+      // recalcular margem na leitura.
+      const redemption = computeRedemption({
+        price: priceNum, costPrice: costNum, taxPercent: taxNum,
+        redeemDisabled: form.redeemDisabled, loyaltyPointsOverride: overrideNum,
+      });
       const payload = {
         ...form,
-        price: Number(form.price),
+        price: priceNum,
         compareAtPrice: form.compareAtPrice ? Number(form.compareAtPrice) : undefined,
         stock: usesVariations ? cleanVariations.reduce((s, v) => s + v.stock, 0) : Number(form.stock),
         minStock: Number(form.minStock),
         variations: cleanVariations,
-        loyaltyPoints: loyaltyEnabled && form.loyaltyPoints ? Number(form.loyaltyPoints) : undefined,
+        loyaltyPoints: redemption.eligible ? redemption.pointsCost ?? undefined : undefined,
+        redeemDisabled: form.redeemDisabled || undefined,
+        loyaltyPointsOverride: overrideNum,
         pointsEarned: earnEnabled && form.pointsEarned ? Number(form.pointsEarned) : undefined,
         brand: form.brand?.trim() || undefined,
         size: form.size?.trim() || undefined,
-        costPrice: form.costPrice ? Number(form.costPrice) : undefined,
-        taxPercent: form.taxPercent ? Number(form.taxPercent) : undefined,
+        costPrice: costNum,
+        taxPercent: taxNum,
       };
       if (editing) {
         await updateProduct(editing.id, payload);
@@ -405,6 +433,11 @@ export default function AdminProducts() {
                             <span className="font-semibold text-[var(--color-text-primary)]">{p.name}</span>
                             <Badge variant="secondary">{categoryLabel(p.category)}</Badge>
                             {p.featured && <Badge variant="premium">Destaque</Badge>}
+                            {p.doublePoints && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
+                                <Star className="w-3 h-3" /> Pontos 2×
+                              </span>
+                            )}
                             {!p.active && <Badge variant="destructive">Inativo</Badge>}
                             {p.loyaltyPoints && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
@@ -569,63 +602,85 @@ export default function AdminProducts() {
               onChange={e => set("minStock", e.target.value)}
             />
 
-            {/* Loyalty toggle */}
+            {/* Resgate por pontos — motor de regras (Task 3.6) */}
             <div className="sm:col-span-2 pt-1">
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex-1 h-px bg-[var(--color-border)]" />
                 <div className="flex items-center gap-1.5 px-2">
                   <Star className="w-3.5 h-3.5 text-[var(--color-warning)]" />
-                  <span className="text-xs font-semibold text-[var(--color-warning)] uppercase tracking-wide">Clube Fidelidade</span>
+                  <span className="text-xs font-semibold text-[var(--color-warning)] uppercase tracking-wide">Resgate por pontos</span>
                 </div>
                 <div className="flex-1 h-px bg-[var(--color-border)]" />
               </div>
 
-              <div className={`rounded-xl border p-4 transition-all ${loyaltyEnabled ? "border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5" : "border-[var(--color-border)] bg-[var(--color-bg-overlay)]"}`}>
-                {/* Toggle row */}
-                <label className="flex items-center justify-between cursor-pointer mb-0">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${loyaltyEnabled ? "bg-[var(--color-warning)]/15" : "bg-[var(--color-bg-elevated)]"}`}>
-                      <Star className={`w-4 h-4 transition-colors ${loyaltyEnabled ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`} />
-                    </div>
-                    <div>
-                      <p className={`text-sm font-semibold transition-colors ${loyaltyEnabled ? "text-[var(--color-warning)]" : "text-[var(--color-text-secondary)]"}`}>
-                        Disponível para resgate por pontos
-                      </p>
-                      <p className="text-xs text-[var(--color-text-muted)]">
-                        {loyaltyEnabled ? "Aparece em Minha Conta dos clientes" : "Produto vendido normalmente, sem resgate"}
-                      </p>
-                    </div>
-                  </div>
-                  <div
-                    onClick={() => {
-                      const next = !loyaltyEnabled;
-                      setLoyaltyEnabled(next);
-                      if (!next) set("loyaltyPoints", undefined);
-                    }}
-                    className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer shrink-0 ${loyaltyEnabled ? "bg-[var(--color-warning)]" : "bg-[var(--color-bg-elevated)] border border-[var(--color-border-strong)]"}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${loyaltyEnabled ? "translate-x-5" : "translate-x-0"}`} />
-                  </div>
-                </label>
+              {(() => {
+                const redemption = computeRedemption({
+                  price: Number(form.price) || 0,
+                  costPrice: form.costPrice ? Number(form.costPrice) : undefined,
+                  taxPercent: form.taxPercent ? Number(form.taxPercent) : undefined,
+                  redeemDisabled: form.redeemDisabled,
+                  loyaltyPointsOverride: form.loyaltyPointsOverride ? Number(form.loyaltyPointsOverride) : undefined,
+                });
+                const marginPct = redemption.margin != null ? Math.round(redemption.margin * 1000) / 10 : null;
+                const statusText = {
+                  disabled: "Resgate desativado manualmente.",
+                  "no-cost": "Cadastre o custo da unidade para liberar o resgate (margem indeterminada).",
+                  "below-margin": `Margem abaixo de ${MIN_REDEMPTION_MARGIN * 100}% — resgate bloqueado pela trava de segurança.`,
+                  override: `Resgate liberado por override manual — ${redemption.pointsCost?.toLocaleString("pt-BR")} pontos.`,
+                  formula: `Elegível — ${redemption.pointsCost?.toLocaleString("pt-BR")} pontos (R$ ${(Number(form.price) || 0).toLocaleString("pt-BR")} × ${REDEMPTION_POINTS_PER_REAL}).`,
+                }[redemption.basis];
 
-                {/* Points field — shown only when enabled */}
-                {loyaltyEnabled && (
-                  <div className="mt-4 pt-4 border-t border-[var(--color-warning)]/20">
-                    <Input
-                      label="Pontos necessários para resgate *"
-                      type="number"
-                      min="1"
-                      step="50"
-                      value={form.loyaltyPoints ?? ""}
-                      onChange={e => set("loyaltyPoints", e.target.value || undefined)}
-                      placeholder="Ex: 500"
-                    />
-                    <p className="text-xs text-[var(--color-text-muted)] mt-2">
-                      O estoque do produto é decrementado automaticamente a cada resgate.
-                    </p>
+                return (
+                  <div className={`rounded-xl border p-4 transition-all ${redemption.eligible ? "border-[var(--color-warning)]/30 bg-[var(--color-warning)]/5" : "border-[var(--color-border)] bg-[var(--color-bg-overlay)]"}`}>
+                    {/* Engine readout */}
+                    <div className="flex items-start gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${redemption.eligible ? "bg-[var(--color-warning)]/15" : "bg-[var(--color-bg-elevated)]"}`}>
+                        <Star className={`w-4 h-4 ${redemption.eligible ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className={`text-sm font-semibold ${redemption.eligible ? "text-[var(--color-warning)]" : "text-[var(--color-text-secondary)]"}`}>
+                          {redemption.eligible ? "Disponível para resgate" : "Indisponível para resgate"}
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{statusText}</p>
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                          Margem de lucro: <strong className={marginPct != null && marginPct < MIN_REDEMPTION_MARGIN * 100 ? "text-[var(--color-error)]" : "text-[var(--color-text-secondary)]"}>
+                            {marginPct != null ? `${marginPct}%` : "—"}
+                          </strong>
+                          {redemption.formulaCost != null && (
+                            <> · Fórmula: {redemption.formulaCost.toLocaleString("pt-BR")} pts</>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Overwrite controls */}
+                    <div className="mt-4 pt-4 border-t border-[var(--color-border)] space-y-3">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!form.redeemDisabled}
+                          onChange={e => set("redeemDisabled", e.target.checked)}
+                          className="w-4 h-4 accent-[var(--color-error)]"
+                        />
+                        <span className="text-sm text-[var(--color-text-secondary)]">Desativar resgate deste produto (ignora a margem)</span>
+                      </label>
+                      <Input
+                        label="Sobrescrever pontos (opcional)"
+                        type="number"
+                        min="1"
+                        step="50"
+                        value={form.loyaltyPointsOverride ?? ""}
+                        onChange={e => set("loyaltyPointsOverride", e.target.value || undefined)}
+                        placeholder={redemption.formulaCost != null ? `Padrão: ${redemption.formulaCost}` : "Ex: 1000"}
+                        disabled={!!form.redeemDisabled}
+                      />
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        Override libera o item ignorando a fórmula e a trava de margem. O estoque é decrementado a cada resgate.
+                      </p>
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </div>
 
             {/* Points earned on purchase */}
@@ -864,6 +919,15 @@ export default function AdminProducts() {
                 />
                 <span className="text-sm text-[var(--color-text-secondary)]">Destaque</span>
               </label>
+              <label className="flex items-center gap-2 cursor-pointer" title="Compras com este produto pontuam em dobro no Clube Shark">
+                <input
+                  type="checkbox"
+                  checked={!!form.doublePoints}
+                  onChange={e => set("doublePoints", e.target.checked)}
+                  className="w-4 h-4 accent-[var(--color-warning)]"
+                />
+                <span className="text-sm text-[var(--color-text-secondary)]">Pontos em dobro</span>
+              </label>
             </div>
           </div>
 
@@ -925,15 +989,29 @@ export default function AdminProducts() {
                         <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{cat.label}</p>
                         <p className="text-xs text-[var(--color-text-muted)]">{cat.slug} · {inUse} produto{inUse !== 1 ? "s" : ""}</p>
                       </div>
-                      {!confirming && (
-                        <button
-                          onClick={() => setCatConfirmId(cat.id)}
-                          title="Remover categoria"
-                          className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                      <div className="flex items-center gap-1 shrink-0">
+                        <label
+                          className="flex items-center gap-1.5 cursor-pointer mr-1"
+                          title="Compras com itens desta categoria pontuam em dobro"
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                          <input
+                            type="checkbox"
+                            checked={!!cat.doublePoints}
+                            onChange={() => handleToggleCategoryDouble(cat)}
+                            className="w-3.5 h-3.5 accent-[var(--color-warning)]"
+                          />
+                          <span className="text-[11px] text-[var(--color-text-muted)] hidden sm:inline">Pontos 2×</span>
+                        </label>
+                        {!confirming && (
+                          <button
+                            onClick={() => setCatConfirmId(cat.id)}
+                            title="Remover categoria"
+                            className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Confirmação inline — permite remover mesmo em uso (avisa) */}

@@ -25,7 +25,7 @@ export function Footer() {
       links: [
         { href: "/catalog", label: "Catálogo" },
         ...categories.slice(0, 8).map(c => ({
-          href: `/catalog?category=${c.slug}`,
+          href: `/catalog?cat=${c.slug}`,
           label: c.label,
         })),
       ],
@@ -41,7 +41,7 @@ export function Footer() {
       title: "Institucional",
       links: [
         { href: "/about", label: "Sobre Nós" },
-        { href: "/account", label: "Clube de Fidelidade" },
+        { href: "/clube", label: "Clube Shark" },
         { href: "/contact", label: "Contato" },
         { href: "/orders", label: "Acompanhar Pedido" },
       ],
@@ -80,8 +80,10 @@ export function Footer() {
               <div className="flex items-start gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
                 <span>
+                  Segunda: Fechado<br />
                   Ter – Sex: 13h às 21h<br />
-                  Sáb – Dom: 14h às 21h
+                  Sáb – Dom: 14h às 21h<br />
+                  Lounge (Ter – Dom): 20h às 22h
                 </span>
               </div>
             </div>

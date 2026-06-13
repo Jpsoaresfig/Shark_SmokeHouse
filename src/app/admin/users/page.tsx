@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Users, Plus, Search, X, Eye, EyeOff, Mail, Lock,
   User, Phone, Shield, Bike, ShoppingBag, Crown,
-  Pencil, Trash2, AlertCircle, CheckCircle, Star, Percent,
+  Pencil, Trash2, AlertCircle, CheckCircle, Star, Percent, Minus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,8 +18,19 @@ import { toast } from "@/stores/toastStore";
 import {
   getAllUsers, createUserWithRole, updateUserRole, updateUserCommission, deleteUserProfile,
 } from "@/lib/firebase/users";
+import { adjustLoyaltyPoints } from "@/lib/firebase/loyalty";
+import { getLevel } from "@/lib/loyalty/levels";
+import { formatCpf, onlyDigits } from "@/lib/cpf";
 import { formatDate } from "@/lib/utils";
 import type { UserProfile, UserRole } from "@/types";
+
+/* ── Quick-reason chips para o ajuste manual de pontos (PDV/balcão) ── */
+const ADJUST_REASONS = [
+  "Resgate presencial no balcão",
+  "Estorno",
+  "Cortesia",
+  "Correção de saldo",
+];
 
 /* ── role config ─────────────────────────────────────────── */
 const roleConfig: Record<UserRole, { label: string; badge: "default" | "orange" | "purple" | "premium"; icon: React.ElementType }> = {
@@ -293,6 +304,167 @@ function EditRoleModal({ user, onClose, onUpdated }: {
   );
 }
 
+/* ── Ajuste manual de pontos (PDV/balcão — Task 3.4) ──────── */
+function AdjustPointsModal({ user, adminUid, onClose, onAdjusted }: {
+  user: UserProfile;
+  adminUid?: string;
+  onClose: () => void;
+  onAdjusted: (uid: string, newPoints: number) => void;
+}) {
+  const current = user.loyaltyPoints ?? 0;
+  const [mode, setMode] = useState<"credit" | "debit">("credit");
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const amountNum = Math.floor(Number(amount) || 0);
+  const signed = mode === "credit" ? amountNum : -amountNum;
+  const newBalance = current + signed;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    if (amountNum <= 0) { setError("Informe uma quantidade de pontos maior que zero."); return; }
+    if (mode === "debit" && amountNum > current) {
+      setError(`Saldo insuficiente: o cliente tem ${current.toLocaleString("pt-BR")} pontos.`);
+      return;
+    }
+    if (!reason.trim()) { setError("Descreva o motivo do ajuste (fica registrado no histórico)."); return; }
+    setLoading(true);
+    try {
+      await adjustLoyaltyPoints(user.uid, signed, reason, adminUid);
+      toast.success(
+        `${mode === "credit" ? "Creditado" : "Debitado"} ${amountNum.toLocaleString("pt-BR")} pts — saldo: ${newBalance.toLocaleString("pt-BR")}.`,
+      );
+      onAdjusted(user.uid, newBalance);
+    } catch {
+      setError("Não foi possível ajustar os pontos. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0, y: 16 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        transition={{ type: "spring", damping: 20, stiffness: 220 }}
+        className="w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)] p-6"
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-bold text-[var(--color-text-primary)]">Ajustar Pontos</h2>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Customer summary */}
+        <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] mb-5">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] flex items-center justify-center text-sm font-bold text-white shrink-0">
+            {user.displayName?.[0]?.toUpperCase() ?? "?"}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{user.displayName}</p>
+            <p className="text-xs text-[var(--color-text-muted)] truncate">
+              {user.cpf ? `CPF ${formatCpf(user.cpf)}` : user.email}
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="flex items-center gap-1 text-[var(--color-warning)]">
+              <Star className="w-3.5 h-3.5" />
+              <span className="text-sm font-bold">{current.toLocaleString("pt-BR")}</span>
+            </div>
+            <p className="text-[10px] text-[var(--color-text-muted)]">{getLevel(current).name}</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Credit / Debit toggle */}
+          <div className="grid grid-cols-2 gap-2">
+            {([
+              { value: "credit", label: "Creditar", icon: Plus },
+              { value: "debit",  label: "Debitar",  icon: Minus },
+            ] as const).map((opt) => {
+              const Icon = opt.icon;
+              const active = mode === opt.value;
+              const activeCls = opt.value === "credit"
+                ? "border-[var(--color-success)] bg-[var(--color-success)]/10 text-[var(--color-success)]"
+                : "border-[var(--color-error)] bg-red-500/10 text-[var(--color-error)]";
+              return (
+                <button key={opt.value} type="button" onClick={() => setMode(opt.value)}
+                  className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-semibold transition-all ${
+                    active ? activeCls : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                  }`}
+                >
+                  <Icon className="w-4 h-4" /> {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <Input
+            type="number"
+            label="Quantidade de pontos"
+            placeholder="Ex: 200"
+            min={1}
+            step={1}
+            icon={<Star className="w-4 h-4" />}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+
+          <div className="flex flex-col gap-1.5">
+            <Input
+              label="Motivo do ajuste"
+              placeholder="Ex: Resgate presencial no balcão"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {ADJUST_REASONS.map((r) => (
+                <button key={r} type="button" onClick={() => setReason(r)}
+                  className="text-[11px] px-2 py-1 rounded-full border border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40 hover:text-[var(--color-text-secondary)] transition-colors">
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {amountNum > 0 && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Novo saldo: <strong className="text-[var(--color-text-primary)]">{newBalance.toLocaleString("pt-BR")} pts</strong>{" "}
+              <span className="text-[var(--color-text-muted)]">({getLevel(newBalance).name})</span>
+            </p>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5">
+              <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
+              <p className="text-sm text-[var(--color-error)]">{error}</p>
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-1">
+            <Button type="button" variant="secondary" className="flex-1" onClick={onClose} disabled={loading}>Cancelar</Button>
+            <Button type="submit" variant="premium" className="flex-1" disabled={loading}>
+              {loading
+                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : "Confirmar ajuste"}
+            </Button>
+          </div>
+        </form>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ── Main page ───────────────────────────────────────────── */
 export default function AdminUsersPage() {
   const { user: adminUser } = useAuthStore();
@@ -302,6 +474,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState<UserRole | "all">("all");
   const [showCreate, setShowCreate] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [adjustingUser, setAdjustingUser] = useState<UserProfile | null>(null);
   const [deletingUid, setDeletingUid] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -330,10 +503,14 @@ export default function AdminUsersPage() {
   }
 
   const filtered = users.filter((u) => {
+    const q = search.toLowerCase();
+    const digits = onlyDigits(search);
     const matchSearch =
-      u.displayName?.toLowerCase().includes(search.toLowerCase()) ||
-      u.email?.toLowerCase().includes(search.toLowerCase()) ||
-      u.phone?.includes(search);
+      u.displayName?.toLowerCase().includes(q) ||
+      u.email?.toLowerCase().includes(q) ||
+      u.phone?.includes(search) ||
+      // Busca por CPF (Task 3.4): casa só com 3+ dígitos para não casar tudo.
+      (digits.length >= 3 && (u.cpf ?? "").includes(digits));
     const matchRole = roleFilter === "all" || u.role === roleFilter;
     return matchSearch && matchRole;
   });
@@ -354,6 +531,11 @@ export default function AdminUsersPage() {
   const handleRoleUpdated = (uid: string, newRole: UserRole, commissionRate?: number) => {
     setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, role: newRole, commissionRate } : u));
     setEditingUser(null);
+  };
+
+  const handlePointsAdjusted = (uid: string, newPoints: number) => {
+    setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, loyaltyPoints: newPoints } : u));
+    setAdjustingUser(null);
   };
 
   const handleDelete = async (uid: string) => {
@@ -416,7 +598,7 @@ export default function AdminUsersPage() {
           <div className="relative max-w-sm mb-6">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
             <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Nome, e-mail ou telefone..."
+              placeholder="Nome, e-mail, telefone ou CPF..."
               className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] pl-10 pr-9 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
             />
             {search && (
@@ -486,6 +668,7 @@ export default function AdminUsersPage() {
                         <div className="hidden md:block min-w-0">
                           <p className="text-sm text-[var(--color-text-secondary)] truncate">{u.email}</p>
                           {u.phone && <p className="text-xs text-[var(--color-text-muted)]">{u.phone}</p>}
+                          {u.cpf && <p className="text-xs text-[var(--color-text-muted)]">CPF {formatCpf(u.cpf)}</p>}
                         </div>
 
                         {/* Role badge */}
@@ -524,6 +707,13 @@ export default function AdminUsersPage() {
 
                         {/* Actions */}
                         <div className="flex items-center gap-1 shrink-0">
+                          {u.role === "customer" && (
+                            <button onClick={() => setAdjustingUser(u)}
+                              className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 transition-all"
+                              title="Ajustar pontos">
+                              <Star className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {u.role !== "admin" && (
                             <button onClick={() => setEditingUser(u)}
                               className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue-glow)] transition-all"
@@ -554,6 +744,14 @@ export default function AdminUsersPage() {
       <AnimatePresence>
         {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={handleCreated} />}
         {editingUser && <EditRoleModal user={editingUser} onClose={() => setEditingUser(null)} onUpdated={handleRoleUpdated} />}
+        {adjustingUser && (
+          <AdjustPointsModal
+            user={adjustingUser}
+            adminUid={adminUser?.uid}
+            onClose={() => setAdjustingUser(null)}
+            onAdjusted={handlePointsAdjusted}
+          />
+        )}
       </AnimatePresence>
     </>
   );

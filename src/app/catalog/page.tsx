@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Search, ShoppingCart, Package, X, Check } from "lucide-react";
 import Image from "next/image";
@@ -13,12 +14,107 @@ import { ProductModal } from "@/components/shop/ProductModal";
 import { formatCurrency } from "@/lib/utils";
 import type { Product, ProductCategory, Category } from "@/types";
 
-export default function CatalogPage() {
+/* ── Card de produto (reutilizado na visão agrupada e na filtrada) ── */
+function ProductCard({ product, categoryLabel, added, onSelect, onAdd }: {
+  product: Product;
+  categoryLabel: string;
+  added: boolean;
+  onSelect: () => void;
+  onAdd: (e: React.MouseEvent) => void;
+}) {
+  const discount = product.compareAtPrice
+    ? Math.round((1 - product.price / product.compareAtPrice) * 100)
+    : null;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{ duration: 0.3 }}
+      className="group cursor-pointer"
+      onClick={onSelect}
+    >
+      <div className="relative aspect-[3/4] bg-[var(--color-bg-overlay)] border border-[var(--color-border)] rounded-xl overflow-hidden group-hover:border-[var(--color-neon-blue)]/50 transition-colors duration-300">
+        {product.images[0] ? (
+          <Image
+            src={product.images[0]}
+            alt={product.name}
+            fill
+            sizes="(max-width:640px) 50vw,(max-width:1024px) 33vw,25vw"
+            className="object-cover group-hover:scale-105 transition-transform duration-500"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
+            <Package className="w-8 h-8 text-[var(--color-text-muted)]" />
+            <p className="text-[10px] text-[var(--color-text-muted)]">sem imagem</p>
+          </div>
+        )}
+
+        <div className="absolute top-2 left-2 flex flex-col gap-1">
+          {discount && <Badge variant="orange" className="text-[10px] px-1.5 py-0.5">-{discount}%</Badge>}
+          {product.featured && <Badge variant="premium" className="text-[10px] px-1.5 py-0.5">Destaque</Badge>}
+          {product.doublePoints && <Badge variant="warning" className="text-[10px] px-1.5 py-0.5">Pontos 2×</Badge>}
+          {product.stock === 0 && <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">Esgotado</Badge>}
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 p-2 md:translate-y-full md:group-hover:translate-y-0 transition-transform duration-300">
+          <Button
+            variant="premium"
+            size="sm"
+            className="w-full text-xs h-9"
+            disabled={product.stock === 0}
+            onClick={onAdd}
+          >
+            {added
+              ? <><Check className="w-3.5 h-3.5" /> Adicionado</>
+              : product.stock === 0
+              ? "Esgotado"
+              : <><ShoppingCart className="w-3.5 h-3.5" /> Adicionar</>
+            }
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-2 sm:mt-3 space-y-0.5 sm:space-y-1">
+        <p className="text-[10px] sm:text-xs text-[var(--color-neon-blue)] font-medium uppercase tracking-wide truncate">
+          {categoryLabel}
+        </p>
+        <h3 className="text-xs sm:text-sm font-semibold text-[var(--color-text-primary)] line-clamp-2 leading-snug group-hover:text-[var(--color-neon-blue)] transition-colors duration-200">
+          {product.name}
+        </h3>
+        <div className="flex items-baseline gap-1.5 pt-0.5 flex-wrap">
+          <span className="text-sm sm:text-base font-bold text-[var(--color-text-primary)]">
+            {formatCurrency(product.price)}
+          </span>
+          {product.compareAtPrice && (
+            <span className="text-[10px] sm:text-xs text-[var(--color-text-muted)] line-through">
+              {formatCurrency(product.compareAtPrice)}
+            </span>
+          )}
+        </div>
+        {product.stock > 0 && product.stock <= 5 && (
+          <p className="text-[10px] sm:text-xs text-amber-400">Últimas {product.stock} un.</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+const gridCls = "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 lg:gap-6";
+
+function CatalogContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  // O filtro de categoria vive na URL (?cat=) — fonte única, compartilhada com o
+  // menu cascata do header. Trocar de categoria é só navegar (client-side).
+  const activeCategory: ProductCategory | "all" = searchParams.get("cat") ?? "all";
+
   const [products, setProducts]         = useState<Product[]>([]);
   const [cats, setCats]                 = useState<Category[]>([]);
   const [loading, setLoading]           = useState(true);
   const [search, setSearch]             = useState("");
-  const [activeCategory, setActiveCategory] = useState<ProductCategory | "all">("all");
   const [addedId, setAddedId]           = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const { addItem }                     = useCartStore();
@@ -30,22 +126,43 @@ export default function CatalogPage() {
     getCategories().then(setCats).catch(() => {});
   }, []);
 
-  // Abas de filtro (Todos + categorias dinâmicas) e resolução de rótulo.
+  const selectCategory = (value: ProductCategory | "all") => {
+    router.replace(value === "all" ? "/catalog" : `/catalog?cat=${value}`, { scroll: false });
+  };
+
   const categories = useMemo(
     () => [{ value: "all" as const, label: "Todos" }, ...cats.map(c => ({ value: c.slug, label: c.label }))],
     [cats],
   );
   const categoryLabel = (slug: string) => cats.find(c => c.slug === slug)?.label ?? slug;
 
+  const searchLower = search.trim().toLowerCase();
   const filtered = useMemo(() => products.filter((p) => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-                        p.description?.toLowerCase().includes(search.toLowerCase());
-    const matchCat    = activeCategory === "all" || p.category === activeCategory;
+    const matchSearch = !searchLower ||
+      p.name.toLowerCase().includes(searchLower) ||
+      p.description?.toLowerCase().includes(searchLower);
+    const matchCat = activeCategory === "all" || p.category === activeCategory;
     return matchSearch && matchCat;
-  }), [products, search, activeCategory]);
+  }), [products, searchLower, activeCategory]);
+
+  // Visão padrão (Task 4.3): sem busca e sem categoria escolhida, exibe TODAS as
+  // categorias organizadas em seções, otimizando o mapeamento visual da loja.
+  const showGrouped = activeCategory === "all" && !searchLower;
+  const groups = useMemo(() => {
+    if (!showGrouped) return [];
+    const ordered = cats.map(c => ({
+      slug: c.slug,
+      label: c.label,
+      items: products.filter(p => p.category === c.slug),
+    }));
+    // Produtos sem categoria conhecida (legados) vão para "Outros".
+    const knownSlugs = new Set(cats.map(c => c.slug));
+    const orphans = products.filter(p => !knownSlugs.has(p.category));
+    if (orphans.length) ordered.push({ slug: "__others", label: "Outros", items: orphans });
+    return ordered.filter(g => g.items.length > 0);
+  }, [showGrouped, cats, products]);
 
   const handleAddToCart = (product: Product) => {
-    // Produto com variações ou cores: abre o modal para o cliente escolher.
     if (product.variations?.length || product.colors?.length) { setSelectedProduct(product); return; }
     addItem(product);
     setAddedId(product.id);
@@ -57,11 +174,11 @@ export default function CatalogPage() {
     <div className="min-h-screen pt-20 sm:pt-24 pb-20 px-3 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
 
-        {/* Header — mobile-first */}
+        {/* Header */}
         <div className="mb-5 sm:mb-8">
           <p className="text-eyebrow text-[var(--color-neon-blue)] mb-1.5">Catálogo</p>
           <h1 className="font-display text-2xl sm:text-4xl font-bold text-[var(--color-text-primary)] leading-tight">
-            Seleção <span className="italic">Premium</span>
+            Seleção
           </h1>
           <p className="text-xs sm:text-sm text-[var(--color-text-muted)] mt-1">
             {loading
@@ -70,7 +187,7 @@ export default function CatalogPage() {
           </p>
         </div>
 
-        {/* Search — full width, prominent on mobile */}
+        {/* Search */}
         <div className="relative mb-3 sm:mb-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
           <input
@@ -90,13 +207,13 @@ export default function CatalogPage() {
           )}
         </div>
 
-        {/* Category pills — horizontal scroll, edge-bleed on mobile */}
+        {/* Category pills */}
         <div className="-mx-3 sm:mx-0 mb-5 sm:mb-8">
           <div className="flex gap-2 overflow-x-auto px-3 sm:px-0 pb-1 scrollbar-none">
             {categories.map((cat) => (
               <button
                 key={cat.value}
-                onClick={() => setActiveCategory(cat.value)}
+                onClick={() => selectCategory(cat.value)}
                 className={`shrink-0 h-9 px-4 rounded-full text-xs sm:text-sm font-medium border transition-all whitespace-nowrap ${
                   activeCategory === cat.value
                     ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border-[var(--color-neon-blue)]/40 shadow-[var(--shadow-neon-sm)]"
@@ -111,7 +228,7 @@ export default function CatalogPage() {
 
         {/* Skeleton */}
         {loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 lg:gap-6">
+          <div className={gridCls}>
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="space-y-2">
                 <div className="skeleton aspect-[3/4] rounded-xl" />
@@ -141,9 +258,9 @@ export default function CatalogPage() {
                 ? "Os produtos aparecerão aqui assim que forem cadastrados pelo admin."
                 : "Tente ajustar os filtros de busca"}
             </p>
-            {search && (
+            {(search || activeCategory !== "all") && (
               <button
-                onClick={() => { setSearch(""); setActiveCategory("all"); }}
+                onClick={() => { setSearch(""); selectCategory("all"); }}
                 className="h-11 px-4 text-sm text-[var(--color-neon-blue)] active:underline"
               >
                 Limpar filtros
@@ -152,98 +269,53 @@ export default function CatalogPage() {
           </motion.div>
         )}
 
-        {/* Product grid */}
-        {!loading && filtered.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5 lg:gap-6"
-          >
+        {/* Visão agrupada por categoria (padrão da loja — Task 4.3) */}
+        {!loading && showGrouped && groups.length > 0 && (
+          <div className="space-y-10 sm:space-y-12">
+            {groups.map((group) => (
+              <section key={group.slug}>
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)]">{group.label}</h2>
+                  {group.slug !== "__others" && (
+                    <button
+                      onClick={() => selectCategory(group.slug)}
+                      className="text-xs sm:text-sm text-[var(--color-neon-blue)] hover:underline"
+                    >
+                      Ver todos ({group.items.length})
+                    </button>
+                  )}
+                </div>
+                <div className={gridCls}>
+                  {group.items.map((product) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      categoryLabel={group.label}
+                      added={addedId === product.id}
+                      onSelect={() => setSelectedProduct(product)}
+                      onAdd={(e) => { e.stopPropagation(); handleAddToCart(product); }}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+
+        {/* Visão filtrada (busca ou categoria escolhida) */}
+        {!loading && !showGrouped && filtered.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={gridCls}>
             <AnimatePresence mode="popLayout">
-              {filtered.map((product, i) => {
-                const discount = product.compareAtPrice
-                  ? Math.round((1 - product.price / product.compareAtPrice) * 100)
-                  : null;
-
-                return (
-                  <motion.div
-                    key={product.id}
-                    layout
-                    initial={{ opacity: 0, scale: 0.96 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.96 }}
-                    transition={{ delay: Math.min(i * 0.03, 0.3), duration: 0.3 }}
-                    className="group cursor-pointer"
-                    onClick={() => setSelectedProduct(product)}
-                  >
-                    {/* Image */}
-                    <div className="relative aspect-[3/4] bg-[var(--color-bg-overlay)] border border-[var(--color-border)] rounded-xl overflow-hidden group-hover:border-[var(--color-neon-blue)]/50 transition-colors duration-300">
-                      {product.images[0] ? (
-                        <Image
-                          src={product.images[0]}
-                          alt={product.name}
-                          fill
-                          sizes="(max-width:640px) 50vw,(max-width:1024px) 33vw,25vw"
-                          className="object-cover group-hover:scale-105 transition-transform duration-500"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center gap-1.5">
-                          <Package className="w-8 h-8 text-[var(--color-text-muted)]" />
-                          <p className="text-[10px] text-[var(--color-text-muted)]">sem imagem</p>
-                        </div>
-                      )}
-
-                      {/* Badges */}
-                      <div className="absolute top-2 left-2 flex flex-col gap-1">
-                        {discount && <Badge variant="orange" className="text-[10px] px-1.5 py-0.5">-{discount}%</Badge>}
-                        {product.featured && <Badge variant="premium" className="text-[10px] px-1.5 py-0.5">Destaque</Badge>}
-                        {product.stock === 0 && <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">Esgotado</Badge>}
-                      </div>
-
-                      {/* Add button — always visible on mobile, hover on desktop */}
-                      <div className="absolute inset-x-0 bottom-0 p-2 md:translate-y-full md:group-hover:translate-y-0 transition-transform duration-300">
-                        <Button
-                          variant="premium"
-                          size="sm"
-                          className="w-full text-xs h-9"
-                          disabled={product.stock === 0}
-                          onClick={(e) => { e.stopPropagation(); handleAddToCart(product); }}
-                        >
-                          {addedId === product.id
-                            ? <><Check className="w-3.5 h-3.5" /> Adicionado</>
-                            : product.stock === 0
-                            ? "Esgotado"
-                            : <><ShoppingCart className="w-3.5 h-3.5" /> Adicionar</>
-                          }
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Info */}
-                    <div className="mt-2 sm:mt-3 space-y-0.5 sm:space-y-1">
-                      <p className="text-[10px] sm:text-xs text-[var(--color-neon-blue)] font-medium uppercase tracking-wide truncate">
-                        {categoryLabel(product.category)}
-                      </p>
-                      <h3 className="text-xs sm:text-sm font-semibold text-[var(--color-text-primary)] line-clamp-2 leading-snug group-hover:text-[var(--color-neon-blue)] transition-colors duration-200">
-                        {product.name}
-                      </h3>
-                      <div className="flex items-baseline gap-1.5 pt-0.5 flex-wrap">
-                        <span className="text-sm sm:text-base font-bold text-[var(--color-text-primary)]">
-                          {formatCurrency(product.price)}
-                        </span>
-                        {product.compareAtPrice && (
-                          <span className="text-[10px] sm:text-xs text-[var(--color-text-muted)] line-through">
-                            {formatCurrency(product.compareAtPrice)}
-                          </span>
-                        )}
-                      </div>
-                      {product.stock > 0 && product.stock <= 5 && (
-                        <p className="text-[10px] sm:text-xs text-amber-400">Últimas {product.stock} un.</p>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })}
+              {filtered.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  categoryLabel={categoryLabel(product.category)}
+                  added={addedId === product.id}
+                  onSelect={() => setSelectedProduct(product)}
+                  onAdd={(e) => { e.stopPropagation(); handleAddToCart(product); }}
+                />
+              ))}
             </AnimatePresence>
           </motion.div>
         )}
@@ -255,5 +327,23 @@ export default function CatalogPage() {
       onClose={() => setSelectedProduct(null)}
     />
     </>
+  );
+}
+
+export default function CatalogPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen pt-20 sm:pt-24 pb-20 px-3 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <div className={gridCls}>
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="skeleton aspect-[3/4] rounded-xl" />
+            ))}
+          </div>
+        </div>
+      </div>
+    }>
+      <CatalogContent />
+    </Suspense>
   );
 }

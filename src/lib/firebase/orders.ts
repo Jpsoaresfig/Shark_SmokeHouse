@@ -296,6 +296,23 @@ export async function updatePaymentStatus(
     paymentStatus: status, // espelho legado
     updatedAt: serverTimestamp(),
   });
+
+  // Baixa manual confirmada → libera a bonificação de indicação no servidor (a
+  // 1ª compra paga do indicado credita +50 ao indicador — Task 3.2). O crédito é
+  // server-side (rota confiável); aqui só disparamos. Não bloqueia a baixa se
+  // falhar — a rota é idempotente e o webhook do MP cobre o fluxo automático.
+  if (status === "paid") {
+    try {
+      await fetch("/api/referrals/qualify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: id }),
+      });
+    } catch (err) {
+      console.error("Falha ao qualificar indicação após baixa manual:", err);
+    }
+  }
+
   invalidate("orders");
 }
 

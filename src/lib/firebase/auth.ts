@@ -12,7 +12,7 @@ import {
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { createUserProfile, getUserProfile, ensureReferralCode } from "./users";
-import { processReferral } from "./loyalty";
+import { recordReferral } from "./loyalty";
 import type { UserProfile } from "@/types";
 
 const ADMIN_EMAIL = "admin@shark.com";
@@ -26,18 +26,23 @@ export async function registerWithEmail(
   displayName: string,
   phone?: string,
   referralCode?: string,
-  birthDate?: string
+  birthDate?: string,
+  cpf?: string
 ): Promise<UserProfile> {
   const { user } = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(user, { displayName });
-  const profile = await createUserProfile(user.uid, { email, displayName, phone, birthDate });
+  const profile = await createUserProfile(user.uid, { email, displayName, phone, birthDate, cpf });
   setSessionCookie(user.uid);
   if (referralCode) {
-    // Don't block/fail registration if the referral can't be processed,
-    // but surface the reason instead of swallowing it silently.
-    processReferral(user.uid, referralCode).catch((err) => {
-      console.error("Falha ao processar indicação:", err);
-    });
+    // AGUARDA a gravação do vínculo: o chamador (useAuth.register) faz
+    // router.push logo em seguida, e um fire-and-forget aqui era cancelado pela
+    // navegação — o vínculo indicador↔indicado nunca persistia (bug da 3.1).
+    // Não pode derrubar o cadastro: se a indicação falhar, apenas registramos.
+    try {
+      await recordReferral(user.uid, referralCode);
+    } catch (err) {
+      console.error("Falha ao registrar indicação:", err);
+    }
   }
   return profile;
 }

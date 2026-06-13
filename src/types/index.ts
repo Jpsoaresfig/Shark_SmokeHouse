@@ -16,6 +16,8 @@ export interface UserProfile {
   blockedUntil?: string;
   addresses?: Address[];
   loyaltyPoints?: number;
+  /** Período "YYYY-MM" do último bônus de aniversário creditado (idempotência do cron). */
+  lastBirthdayBonusPeriod?: string;
   referralCode?: string;
   referredBy?: string;
   /** % de comissão sobre vendas (apenas vendedores). Ex.: 5 = 5%. */
@@ -62,6 +64,8 @@ export interface Category {
   label: string;
   /** Ordem de exibição (menor primeiro). */
   order?: number;
+  /** Campanha "Pontos em Dobro" (Task 3.5): compras com itens desta categoria pontuam 2×. */
+  doublePoints?: boolean;
 }
 
 export interface Product {
@@ -97,10 +101,18 @@ export interface Product {
    *  código de barras (SKU) diferentes, com estoque próprio por variação.
    *  Quando presente, `stock` deste produto é a SOMA dos estoques das variações. */
   variations?: ProductVariation[];
-  /** Points required to redeem this product as a loyalty reward. */
+  /** Custo EFETIVO de resgate em pontos, derivado pelo motor de resgate (Task 3.6):
+   *  fórmula (valor × 200) ou override. Ausente/0 = não resgatável. Persistido no
+   *  save do produto para o cliente não precisar recalcular margem (dado interno). */
   loyaltyPoints?: number;
+  /** Overwrite (Task 3.6): desativa o resgate deste item, independente da margem. */
+  redeemDisabled?: boolean;
+  /** Overwrite (Task 3.6): custo manual em pontos, ignorando a fórmula e a trava de margem. */
+  loyaltyPointsOverride?: number;
   /** Points the customer earns (per unit) when buying this product. */
   pointsEarned?: number;
+  /** Campanha "Pontos em Dobro" (Task 3.5): compras com este item pontuam 2×. */
+  doublePoints?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -137,6 +149,9 @@ export interface CartItem {
   notes?: string;
   /** Loyalty points earned per unit, snapshotted from the product at add-to-cart. */
   pointsEarned?: number;
+  /** Multiplicador de pontos congelado na COMPRA (Task 3.5): 2 quando o produto ou
+   *  sua categoria estava em campanha de "Pontos em Dobro"; 1 (ou ausente) caso contrário. */
+  pointsMultiplier?: number;
 }
 
 /* ── Order ───────────────────────────────────────────────── */
@@ -300,7 +315,14 @@ export interface Event {
 }
 
 /* ── Loyalty ─────────────────────────────────────────────── */
-export type LoyaltyTransactionType = "earned" | "referral" | "bonus" | "welcome" | "redeemed";
+export type LoyaltyTransactionType =
+  | "earned"
+  | "referral"
+  | "bonus"
+  | "welcome"
+  | "redeemed"
+  | "expired"
+  | "adjustment";
 
 export interface LoyaltyTransaction {
   id: string;
@@ -310,7 +332,33 @@ export interface LoyaltyTransaction {
   reason: string;
   referredUserId?: string;
   rewardId?: string;
+  /** uid de quem fez o ajuste manual (PDV/balcão). Ausente em eventos do sistema. */
+  by?: string;
   createdAt: string;
+}
+
+/**
+ * Vínculo persistido entre quem indicou (referrer) e quem foi indicado (referred).
+ * Criado no momento do cadastro do indicado. A bonificação ao indicador NÃO é
+ * creditada aqui — ela só acontece quando o indicado conclui a 1ª compra paga
+ * (regra do Clube Shark / Task 3.2), que promove o status para "qualified".
+ * Doc id = referredUserId (1 indicação por indicado, idempotente).
+ */
+export type ReferralStatus = "pending" | "qualified";
+
+export interface Referral {
+  referrerId: string;
+  referredUserId: string;
+  /** Código de indicação usado no cadastro (ex.: "SHARK-AB12CD"). */
+  code: string;
+  status: ReferralStatus;
+  /** Pontos já creditados ao indicador por esta indicação (0 enquanto "pending"). */
+  pointsAwarded: number;
+  createdAt: string;
+  /** Quando o indicado concluiu a 1ª compra paga e a indicação foi bonificada. */
+  qualifiedAt?: string;
+  /** Pedido (1ª compra paga) que disparou a bonificação da indicação. */
+  qualifyingOrderId?: string;
 }
 
 export interface LoyaltyReward {
@@ -321,6 +369,42 @@ export interface LoyaltyReward {
   pointsCost: number;
   stock: number;
   active: boolean;
+  createdAt: string;
+}
+
+/* ── Coupon (cupom de desconto — Task 3.3) ───────────────── */
+export type CouponType = "percent" | "fixed";
+
+export interface Coupon {
+  /** Doc id = code (garante unicidade e lookup direto por código). */
+  id: string;
+  /** Código em maiúsculas, sem espaços (ex.: "SHARK10"). */
+  code: string;
+  type: CouponType;
+  /** % (0–100) quando type=percent; R$ quando type=fixed. */
+  value: number;
+  /** Valor mínimo do pedido (R$) para o cupom valer. */
+  minOrder?: number;
+  /** Data de expiração "YYYY-MM-DD" (inclusiva). Ausente = sem validade. */
+  expiresAt?: string;
+  /** Limite de usos por CPF. Ausente = ilimitado. */
+  usageLimitPerCpf?: number;
+  /** Slugs de categorias a que o cupom se restringe. Vazio/ausente = todas. */
+  categories?: string[];
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Registro de uso de um cupom (para limitar por CPF e auditar). */
+export interface CouponRedemption {
+  id: string;
+  couponId: string;
+  code: string;
+  cpf: string;
+  userId: string;
+  orderId: string;
+  discount: number;
   createdAt: string;
 }
 
