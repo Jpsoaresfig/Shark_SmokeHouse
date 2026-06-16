@@ -13,7 +13,7 @@ function InstagramGlyph({ className = "" }: { className?: string }) {
 }
 
 /* ── Contato da loja ─────────────────────────────────────── */
-const STORE_WHATSAPP = "5583999020606"; // somente dígitos, com DDI
+const STORE_WHATSAPP = "558399020606"; // somente dígitos, com DDI
 const WA_LINK = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
   "Olá, vim pelo site da Shark Smokehouse! Gostaria de mais informações.",
 )}`;
@@ -50,8 +50,8 @@ const channels = [
   {
     icon: Phone,
     label: "Telefone",
-    value: "(83) 99902-0606",
-    href: "tel:+5583999020606",
+    value: "(83) 9902-0606",
+    href: "tel:+558399020606",
     color: "text-[var(--color-neon-blue)]",
     bg: "bg-[var(--color-neon-blue-glow)]",
     border: "border-[var(--color-neon-blue)]/20",

@@ -6,7 +6,6 @@ import { Logo } from "@/components/ui/Logo";
 import {
   LOYALTY_LEVELS, WELCOME_BONUS_POINTS, POINTS_VALIDITY_DAYS,
 } from "@/lib/loyalty/levels";
-import { REDEMPTION_POINTS_PER_REAL, MIN_REDEMPTION_MARGIN } from "@/lib/loyalty/redemption";
 
 export const metadata: Metadata = {
   title: "Clube Shark — Programa de Fidelidade | Shark Smokehouse",
@@ -157,7 +156,6 @@ export default function ClubePage() {
               `Bônus de boas-vindas: ${WELCOME_BONUS_POINTS} pontos creditados ao concluir o cadastro.`,
               "Acúmulo por compra: cada R$ 1,00 gasto rende pontos conforme o seu nível (de 10 a 15 pontos por real).",
               "Indicação: você ganha +50 pontos quando o amigo indicado conclui a primeira compra paga.",
-              `Resgate: o custo em pontos de um produto é o valor dele × ${REDEMPTION_POINTS_PER_REAL}, disponível para itens com margem de lucro igual ou superior a ${MIN_REDEMPTION_MARGIN * 100}%.`,
               "Identificação: o CPF precisa estar cadastrado para acumular e resgatar pontos.",
               `Validade: os pontos expiram ${POINTS_VALIDITY_DAYS} dias após a data em que foram gerados.`,
               "Pontos em dobro: produtos e categorias em campanha pontuam em dobro durante a vigência.",

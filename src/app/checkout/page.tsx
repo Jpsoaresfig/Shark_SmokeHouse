@@ -57,7 +57,7 @@ function maskPhone(v: string) {
 }
 
 /* ── Store contact ───────────────────────────────────────── */
-const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente dígitos, com DDI)
+const STORE_WHATSAPP = "558399020606"; // número oficial da loja (somente dígitos, com DDI)
 
 /* ── Payment options ─────────────────────────────────────── */
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
