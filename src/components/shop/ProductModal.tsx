@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ShoppingCart, Plus, Minus, Check, Package, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import Image from "next/image";
@@ -28,6 +28,20 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const [selectedColor, setSelectedColor] = useState("");
   const [selectedVarId, setSelectedVarId] = useState("");
   const { addItem, openCart } = useCartStore();
+
+  /* Trava o scroll de fundo enquanto o modal está aberto e restaura a posição
+     exata ao fechar — sem isso o catálogo "volta pro início" no mobile. */
+  useEffect(() => {
+    if (!product) return;
+    const scrollY = window.scrollY;
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    body.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = prevOverflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [product]);
 
   if (!product) return null;
 

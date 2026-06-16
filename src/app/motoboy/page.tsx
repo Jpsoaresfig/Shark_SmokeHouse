@@ -37,9 +37,26 @@ function mapsLink(o: Order) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`;
 }
 
-function waLink(phone: string) {
-  const digits = phone.replace(/\D/g, "");
-  return `https://wa.me/${digits.startsWith("55") ? digits : `55${digits}`}`;
+/** Normaliza um telefone BR para os dígitos internacionais (55 + DDD + 9 + número),
+    inserindo o DDI e o 9 de celular quando faltarem — usado no tel: e no wa.me. */
+function phoneDigits(phone: string) {
+  let d = phone.replace(/\D/g, "");
+  if (!d.startsWith("55")) {
+    if (d.length === 10) d = `${d.slice(0, 2)}9${d.slice(2)}`; // celular antigo sem o 9
+    d = `55${d}`;
+  }
+  return d;
+}
+
+function telLink(phone: string) {
+  return `tel:+${phoneDigits(phone)}`;
+}
+
+function waLink(phone: string, order?: Order) {
+  const base = `https://wa.me/${phoneDigits(phone)}`;
+  if (!order) return base;
+  const msg = `Olá! Sou o entregador da Shark Smokehouse 🦈 com o seu pedido #${order.id.slice(-6).toUpperCase()}. Estou a caminho!`;
+  return `${base}?text=${encodeURIComponent(msg)}`;
 }
 
 function isPickup(o: Order) {
@@ -186,6 +203,21 @@ export default function MotoboyPage() {
               </div>
             )}
 
+            {/* Ganho do entregador — a taxa de entrega (frete) deste pedido */}
+            {!pickup && order.deliveryFee > 0 && order.status !== "cancelled" && (
+              <div className="flex items-center gap-2.5 rounded-xl bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 px-3 py-3">
+                <Bike className="w-5 h-5 text-[var(--color-neon-blue)] shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-[var(--color-neon-blue)]">
+                    Você recebe pela entrega: {formatCurrency(order.deliveryFee)}
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    Taxa de entrega (frete) deste pedido
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Cliente */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="min-w-0">
@@ -197,13 +229,13 @@ export default function MotoboyPage() {
               {order.customerPhone && (
                 <div className="flex items-center gap-2">
                   <a
-                    href={`tel:${order.customerPhone.replace(/\D/g, "")}`}
+                    href={telLink(order.customerPhone)}
                     className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                   >
                     <Phone className="w-3.5 h-3.5" /> Ligar
                   </a>
                   <a
-                    href={waLink(order.customerPhone)}
+                    href={waLink(order.customerPhone, order)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-success)]/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"

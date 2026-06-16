@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { REFERRAL_BONUS_POINTS } from "@/lib/loyalty/levels";
 import type { Order } from "@/types";
 
 /**
@@ -12,7 +13,7 @@ import type { Order } from "@/types";
  */
 
 /** Pontos creditados ao INDICADOR quando o indicado conclui a 1ª compra paga (Task 3.2). */
-export const REFERRAL_POINTS = 50;
+export const REFERRAL_POINTS = REFERRAL_BONUS_POINTS;
 
 /**
  * Libera a bonificação de uma indicação PENDENTE quando o indicado conclui sua

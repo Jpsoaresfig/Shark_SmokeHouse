@@ -37,6 +37,12 @@ export const LOYALTY_LEVELS: readonly LoyaltyLevel[] = [
 /** Bônus de boas-vindas creditado ao concluir o cadastro (Task 3.7). */
 export const WELCOME_BONUS_POINTS = 50;
 
+/**
+ * Pontos creditados ao INDICADOR quando o indicado conclui a 1ª compra paga.
+ * Fonte única client-safe — o servidor (referrals.server) reexporta este valor.
+ */
+export const REFERRAL_BONUS_POINTS = 50;
+
 /** Validade dos pontos: expiram 180 dias após a data de geração (Task 3.7). */
 export const POINTS_VALIDITY_DAYS = 180;
 

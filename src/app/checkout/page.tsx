@@ -1115,8 +1115,8 @@ export default function CheckoutPage() {
                       </p>
                       {cardPct !== 0 && (
                         <p className="text-[var(--color-text-secondary)]">
-                          {cardPct > 0 ? "Acréscimo" : "Desconto"} de <strong>{Math.abs(cardPct)}%</strong> no
-                          {payment === "credit" ? " crédito" : " débito"} ({cardPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}),
+                          {cardPct > 0 ? "Acréscimo" : "Desconto"} no
+                          {payment === "credit" ? " crédito" : " débito"},
                           conforme a Lei nº 13.455/2017.
                         </p>
                       )}
@@ -1135,12 +1135,7 @@ export default function CheckoutPage() {
                     💸 <strong>PIX e dinheiro:</strong> preço à vista.
                   </p>
                   <p className="text-[var(--color-text-secondary)]">
-                    💳 <strong>Débito e crédito:</strong> acréscimo sobre o valor do produto
-                    {creditFeePercent ? ` (crédito ${creditFeePercent > 0 ? "+" : "−"}${Math.abs(creditFeePercent)}%` : ""}
-                    {creditFeePercent && debitFeePercent ? ", " : ""}
-                    {!creditFeePercent && debitFeePercent ? " (" : ""}
-                    {debitFeePercent ? `débito ${debitFeePercent > 0 ? "+" : "−"}${Math.abs(debitFeePercent)}%` : ""}
-                    {creditFeePercent || debitFeePercent ? ")" : ""}.
+                    💳 <strong>Débito e crédito:</strong> acréscimo sobre o valor do produto.
                   </p>
                 </div>
               </CardContent>
@@ -1281,16 +1276,6 @@ export default function CheckoutPage() {
                     <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] rounded-lg px-3 py-2">
                       <Truck className="w-3 h-3 shrink-0" />
                       O frete é calculado pelo seu bairro
-                    </div>
-                  )}
-                  {cardFeeAmount !== 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[var(--color-text-secondary)]">
-                        {cardPct > 0 ? "Acréscimo" : "Desconto"} {payment === "credit" ? "crédito" : "débito"} ({Math.abs(cardPct)}%)
-                      </span>
-                      <span className={cardPct > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
-                        {cardPct > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}
-                      </span>
                     </div>
                   )}
                   {discount > 0 && (

@@ -19,7 +19,7 @@ import {
 import { getUserProfile } from "@/lib/firebase/users";
 import { formatDateTime } from "@/lib/utils";
 import { LoyaltyProgramModal } from "@/components/account/LoyaltyProgramModal";
-import { getLevel, getNextLevel, getLevelProgress } from "@/lib/loyalty/levels";
+import { getLevel, getNextLevel, getLevelProgress, REFERRAL_BONUS_POINTS } from "@/lib/loyalty/levels";
 import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
 
 /* ── Tier helpers (níveis reais do Clube Shark — engine única) ── */
@@ -68,7 +68,7 @@ function ReferralCard({ referralCode, uid }: { referralCode: string; uid: string
           <div>
             <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Seu Link de Indicação</h3>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Ganhe <strong className="text-[var(--color-neon-blue)]">200 pts</strong> por amigo que se cadastrar
+              Ganhe <strong className="text-[var(--color-neon-blue)]">{REFERRAL_BONUS_POINTS} pts</strong> por amigo que fizer a 1ª compra
             </p>
           </div>
         </div>
@@ -97,7 +97,7 @@ function ReferralCard({ referralCode, uid }: { referralCode: string; uid: string
           </div>
           <div className="p-3 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] text-center">
             <p className="text-lg font-black text-[var(--color-success)]">
-              {referralCount != null ? referralCount * 200 : "—"}
+              {referralCount != null ? referralCount * REFERRAL_BONUS_POINTS : "—"}
             </p>
             <p className="text-xs text-[var(--color-text-muted)]">Pts por indicações</p>
           </div>
@@ -105,7 +105,7 @@ function ReferralCard({ referralCode, uid }: { referralCode: string; uid: string
 
         <div className="mt-4 p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)]/50">
           <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
-            <strong className="text-[var(--color-text-secondary)]">Como funciona:</strong> compartilhe seu link, quando alguém se cadastrar você ganha <strong className="text-[var(--color-neon-blue)]">200 pontos</strong> automaticamente.
+            <strong className="text-[var(--color-text-secondary)]">Como funciona:</strong> compartilhe seu link, quando alguém se cadastrar e fizer a 1ª compra você ganha <strong className="text-[var(--color-neon-blue)]">{REFERRAL_BONUS_POINTS} pontos</strong> automaticamente.
           </p>
         </div>
       </CardContent>
