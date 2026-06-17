@@ -20,7 +20,7 @@ import {
 } from "@/lib/firebase/users";
 import { adjustLoyaltyPoints } from "@/lib/firebase/loyalty";
 import { getLevel } from "@/lib/loyalty/levels";
-import { formatCpf, onlyDigits } from "@/lib/cpf";
+import { formatCpf, onlyDigits, isValidCpf } from "@/lib/cpf";
 import { formatDate } from "@/lib/utils";
 import type { UserProfile, UserRole } from "@/types";
 
@@ -51,7 +51,7 @@ function CreateUserModal({ onClose, onCreated }: {
   onClose: () => void;
   onCreated: (user: UserProfile) => void;
 }) {
-  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", phone: "", cpf: "", password: "" });
   const [role, setRole] = useState<UserRole>("customer");
   const [commission, setCommission] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -61,10 +61,15 @@ function CreateUserModal({ onClose, onCreated }: {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    // CPF é opcional, mas se preenchido precisa ser válido.
+    if (form.cpf.trim() && !isValidCpf(form.cpf)) {
+      setError("CPF inválido. Confira os números ou deixe o campo em branco.");
+      return;
+    }
     setLoading(true);
     try {
       const rate = role === "seller" && commission.trim() !== "" ? Number(commission) : undefined;
-      const profile = await createUserWithRole(form.email, form.password, form.name, form.phone, role, rate);
+      const profile = await createUserWithRole(form.email, form.password, form.name, form.phone, role, rate, form.cpf.trim() || undefined);
       toast.success("Usuário criado com sucesso!");
       onCreated(profile);
     } catch (err) {
@@ -136,6 +141,15 @@ function CreateUserModal({ onClose, onCreated }: {
               icon={<Phone className="w-4 h-4" />}
               value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </div>
+
+          <Input
+            label={`CPF${role === "customer" ? " (necessário para o Clube Shark)" : " (opcional)"}`}
+            inputMode="numeric"
+            placeholder="000.000.000-00"
+            icon={<User className="w-4 h-4" />}
+            value={form.cpf}
+            onChange={(e) => setForm({ ...form, cpf: formatCpf(e.target.value) })}
+          />
 
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-[var(--color-text-secondary)]">Senha inicial</label>

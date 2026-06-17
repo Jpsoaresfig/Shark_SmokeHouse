@@ -148,7 +148,11 @@ export async function createUserWithRole(
   phone: string,
   role: UserRole,
   commissionRate?: number,
+  cpf?: string,
 ): Promise<UserProfile> {
+  // CPF é opcional, mas se vier deve ser válido (gate do Clube Shark).
+  const cpfDigits = cpf ? onlyDigits(cpf) : "";
+  if (cpfDigits && !isValidCpf(cpfDigits)) throw new Error("CPF inválido.");
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
@@ -182,6 +186,8 @@ export async function createUserWithRole(
     addresses: [],
     // Comissão só para vendedor e quando informada (Firestore rejeita undefined).
     ...(role === "seller" && commissionRate != null ? { commissionRate } : {}),
+    // CPF só quando informado e válido.
+    ...(cpfDigits ? { cpf: cpfDigits } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
