@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, ChevronDown, ChevronUp, ShoppingBag,
   Clock, CheckCircle, Truck, XCircle, AlertTriangle,
-  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2,
+  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2, Wallet,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -175,9 +175,42 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
   onReviewed?: (orderId: string, rating: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [mpLoading, setMpLoading] = useState(false);
   const cfg = statusConfig[order.status];
   const StatusIcon = cfg.icon;
   const isActive = !["delivered", "cancelled"].includes(order.status);
+
+  /* Pagamento via Mercado Pago ainda pendente: o cliente fechou o pedido mas não
+     concluiu o pagamento online. Mostra um botão para retomar o Checkout Pro; o
+     webhook marca o pagamento como "paid" e o botão some na próxima atualização. */
+  const pay = resolveOrderPayment(order);
+  const needsMercadoPago =
+    pay.method === "mercadopago" &&
+    pay.status !== "paid" &&
+    order.status !== "cancelled";
+
+  /* Recria a preferência de cobrança e redireciona ao ambiente do Mercado Pago. */
+  const payWithMercadoPago = async () => {
+    setMpLoading(true);
+    try {
+      const res = await fetch("/api/payments/mercadopago/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.initPoint) {
+        toast.error(data?.error ?? "Não foi possível iniciar o pagamento. Tente novamente.");
+        setMpLoading(false);
+        return;
+      }
+      window.location.href = data.initPoint as string;
+    } catch (err) {
+      console.error("[orders] mercadopago", err);
+      toast.error("Não foi possível iniciar o pagamento. Tente novamente.");
+      setMpLoading(false);
+    }
+  };
 
   return (
     <motion.div
@@ -256,6 +289,26 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
         {/* Progress bar — shown in header when active */}
         {isActive && <OrderProgress status={order.status} />}
       </button>
+
+      {/* Pagamento Mercado Pago pendente — CTA para concluir o pagamento online */}
+      {needsMercadoPago && (
+        <div className="px-5 pb-5 -mt-1">
+          <div className="rounded-xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]/20 p-4">
+            <div className="flex items-center gap-2 mb-1.5">
+              <Wallet className="w-4 h-4 text-[var(--color-neon-blue)]" />
+              <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pagamento pendente</span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mb-3">
+              Conclua o pagamento de <strong className="text-[var(--color-text-secondary)]">{formatCurrency(order.total)}</strong> via PIX no Mercado Pago. Seu pedido é liberado automaticamente assim que o pagamento for confirmado.
+            </p>
+            <Button variant="premium" size="sm" className="w-full sm:w-auto" onClick={payWithMercadoPago} disabled={mpLoading}>
+              {mpLoading
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <><Wallet className="w-4 h-4" /> Pagar com Mercado Pago</>}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Expanded details */}
       <AnimatePresence initial={false}>
@@ -343,14 +396,22 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
                             {order.deliveryFee === 0 ? "Grátis" : formatCurrency(order.deliveryFee)}
                           </span>
                         </div>
-                        {Math.abs(cardFee) >= 0.01 && (
-                          <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
-                            <span>{cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}</span>
-                            <span className={cardFee > 0 ? "" : "text-[var(--color-success)]"}>
-                              {cardFee > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFee))}
-                            </span>
-                          </div>
-                        )}
+                        {Math.abs(cardFee) >= 0.01 && (() => {
+                          const inst = order.payment?.installments ?? 1;
+                          const isInstallment = order.payment?.method === "credit" && inst > 1;
+                          return (
+                            <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
+                              <span>
+                                {isInstallment
+                                  ? `Taxa de parcelamento (${inst}x)`
+                                  : cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}
+                              </span>
+                              <span className={cardFee > 0 ? "" : "text-[var(--color-success)]"}>
+                                {cardFee > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFee))}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </>
                     );
                   })()}
