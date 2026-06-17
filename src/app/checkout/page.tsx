@@ -10,6 +10,7 @@ import {
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, Banknote, Plus, Star,
   Copy, Check, User, LogIn, MessageCircle, Wallet, CreditCard, AlertCircle, Ticket,
+  Home, Bookmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import { evaluateCoupon, normalizeCouponCode } from "@/lib/coupons";
 import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
 import { manualGateway, mercadopagoGateway } from "@/lib/payments";
+import { normalizeInstallmentFees, installmentFeePercent, formatFeePercent, cardTotalFor } from "@/lib/payments/installments";
 import { getDeliveryAreas, normalizeArea } from "@/lib/firebase/delivery";
 import { formatCurrency } from "@/lib/utils";
 import { computeOrderPoints } from "@/lib/loyalty/levels";
@@ -112,7 +114,7 @@ function buildProofLink(orderId: string, total: number) {
 }
 
 /* ── Success screen ──────────────────────────────────────── */
-function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; payment: PaymentMethod; waLink: string; total: number }) {
+function SuccessScreen({ orderId, payment, waLink, total, installments }: { orderId: string; payment: PaymentMethod; waLink: string; total: number; installments: number }) {
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
   const [mpLoading, setMpLoading] = useState(false);
@@ -372,8 +374,11 @@ function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; p
               </span>
             </div>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Você pagará <strong className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</strong> na
-              maquininha no momento da entrega ou retirada. 💳
+              Você pagará <strong className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</strong>
+              {payment === "credit" && installments > 1
+                ? <> em <strong className="text-[var(--color-text-secondary)]">{installments}x de {formatCurrency(total / installments)}</strong> (taxa de parcelamento já incluída)</>
+                : null}
+              {" "}na maquininha no momento da entrega ou retirada. 💳
             </p>
           </motion.div>
         )}
@@ -397,10 +402,10 @@ function SuccessScreen({ orderId, payment, waLink, total }: { orderId: string; p
 /* ── Main checkout ───────────────────────────────────────── */
 export default function CheckoutPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const cartStore = useCartStore();
   const { items, subtotal, clearCart, closeCart } = cartStore;
-  const { pixKey, pixName, creditFeePercent, debitFeePercent } = useSitePayment();
+  const { pixKey, pixName, creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
@@ -441,13 +446,16 @@ export default function CheckoutPage() {
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
-  const [saveAddress, setSaveAddress] = useState(false);
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
+  /* Salvar endereço no perfil — botão explícito (vincula ao perfil na hora). */
+  const [savingAddr, setSavingAddr] = useState(false);
   const [fulfillment, setFulfillment] = useState<"delivery" | "pickup">("delivery");
   const [payment, setPayment] = useState<PaymentMethod>("pix_manual");
   const [notes, setNotes] = useState("");
   /* Troco para pagamento na entrega — guardado separado da observação geral. */
   const [changeFor, setChangeFor] = useState("");
+  /* Parcelas no cartão de crédito: 1 = à vista (direto), 2+ = parcelado na maquininha. */
+  const [creditInstallments, setCreditInstallments] = useState(1);
 
   /* ui state */
   const [cepLoading, setCepLoading] = useState(false);
@@ -479,6 +487,45 @@ export default function CheckoutPage() {
     setCity(addr.city);
     setState(addr.state);
   }, []);
+
+  /* Endereço preenchido o suficiente para salvar/entregar. */
+  const addressComplete = !!(
+    street.trim() && number.trim() && city.trim() && state.trim() && zip.trim() &&
+    (selectedArea?.name || neighborhood.trim())
+  );
+
+  /* Salva o endereço atual no perfil e atualiza o store na hora, para que ele
+     já apareça em "Endereços salvos" sem precisar finalizar o pedido. */
+  async function handleSaveAddress() {
+    if (!user || !addressComplete) return;
+    setSavingAddr(true);
+    try {
+      const existing = user.addresses ?? [];
+      const newAddr: Address = {
+        id: `addr_${Date.now()}`,
+        label: "Casa",
+        street: street.trim(),
+        number: number.trim(),
+        // omite o complemento vazio (o Firestore client rejeita undefined)
+        ...(complement.trim() ? { complement: complement.trim() } : {}),
+        neighborhood: selectedArea?.name ?? neighborhood.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        zipCode: zip.trim(),
+        isDefault: existing.length === 0,
+      };
+      const addresses = [...existing, newAddr];
+      await updateUserProfile(user.uid, { addresses });
+      setUser({ ...user, addresses });
+      setSelectedSavedId(newAddr.id);
+      toast.success("Endereço salvo no seu perfil!");
+    } catch (err) {
+      console.error("[checkout] save address", err);
+      toast.error("Não foi possível salvar o endereço. Tente novamente.");
+    } finally {
+      setSavingAddr(false);
+    }
+  }
 
   /* Quando as áreas carregam (ou o bairro é preenchido pelo CEP/endereço salvo),
      tenta selecionar automaticamente a área de entrega correspondente. */
@@ -539,7 +586,7 @@ export default function CheckoutPage() {
   }
 
   if (orderId) {
-    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} />;
+    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} installments={payment === "credit" ? creditInstallments : 1} />;
   }
 
   const isPickup = fulfillment === "pickup";
@@ -547,12 +594,21 @@ export default function CheckoutPage() {
   const effectiveDeliveryFee = isPickup ? 0 : (selectedArea?.fee ?? 0);
   // Diferença de preço no cartão (Lei nº 13.455/2017): incide no crédito e no
   // débito; positiva = acréscimo, negativa = desconto. Aplica sobre subtotal+frete.
+  // No crédito parcelado (2x+), a taxa vem da tabela de parcelamento; à vista (1x)
+  // usa a diferença padrão do crédito (creditFeePercent).
   const cardPct =
-    payment === "credit" ? (creditFeePercent ?? 0)
-    : payment === "debit" ? (debitFeePercent ?? 0)
-    : 0;
-  const cardFeeAmount = Math.round((subtotal + effectiveDeliveryFee) * (cardPct / 100) * 100) / 100;
-  const effectiveTotal = Math.max(0, subtotal + effectiveDeliveryFee + cardFeeAmount - discount);
+    payment === "credit"
+      ? (creditInstallments > 1
+          ? installmentFeePercent(creditInstallmentFees, creditInstallments)
+          : (creditFeePercent ?? 0))
+      : payment === "debit" ? (debitFeePercent ?? 0)
+      : 0;
+  // Base de cálculo da taxa de cartão (subtotal + frete). Mantemos o total do
+  // pedido como expressão inline (e não via helper) p/ não perturbar o React
+  // Compiler; o helper cardTotalFor é usado só nas opções de parcela do <select>.
+  const cardBase = subtotal + effectiveDeliveryFee;
+  const cardFeeAmount = Math.round(cardBase * (cardPct / 100) * 100) / 100;
+  const effectiveTotal = Math.max(0, cardBase + cardFeeAmount - discount);
 
   // Link de WhatsApp para quando o bairro não está na lista de entrega.
   const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
@@ -670,6 +726,7 @@ export default function CheckoutPage() {
         amount: effectiveTotal,
         pixKey,
         pixName,
+        ...(payment === "credit" ? { installments: creditInstallments } : {}),
       });
 
       const id = await createOrder({
@@ -699,12 +756,6 @@ export default function CheckoutPage() {
         ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
       });
 
-      /* save address to profile if requested (apenas entrega) */
-      if (!isPickup && saveAddress && !selectedSavedId) {
-        const existing = user.addresses ?? [];
-        const newAddr = { ...address, id: `addr_${Date.now()}`, label: "Casa", isDefault: existing.length === 0 };
-        await updateUserProfile(user.uid, { addresses: [...existing, newAddr] });
-      }
       /* save phone if changed */
       if (phone.trim() && phone.trim() !== user.phone) {
         await updateUserProfile(user.uid, { phone: phone.trim() });
@@ -738,7 +789,11 @@ export default function CheckoutPage() {
         cardFee: cardFeeAmount,
         total: effectiveTotal,
         fulfillment,
-        paymentLabel: PAYMENT_OPTIONS.find((o) => o.value === payment)?.label ?? payment,
+        paymentLabel:
+          (PAYMENT_OPTIONS.find((o) => o.value === payment)?.label ?? payment) +
+          (payment === "credit" && creditInstallments > 1
+            ? ` — ${creditInstallments}x de ${formatCurrency(effectiveTotal / creditInstallments)}`
+            : ""),
         address: addressLine,
       }));
       setPaidTotal(effectiveTotal);
@@ -1004,17 +1059,36 @@ export default function CheckoutPage() {
                     />
                   </div>
 
-                  {/* Save address */}
+                  {/* Salvar endereço no perfil — botão explícito, vincula na hora */}
                   {!selectedSavedId && (
-                    <label className="flex items-center gap-2.5 cursor-pointer select-none mt-1">
-                      <input
-                        type="checkbox"
-                        checked={saveAddress}
-                        onChange={(e) => setSaveAddress(e.target.checked)}
-                        className="w-4 h-4 accent-[var(--color-neon-blue)] cursor-pointer"
-                      />
-                      <span className="text-sm text-[var(--color-text-secondary)]">Salvar este endereço no meu perfil</span>
-                    </label>
+                    <div className="mt-2 rounded-xl border border-[var(--color-neon-blue)]/25 bg-[var(--color-neon-blue-glow)]/15 p-3.5">
+                      <div className="flex items-start gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[var(--color-neon-blue-glow)] flex items-center justify-center shrink-0">
+                          <Home className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[var(--color-text-primary)]">Salvar no meu perfil</p>
+                          <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                            Guarde este endereço para finalizar mais rápido na próxima compra.
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        className="w-full mt-3"
+                        disabled={!addressComplete || savingAddr}
+                        onClick={handleSaveAddress}
+                      >
+                        {savingAddr
+                          ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando…</>
+                          : <><Bookmark className="w-4 h-4" /> Salvar endereço</>}
+                      </Button>
+                      {!addressComplete && (
+                        <p className="text-[11px] text-[var(--color-text-muted)] text-center mt-2">
+                          Preencha o endereço completo para salvar.
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -1121,6 +1195,39 @@ export default function CheckoutPage() {
                         </p>
                       )}
                     </div>
+
+                    {/* Crédito: escolher pagar direto (à vista) ou parcelado na maquininha.
+                        Quanto mais parcelas, maior a taxa (tabela editável no admin). */}
+                    {payment === "credit" && (
+                      <div className="mt-3">
+                        <label htmlFor="credit-installments" className="block text-xs font-semibold text-[var(--color-text-secondary)] mb-1.5">
+                          Como deseja pagar no crédito?
+                        </label>
+                        <select
+                          id="credit-installments"
+                          value={creditInstallments}
+                          onChange={(e) => setCreditInstallments(Number(e.target.value))}
+                          className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                        >
+                          <option value={1}>À vista (direto) — {formatCurrency(cardTotalFor(cardBase, creditFeePercent ?? 0, discount))}</option>
+                          {normalizeInstallmentFees(creditInstallmentFees).map(({ installments: n, feePercent }) => (
+                            <option key={n} value={n}>
+                              {n}x de {formatCurrency(cardTotalFor(cardBase, feePercent, discount) / n)}
+                              {feePercent !== 0 ? ` (taxa ${formatFeePercent(feePercent)})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {creditInstallments > 1 && cardFeeAmount > 0 && (
+                          <p className="mt-1.5 text-[11px] text-[var(--color-text-secondary)]">
+                            Taxa de parcelamento ({creditInstallments}x): <strong>+{formatCurrency(cardFeeAmount)}</strong>
+                            {" · "}total {formatCurrency(effectiveTotal)}
+                          </p>
+                        )}
+                        <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                          O parcelamento é feito na maquininha, no momento da entrega/retirada.
+                        </p>
+                      </div>
+                    )}
                   </motion.div>
                 )}
 
@@ -1284,6 +1391,18 @@ export default function CheckoutPage() {
                         Desconto{appliedCoupon ? ` · ${appliedCoupon.code}` : ""}
                       </span>
                       <span className="text-[var(--color-success)]">−{formatCurrency(discount)}</span>
+                    </div>
+                  )}
+                  {cardFeeAmount !== 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-[var(--color-text-secondary)]">
+                        {payment === "credit" && creditInstallments > 1
+                          ? `Taxa de parcelamento (${creditInstallments}x)`
+                          : cardFeeAmount > 0 ? "Acréscimo cartão" : "Desconto cartão"}
+                      </span>
+                      <span className={cardFeeAmount > 0 ? "text-[var(--color-text-secondary)]" : "text-[var(--color-success)]"}>
+                        {cardFeeAmount > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFeeAmount))}
+                      </span>
                     </div>
                   )}
                   <Separator />
