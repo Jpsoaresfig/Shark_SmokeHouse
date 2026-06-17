@@ -443,9 +443,15 @@ export default function AdminOrders() {
                     (selected.total - selected.subtotal - selected.deliveryFee + (selected.discount ?? 0)) * 100,
                   ) / 100;
                   if (Math.abs(cardFee) < 0.01) return null;
+                  const inst = selected.payment?.installments ?? 1;
+                  const isInstallment = selected.payment?.method === "credit" && inst > 1;
                   return (
                     <div className="flex justify-between text-sm">
-                      <span className="text-[var(--color-text-muted)]">{cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}</span>
+                      <span className="text-[var(--color-text-muted)]">
+                        {isInstallment
+                          ? `Taxa de parcelamento (${inst}x)`
+                          : cardFee > 0 ? "Acréscimo cartão" : "Desconto cartão"}
+                      </span>
                       <span className="text-[var(--color-text-secondary)]">
                         {cardFee > 0 ? "+" : "−"}{formatCurrency(Math.abs(cardFee))}
                       </span>
@@ -573,6 +579,23 @@ export default function AdminOrders() {
                           {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
                         </Badge>
                       </div>
+
+                      {/* Crédito: parcelado ou à vista (direto) — como cobrar na maquininha */}
+                      {pay.method === "credit" && (
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <CreditCard className="w-3.5 h-3.5 shrink-0 text-[var(--color-text-muted)]" />
+                          {(pay.installments ?? 1) > 1 ? (
+                            <span className="font-medium text-[var(--color-text-primary)]">
+                              Parcelado em {pay.installments}x
+                              <span className="font-normal text-[var(--color-text-muted)]">
+                                {" · "}{formatCurrency(pay.amount / (pay.installments || 1))} por parcela
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="font-medium text-[var(--color-text-primary)]">À vista (direto)</span>
+                          )}
+                        </div>
+                      )}
 
                       {/* Nota explicativa do Mercado Pago — sem repetir o status */}
                       {pay.provider === "mercadopago" && (
