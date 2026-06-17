@@ -4,7 +4,11 @@ import {
   getPayment,
   mapMercadoPagoStatus,
 } from "@/lib/payments/mercadopago";
-import { applyPaymentStatusAdmin, getOrderAdmin } from "@/lib/firebase/orders.server";
+import {
+  applyPaymentStatusAdmin,
+  advanceOrderStatusAdmin,
+  getOrderAdmin,
+} from "@/lib/firebase/orders.server";
 import { qualifyReferralForPaidOrder } from "@/lib/firebase/referrals.server";
 
 export const runtime = "nodejs";
@@ -81,6 +85,21 @@ export async function POST(request: NextRequest) {
     const applied = await applyPaymentStatusAdmin(orderId, target, {
       note: `Mercado Pago: pagamento ${paymentId} (${payment.status})`,
     });
+
+    // Pagamento confirmado → manda o pedido direto para "Preparando". O cliente
+    // pagou online, então pula a triagem manual (Recebido/Análise/Aprovado).
+    // Seguro: advanceOrderStatusAdmin nunca retrocede nem mexe em pedido
+    // entregue/cancelado, e é idempotente em reenvios. Não derruba o webhook se
+    // falhar — a baixa do pagamento já foi aplicada acima.
+    if (applied && target === "paid") {
+      try {
+        await advanceOrderStatusAdmin(orderId, "preparing", {
+          note: "Pagamento confirmado no Mercado Pago — pedido liberado para preparo.",
+        });
+      } catch (err) {
+        console.error("Webhook MP: falha ao avançar status do pedido", { orderId, err });
+      }
+    }
 
     // Compra paga → libera a bonificação de indicação se for a 1ª compra do
     // indicado (Task 3.2). Idempotente: só credita uma vez. Não derruba o webhook

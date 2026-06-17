@@ -1,6 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
-import type { Order, PaymentEvent, PaymentStatus } from "@/types";
+import type { Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent } from "@/types";
 
 /**
  * Operações de pedido executadas no SERVIDOR via Firebase Admin SDK.
@@ -70,6 +70,54 @@ export async function applyPaymentStatusAdmin(
     "payment.history": FieldValue.arrayUnion(event),
     ...(status === "paid" ? { "payment.paidAt": now } : {}),
     paymentStatus: status, // espelho legado
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return true;
+}
+
+/* Ordem do funil de entrega — usada para nunca retroceder o status. */
+const STATUS_RANK: Record<OrderStatus, number> = {
+  received: 0,
+  analyzing: 1,
+  approved: 2,
+  preparing: 3,
+  out_for_delivery: 4,
+  delivered: 5,
+  cancelled: 6,
+};
+
+/**
+ * Avança o status de entrega do pedido a partir do servidor (webhook), apenas se
+ * for um avanço real. Usado quando o pagamento do Mercado Pago é confirmado para
+ * mandar o pedido direto para "Preparando".
+ *
+ * Seguro:
+ *   - nunca retrocede (ignora se o pedido já passou do status alvo);
+ *   - nunca mexe em pedido "delivered" ou "cancelled";
+ *   - idempotente: reenvios do webhook não duplicam o avanço.
+ * Retorna true se aplicou, false se ignorou.
+ */
+export async function advanceOrderStatusAdmin(
+  orderId: string,
+  toStatus: OrderStatus,
+  opts: { note?: string } = {},
+): Promise<boolean> {
+  const ref = getAdminDb().collection(COL).doc(orderId);
+  const snap = await ref.get();
+  if (!snap.exists) return false;
+
+  const current = (snap.data()?.status ?? "received") as OrderStatus;
+  if (current === "cancelled" || current === "delivered") return false;
+  if (STATUS_RANK[current] >= STATUS_RANK[toStatus]) return false; // já igual/à frente
+
+  const event: StatusEvent = {
+    status: toStatus,
+    timestamp: new Date().toISOString(),
+    ...(opts.note ? { note: opts.note } : {}),
+  };
+  await ref.update({
+    status: toStatus,
+    statusHistory: FieldValue.arrayUnion(event),
     updatedAt: FieldValue.serverTimestamp(),
   });
   return true;

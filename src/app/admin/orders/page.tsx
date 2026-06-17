@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   ShoppingBag, Clock, CheckCircle, Truck, AlertTriangle, Package, CreditCard, Star, MessageCircle,
-  Bell, BellOff, Search, X, Banknote, Bike,
+  Bell, BellOff, Search, X, Banknote, Bike, Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -316,6 +316,7 @@ export default function AdminOrders() {
               {filtered.map((order, i) => {
                 const cfg = STATUS_CONFIG[order.status];
                 const Icon = cfg.icon;
+                const rowPay = resolveOrderPayment(order);
                 return (
                   <div key={order.id}>
                     <motion.div
@@ -357,6 +358,12 @@ export default function AdminOrders() {
                             <Badge variant="secondary" className="text-xs">
                               <Bike className="w-3 h-3" />
                               {order.motoboyName}
+                            </Badge>
+                          )}
+                          {rowPay.provider === "mercadopago" && (
+                            <Badge variant={PAYMENT_STATUS_BADGE[rowPay.status] ?? "secondary"} className="text-xs">
+                              <Wallet className="w-3 h-3" />
+                              Mercado Pago: {PAYMENT_STATUS_LABELS[rowPay.status] ?? rowPay.status}
                             </Badge>
                           )}
                           <Badge variant={cfg.badge} className="sm:hidden text-xs">
@@ -562,6 +569,25 @@ export default function AdminOrders() {
                           {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
                         </Badge>
                       </div>
+                      {pay.provider === "mercadopago" && (
+                        <div className="rounded-lg bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 px-2.5 py-2 space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-neon-blue)]">
+                              <Wallet className="w-3.5 h-3.5" /> Status do Mercado Pago
+                            </span>
+                            <Badge variant={PAYMENT_STATUS_BADGE[pay.status] ?? "secondary"} className="text-xs">
+                              {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-[var(--color-text-muted)]">
+                            {pay.status === "paid"
+                              ? "PIX confirmado pelo Mercado Pago — o pedido avançou automaticamente para Preparando."
+                              : pay.status === "pending"
+                                ? "Aguardando o pagamento via PIX no Mercado Pago. O pedido avança sozinho assim que cair."
+                                : "Atualizado automaticamente pelo webhook do Mercado Pago."}
+                          </p>
+                        </div>
+                      )}
                       {pay.paidAt && (
                         <p className="text-xs text-[var(--color-text-muted)]">
                           Confirmado em {formatDateTime(pay.paidAt)}
