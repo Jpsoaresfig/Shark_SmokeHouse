@@ -1,5 +1,6 @@
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
 import type { SiteSettings } from "@/types";
 
 const DOC = doc(db, "settings", "site");
@@ -17,6 +18,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
     pixQrPayload: "",
     creditFeePercent: 0,
     debitFeePercent: 0,
+    creditInstallmentFees: DEFAULT_INSTALLMENT_FEES,
   },
 };
 
@@ -37,6 +39,8 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       pixQrPayload: data.payment?.pixQrPayload ?? "",
       creditFeePercent: data.payment?.creditFeePercent ?? 0,
       debitFeePercent: data.payment?.debitFeePercent ?? 0,
+      creditInstallmentFees:
+        data.payment?.creditInstallmentFees ?? DEFAULT_INSTALLMENT_FEES,
     },
   };
 }

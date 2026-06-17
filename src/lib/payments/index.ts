@@ -20,6 +20,8 @@ export interface CreatePaymentInput {
   /** Chave PIX exibida ao cliente (apenas pix_manual). */
   pixKey?: string;
   pixName?: string;
+  /** Parcelas no crédito: 1 = à vista (direto), 2+ = parcelado (apenas credit). */
+  installments?: number;
 }
 
 export interface PaymentGateway {

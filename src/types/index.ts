@@ -221,6 +221,9 @@ export interface PaymentInfo {
   /** Snapshot da chave PIX exibida ao cliente (pix_manual). */
   pixKey?: string;
   pixName?: string;
+  /** Parcelas no cartão de crédito: 1 = à vista (direto), 2+ = parcelado em N
+   *  vezes na maquininha. Só para method "credit"; ausente nos demais. */
+  installments?: number;
   /** Quando o pagamento foi confirmado. */
   paidAt?: string;
   /** uid do admin que deu baixa manual. */
@@ -426,6 +429,14 @@ export interface StockMovement {
 }
 
 /* ── Site Settings ───────────────────────────────────────── */
+/** Taxa de parcelamento no cartão de crédito (maquininha) para um nº de parcelas. */
+export interface InstallmentFee {
+  /** Número de parcelas (>= 2). 1x é à vista (direto), sem taxa de parcelamento. */
+  installments: number;
+  /** Taxa (%) aplicada ao total quando o cliente parcela nesse número de vezes. */
+  feePercent: number;
+}
+
 export interface SiteSettings {
   sections: {
     hero: boolean;
@@ -447,6 +458,10 @@ export interface SiteSettings {
     /** % aplicada ao pagar no DÉBITO (Lei nº 13.455/2017 — preço diferenciado).
      *  Positivo = acréscimo; negativo = desconto; 0/ausente = sem diferença. */
     debitFeePercent?: number;
+    /** Tabela de taxas de parcelamento no CRÉDITO (maquininha), por nº de parcelas.
+     *  Editável pelo admin; define também quais parcelas aparecem no checkout.
+     *  1x = à vista (direto), sem taxa de parcelamento (usa creditFeePercent). */
+    creditInstallmentFees?: InstallmentFee[];
   };
   updatedAt?: string;
 }

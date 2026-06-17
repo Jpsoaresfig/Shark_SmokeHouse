@@ -17,7 +17,7 @@ const INITIAL_STATUS: Partial<Record<CreatePaymentInput["method"], PaymentStatus
  */
 export const manualGateway: PaymentGateway = {
   provider: "manual",
-  createPayment({ method, amount, pixKey, pixName }): PaymentInfo {
+  createPayment({ method, amount, pixKey, pixName, installments }): PaymentInfo {
     const status = INITIAL_STATUS[method] ?? "pending";
     const now = new Date().toISOString();
     return {
@@ -29,6 +29,8 @@ export const manualGateway: PaymentGateway = {
       ...(method === "pix_manual" && pixKey
         ? { pixKey, ...(pixName ? { pixName } : {}) }
         : {}),
+      // Parcelas só fazem sentido no crédito (na maquininha).
+      ...(method === "credit" ? { installments: Math.max(1, installments ?? 1) } : {}),
     };
   },
 };

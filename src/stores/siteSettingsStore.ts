@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { getSiteSettings } from "@/lib/firebase/settings";
+import { DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
 import type { SiteSettings } from "@/types";
 
 const DEFAULT: SiteSettings["sections"] = {
@@ -18,6 +19,7 @@ const DEFAULT_PAYMENT: SiteSettings["payment"] = {
   pixQrPayload: "",
   creditFeePercent: 0,
   debitFeePercent: 0,
+  creditInstallmentFees: DEFAULT_INSTALLMENT_FEES,
 };
 
 interface SiteSettingsStore {
