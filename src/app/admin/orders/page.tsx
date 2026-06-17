@@ -560,34 +560,34 @@ export default function AdminOrders() {
                     <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                       <CreditCard className="w-3.5 h-3.5" /> Pagamento
                     </p>
-                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3 space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--color-text-secondary)]">
+                    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3 space-y-3">
+                      {/* Método + status atual (única fonte do status) */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
+                          {pay.provider === "mercadopago"
+                            ? <Wallet className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
+                            : <CreditCard className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />}
                           {PAYMENT_METHOD_LABELS[pay.method] ?? pay.method}
                         </span>
                         <Badge variant={PAYMENT_STATUS_BADGE[pay.status] ?? "secondary"} className="text-xs">
                           {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
                         </Badge>
                       </div>
+
+                      {/* Nota explicativa do Mercado Pago — sem repetir o status */}
                       {pay.provider === "mercadopago" && (
-                        <div className="rounded-lg bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 px-2.5 py-2 space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-neon-blue)]">
-                              <Wallet className="w-3.5 h-3.5" /> Status do Mercado Pago
-                            </span>
-                            <Badge variant={PAYMENT_STATUS_BADGE[pay.status] ?? "secondary"} className="text-xs">
-                              {PAYMENT_STATUS_LABELS[pay.status] ?? pay.status}
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] text-[var(--color-text-muted)]">
+                        <p className="flex items-start gap-1.5 rounded-lg bg-[var(--color-neon-blue)]/5 border border-[var(--color-neon-blue)]/20 px-2.5 py-2 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                          <Wallet className="w-3.5 h-3.5 shrink-0 mt-0.5 text-[var(--color-neon-blue)]" />
+                          <span>
                             {pay.status === "paid"
                               ? "PIX confirmado pelo Mercado Pago — o pedido avançou automaticamente para Preparando."
                               : pay.status === "pending"
                                 ? "Aguardando o pagamento via PIX no Mercado Pago. O pedido avança sozinho assim que cair."
-                                : "Atualizado automaticamente pelo webhook do Mercado Pago."}
-                          </p>
-                        </div>
+                                : "Status atualizado automaticamente pelo webhook do Mercado Pago."}
+                          </span>
+                        </p>
                       )}
+
                       {pay.paidAt && (
                         <p className="text-xs text-[var(--color-text-muted)]">
                           Confirmado em {formatDateTime(pay.paidAt)}
@@ -596,52 +596,62 @@ export default function AdminOrders() {
 
                       {/* Histórico financeiro */}
                       {pay.history?.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          {pay.history.slice().reverse().map((ev, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                              <span className="text-[var(--color-text-secondary)]">
-                                {PAYMENT_STATUS_LABELS[ev.status] ?? ev.status}
-                              </span>
-                              <span>· {ev.timestamp ? formatDateTime(ev.timestamp) : ""}</span>
-                              {ev.note && <span className="truncate">· {ev.note}</span>}
-                            </div>
-                          ))}
-                        </div>
+                        <>
+                          <Separator />
+                          <div className="space-y-1.5">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                              Histórico do pagamento
+                            </p>
+                            {pay.history.slice().reverse().map((ev, i) => (
+                              <div key={i} className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                                <span className="text-[var(--color-text-secondary)]">
+                                  {PAYMENT_STATUS_LABELS[ev.status] ?? ev.status}
+                                </span>
+                                <span>· {ev.timestamp ? formatDateTime(ev.timestamp) : ""}</span>
+                                {ev.note && <span className="truncate">· {ev.note}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </>
                       )}
 
                       {/* Ações de baixa */}
                       {!settled && (
-                        <div className="pt-2 space-y-2">
-                          <input
-                            value={payNote}
-                            onChange={e => setPayNote(e.target.value)}
-                            placeholder="Observação do pagamento (opcional)"
-                            className={inputCls}
-                          />
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="premium"
-                              size="sm"
-                              onClick={() => handlePaymentStatus("paid")}
-                              disabled={payingStatus !== null}
-                            >
-                              {payingStatus === "paid"
-                                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                : <><CheckCircle className="w-3.5 h-3.5" /> Confirmar pagamento</>}
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => handlePaymentStatus("cancelled")}
-                              disabled={payingStatus !== null}
-                            >
-                              Cancelar pagamento
-                            </Button>
+                        <>
+                          <Separator />
+                          <div className="space-y-2">
+                            <input
+                              value={payNote}
+                              onChange={e => setPayNote(e.target.value)}
+                              placeholder="Observação do pagamento (opcional)"
+                              className={inputCls}
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="premium"
+                                size="sm"
+                                onClick={() => handlePaymentStatus("paid")}
+                                disabled={payingStatus !== null}
+                              >
+                                {payingStatus === "paid"
+                                  ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                  : <><CheckCircle className="w-3.5 h-3.5" /> Confirmar pagamento</>}
+                              </Button>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => handlePaymentStatus("cancelled")}
+                                disabled={payingStatus !== null}
+                              >
+                                Cancelar pagamento
+                              </Button>
+                            </div>
                           </div>
-                        </div>
+                        </>
                       )}
                       {pay.status === "paid" && (
-                        <div className="pt-2">
+                        <>
+                          <Separator />
                           <Button
                             variant="secondary"
                             size="sm"
@@ -652,7 +662,7 @@ export default function AdminOrders() {
                               ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
                               : "Estornar"}
                           </Button>
-                        </div>
+                        </>
                       )}
                     </div>
                   </div>
