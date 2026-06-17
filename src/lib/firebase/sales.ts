@@ -6,7 +6,7 @@ import {
 import { db } from "@/lib/firebase";
 import { addStockMovement } from "@/lib/firebase/inventory";
 import { cached, invalidate } from "@/lib/firebase/cache";
-import type { Sale, SalePaymentMethod } from "@/types";
+import type { Sale, SalePaymentMethod, SaleChannel } from "@/types";
 
 const COL = "sales";
 
@@ -18,6 +18,12 @@ export const SALE_PAYMENT_LABELS: Record<SalePaymentMethod, string> = {
   card: "Cartão", // legado
 };
 const PAYMENT_LABELS = SALE_PAYMENT_LABELS;
+
+export const SALE_CHANNEL_LABELS: Record<SaleChannel, string> = {
+  in_store: "Loja (presencial)",
+  delivery: "Entrega (em casa)",
+  online: "Online",
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(value: any): Date {
@@ -68,6 +74,21 @@ export async function createSale(
   if (data.notes !== undefined && data.notes !== "") {
     payload.notes = data.notes;
   }
+  // Subtotal de produtos (sem frete/taxa) — base da comissão do vendedor.
+  if (data.subtotal !== undefined) payload.subtotal = data.subtotal;
+  // Canal/onde a venda foi feita (loja, entrega, online).
+  if (data.channel) payload.channel = data.channel;
+  // Frete e taxa de cartão — registrados separados para relatório.
+  if (data.deliveryFee) payload.deliveryFee = data.deliveryFee;
+  if (data.cardFee) payload.cardFee = data.cardFee;
+  if (data.cardFeePercent) payload.cardFeePercent = data.cardFeePercent;
+  // Parcelas só fazem sentido no crédito (2x+).
+  if (data.installments && data.installments > 1) payload.installments = data.installments;
+  // Cupom aplicado.
+  if (data.discount) payload.discount = data.discount;
+  if (data.couponCode) payload.couponCode = data.couponCode;
+  // Pontos do Clube Shark creditados ao cliente vinculado.
+  if (data.pointsEarned) payload.pointsEarned = data.pointsEarned;
   // Cliente vinculado (venda presencial).
   if (data.customerId) {
     payload.customerId = data.customerId;
@@ -114,12 +135,14 @@ export async function markSaleDelivered(id: string): Promise<void> {
 
 export function exportSalesCSV(sales: Sale[], filename?: string): void {
   const headers = [
-    "Data", "Hora", "ID", "Vendedor", "Cliente",
+    "Data", "Hora", "ID", "Vendedor", "Cliente", "Canal",
     "Produto", "Variação", "SKU", "Categoria", "Qtd",
-    "Preço Unit.", "Subtotal", "Total da Venda",
+    "Preço Unit.", "Subtotal Item",
+    "Subtotal Produtos", "Cupom", "Desconto", "Frete", "Taxa Cartão", "Parcelas", "Total da Venda",
     "Pagamento", "Entrega", "Observações",
   ];
   const rows: string[][] = [headers];
+  const money = (n: number) => n.toFixed(2).replace(".", ",");
 
   for (const sale of sales) {
     const d = toDate(sale.createdAt);
@@ -128,6 +151,10 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
     const deliveryStr = sale.deliveryLater
       ? (sale.delivered ? "Entregue" : "Entrega pendente")
       : "Retirada na hora";
+    const channelStr = sale.channel ? SALE_CHANNEL_LABELS[sale.channel] : "Loja (presencial)";
+    // Subtotal de produtos: campo novo; nas vendas antigas o total já era só produtos.
+    const productsSubtotal = sale.subtotal ?? sale.total;
+    const installmentsStr = (sale.installments ?? 1) > 1 ? `${sale.installments}x` : "À vista";
     for (const item of sale.items) {
       rows.push([
         dateStr,
@@ -135,14 +162,21 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
         sale.id.slice(-8).toUpperCase(),
         sale.sellerName,
         sale.customerName ?? "",
+        channelStr,
         item.productName,
         item.variationName ?? "",
         item.sku ?? "",
         item.category,
         String(item.quantity),
-        item.price.toFixed(2).replace(".", ","),
-        item.subtotal.toFixed(2).replace(".", ","),
-        sale.total.toFixed(2).replace(".", ","),
+        money(item.price),
+        money(item.subtotal),
+        money(productsSubtotal),
+        sale.couponCode ?? "",
+        money(sale.discount ?? 0),
+        money(sale.deliveryFee ?? 0),
+        money(sale.cardFee ?? 0),
+        installmentsStr,
+        money(sale.total),
         PAYMENT_LABELS[sale.paymentMethod],
         deliveryStr,
         sale.notes ?? "",

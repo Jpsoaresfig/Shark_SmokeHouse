@@ -45,23 +45,28 @@ export default function SellerDashboard() {
     const now = new Date();
     const m = now.getMonth();
     const y = now.getFullYear();
-    let monthCount = 0, monthTotal = 0, allTotal = 0;
+    // `*Total` = total cobrado (com frete/taxa) para exibição; `*Base` = só produtos,
+    // que é a base da comissão. Vendas antigas (sem subtotal) tinham total = produtos.
+    let monthCount = 0, monthTotal = 0, allTotal = 0, monthBase = 0, allBase = 0;
     for (const s of sales) {
+      const base = Math.max(0, (s.subtotal ?? s.total ?? 0) - (s.discount ?? 0));
       allTotal += s.total ?? 0;
+      allBase += base;
       const d = toDate(s.createdAt);
       if (d.getMonth() === m && d.getFullYear() === y) {
         monthCount++;
         monthTotal += s.total ?? 0;
+        monthBase += base;
       }
     }
     const commission = (v: number) => (hasCommission ? v * (rate! / 100) : 0);
     return {
       monthCount,
       monthTotal,
-      monthCommission: commission(monthTotal),
+      monthCommission: commission(monthBase),
       allCount: sales.length,
       allTotal,
-      allCommission: commission(allTotal),
+      allCommission: commission(allBase),
     };
   }, [sales, hasCommission, rate]);
 
@@ -188,7 +193,7 @@ export default function SellerDashboard() {
                         <span className="text-sm font-bold text-[var(--color-neon-blue)] block">{formatCurrency(sale.total)}</span>
                         {hasCommission && (
                           <Badge variant="success" className="text-[10px] mt-0.5">
-                            +{formatCurrency(sale.total * (rate! / 100))}
+                            +{formatCurrency(Math.max(0, (sale.subtotal ?? sale.total) - (sale.discount ?? 0)) * (rate! / 100))}
                           </Badge>
                         )}
                       </div>

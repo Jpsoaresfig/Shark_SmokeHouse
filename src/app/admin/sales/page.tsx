@@ -6,6 +6,7 @@ import {
   Plus, Minus, Trash2, Search, ShoppingCart,
   History, Download, Receipt, TrendingUp, Package,
   ChevronDown, ChevronUp, User, X, Truck, CheckCircle, Percent,
+  Store, Globe, Ticket, Star,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,12 +15,19 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
-import { getSales, createSale, exportSalesCSV, markSaleDelivered, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
+import { getSales, createSale, exportSalesCSV, markSaleDelivered, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
 import { getAllUsers } from "@/lib/firebase/users";
+import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
+import { getCategories } from "@/lib/firebase/categories";
+import { addLoyaltyPoints } from "@/lib/firebase/loyalty";
+import { computeOrderPoints, computeOrderPointsForItems } from "@/lib/loyalty/levels";
+import { evaluateCoupon, normalizeCouponCode } from "@/lib/coupons";
 import { useAuthStore } from "@/stores/authStore";
+import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
-import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, UserProfile } from "@/types";
+import { normalizeInstallmentFees, installmentFeePercent, formatFeePercent, cardTotalFor } from "@/lib/payments/installments";
+import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, SaleChannel, Coupon, UserProfile } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(v: any): Date {
@@ -36,6 +44,18 @@ const PAYMENT_OPTIONS: { value: SalePaymentMethod; label: string }[] = [
   { value: "debit", label: "Débito" },
 ];
 
+const CHANNEL_OPTIONS: { value: SaleChannel; label: string; desc: string; icon: React.ElementType }[] = [
+  { value: "in_store", label: "Loja",    desc: "Venda presencial no balcão",    icon: Store },
+  { value: "delivery", label: "Entrega", desc: "Em casa, com maquineta",        icon: Truck },
+  { value: "online",   label: "Online",  desc: "Pedido feito pela internet",    icon: Globe },
+];
+
+/** Converte um valor digitado em reais ("12,50" ou "12.50") para número. */
+function parseMoney(v: string): number {
+  const n = parseFloat(v.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
@@ -48,9 +68,24 @@ export default function AdminSales() {
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [search, setSearch] = useState("");
 
+  /* Taxas configuradas pelo admin (crédito/débito + tabela de parcelamento). */
+  const { creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
+  const installmentOptions = normalizeInstallmentFees(creditInstallmentFees);
+
   /* ── Current sale ── */
   const [items, setItems] = useState<SaleItem[]>([]);
   const [payment, setPayment] = useState<SalePaymentMethod>("cash");
+  const [channel, setChannel] = useState<SaleChannel>("in_store");
+  /* Frete cobrado (venda com entrega em casa) — texto livre em R$. */
+  const [deliveryFee, setDeliveryFee] = useState("");
+  /* Parcelas no crédito: 1 = à vista (direto), 2+ = parcelado na maquininha. */
+  const [creditInstallments, setCreditInstallments] = useState(1);
+  /* Cupom de desconto (mesma engine do checkout). */
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
+  const [discount, setDiscount] = useState(0);
+  const [couponError, setCouponError] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -132,7 +167,10 @@ export default function AdminSales() {
   const saleCommission = useCallback((sale: Sale): { rate: number; amount: number } | null => {
     const rate = sellerById.get(sale.sellerId)?.commissionRate;
     if (rate == null || rate <= 0) return null;
-    return { rate, amount: sale.total * (rate / 100) };
+    // Comissão só sobre os produtos, já descontado o cupom. Vendas antigas (sem
+    // subtotal) tinham `total` = produtos, então o fallback mantém o cálculo.
+    const base = Math.max(0, (sale.subtotal ?? sale.total) - (sale.discount ?? 0));
+    return { rate, amount: base * (rate / 100) };
   }, [sellerById]);
   const customerMatches = useMemo(() => {
     const q = customerQuery.trim().toLowerCase();
@@ -192,8 +230,35 @@ export default function AdminSales() {
     toast.success(`${match.name} adicionado.`);
   }, { enabled: tab === "new" });
 
+  /* Subtotal só dos produtos (base da comissão). */
   const total = useMemo(() =>
     items.reduce((s, i) => s + i.subtotal, 0), [items]);
+
+  /* Frete só entra quando a venda é entrega em casa. */
+  const deliveryFeeNum = channel === "delivery" ? parseMoney(deliveryFee) : 0;
+  /* Taxa do cartão (Lei 13.455/2017): crédito à vista usa a % do crédito; crédito
+     parcelado (2x+) usa a tabela; débito usa a % do débito; demais formas, zero. */
+  const cardPct =
+    payment === "credit"
+      ? (creditInstallments > 1
+          ? installmentFeePercent(creditInstallmentFees, creditInstallments)
+          : (creditFeePercent ?? 0))
+      : payment === "debit" ? (debitFeePercent ?? 0)
+      : 0;
+  // Produtos líquidos (após o cupom) + frete = base da taxa de cartão.
+  const netProducts = Math.max(0, total - discount);
+  const cardBase = netProducts + deliveryFeeNum;
+  // Valores monetários centrais como expressões inline (React Compiler) — os
+  // helpers importados ficam só nas opções do <select> de parcelas.
+  const cardFeeAmount = Math.round(cardBase * (cardPct / 100) * 100) / 100;
+  const grandTotal = Math.round((cardBase + cardFeeAmount) * 100) / 100;
+
+  /* Clube Shark: estimativa de pontos para o cliente vinculado (exige CPF no
+     cadastro dele). O crédito real é feito no momento de salvar a venda. */
+  const customerCpfPresent = !!(customer?.cpf && customer.cpf.trim());
+  const estimatedPoints = customer
+    ? computeOrderPoints({ eligibleReais: total, currentPoints: customer.loyaltyPoints ?? 0, cpfPresent: customerCpfPresent })
+    : 0;
 
   const historyTotal = useMemo(() =>
     sales.reduce((s, sale) => s + sale.total, 0), [sales]);
@@ -265,6 +330,54 @@ export default function AdminSales() {
     setItems(prev => prev.filter(i => !(i.productId === productId && (i.variationId ?? "") === vId)));
   }
 
+  /* ── Cupom de desconto ──
+     Valida o código contra o carrinho (mesma engine do checkout). Quando o cupom
+     tem limite por CPF, usa o CPF do cliente vinculado. */
+  async function applyCoupon() {
+    const code = normalizeCouponCode(couponInput);
+    if (!code) return;
+    if (!items.length) { setCouponError("Adicione itens antes de aplicar um cupom."); return; }
+    setCouponError("");
+    setCouponLoading(true);
+    try {
+      const coupon = await getCouponByCode(code);
+      if (!coupon) {
+        setCouponError("Cupom não encontrado.");
+        setAppliedCoupon(null); setDiscount(0);
+        return;
+      }
+      const couponItems = items.map(i => ({ categorySlug: i.category, lineTotal: i.subtotal }));
+      const cpfDigits = (customer?.cpf ?? "").replace(/\D/g, "");
+      const priorUses = coupon.usageLimitPerCpf != null && cpfDigits
+        ? await countCouponUsesForCpf(coupon.id, cpfDigits)
+        : 0;
+      const result = evaluateCoupon(coupon, {
+        items: couponItems,
+        cpf: cpfDigits || undefined,
+        priorUsesForCpf: priorUses,
+      });
+      if (!result.valid) {
+        setCouponError(result.message ?? "Cupom inválido.");
+        setAppliedCoupon(null); setDiscount(0);
+        return;
+      }
+      setAppliedCoupon(coupon);
+      setDiscount(result.discount);
+      toast.success(`Cupom ${coupon.code} aplicado!`);
+    } catch {
+      setCouponError("Não foi possível validar o cupom. Tente novamente.");
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setAppliedCoupon(null);
+    setDiscount(0);
+    setCouponInput("");
+    setCouponError("");
+  }
+
   /* ── Save sale ── */
   async function handleSave() {
     if (!items.length || !user) return;
@@ -289,16 +402,65 @@ export default function AdminSales() {
     setSaving(true);
     setSavedId(null);
     try {
+      /* Pontos do Clube Shark: quando há cliente vinculado COM CPF, a venda pontua
+         na conta dele (mesma engine do e-commerce) — vale também no presencial.
+         A taxa vem do nível atual do cliente; o multiplicador "Pontos em Dobro"
+         (2×) sai do produto ou da categoria. Sem cliente/CPF, não pontua. */
+      let pointsEarned = 0;
+      if (customer && customerCpfPresent) {
+        const cats = await getCategories();
+        const catDouble = new Map(cats.map(c => [c.slug, !!c.doublePoints]));
+        pointsEarned = computeOrderPointsForItems({
+          items: items.map(it => {
+            const p = products.find(pp => pp.id === it.productId);
+            const isDouble = !!p?.doublePoints || (!!p && (catDouble.get(p.category) ?? false));
+            return { reais: it.subtotal, multiplier: isDouble ? 2 : 1 };
+          }),
+          currentPoints: customer.loyaltyPoints ?? 0,
+          cpfPresent: true,
+        });
+      }
+
       const id = await createSale({
         sellerId: finalSellerId,
         sellerName: finalSellerName,
         items,
-        total,
+        subtotal: total,                 // produtos (base da comissão)
+        total: grandTotal,               // produtos + frete + taxa do cartão
+        channel,
         paymentMethod: payment,
+        ...(deliveryFeeNum > 0 ? { deliveryFee: deliveryFeeNum } : {}),
+        ...(cardFeeAmount > 0 ? { cardFee: cardFeeAmount, cardFeePercent: cardPct } : {}),
+        ...(payment === "credit" && creditInstallments > 1 ? { installments: creditInstallments } : {}),
+        ...(appliedCoupon && discount > 0 ? { couponCode: appliedCoupon.code, discount } : {}),
+        ...(pointsEarned > 0 ? { pointsEarned } : {}),
         notes: notes.trim() || undefined,
         ...(customer ? { customerId: customer.uid, customerName: customer.displayName } : {}),
         ...(deliveryLater ? { deliveryLater: true } : {}),
       });
+
+      /* Registra o uso do cupom (auditoria + limite por CPF) — não bloqueia a venda. */
+      if (appliedCoupon && discount > 0) {
+        await recordCouponRedemption({
+          couponId: appliedCoupon.id,
+          code: appliedCoupon.code,
+          cpf: (customer?.cpf ?? "").replace(/\D/g, ""),
+          userId: customer?.uid ?? finalSellerId,
+          orderId: id,
+          discount,
+        }).catch(err => console.error("Falha ao registrar uso do cupom:", err));
+      }
+
+      /* Credita os pontos na conta do cliente vinculado (não bloqueia a venda). */
+      if (customer && pointsEarned > 0) {
+        await addLoyaltyPoints(
+          customer.uid,
+          pointsEarned,
+          `Venda PDV #${id.slice(-6).toUpperCase()}`,
+          "earned",
+        ).catch(err => console.error("Falha ao creditar pontos:", err));
+      }
+
       setSavedId(id.slice(-8).toUpperCase());
       const attributedToOther = finalSellerId !== user.uid;
       toast.success(
@@ -306,9 +468,16 @@ export default function AdminSales() {
           ? `Venda registrada para ${finalSellerName}!`
           : "Venda registrada com sucesso!",
       );
+      if (customer && pointsEarned > 0) {
+        toast.success(`+${pointsEarned.toLocaleString("pt-BR")} pontos creditados para ${customer.displayName}.`);
+      }
       setItems([]);
       setNotes("");
       setPayment("cash");
+      setChannel("in_store");
+      setDeliveryFee("");
+      setCreditInstallments(1);
+      removeCoupon();
       setCustomer(null);
       setCustomerQuery("");
       setDeliveryLater(false);
@@ -560,6 +729,41 @@ export default function AdminSales() {
                     </div>
                   )}
 
+                  {/* Canal — onde a venda foi feita */}
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Onde foi a venda</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {CHANNEL_OPTIONS.map(({ value, label, desc, icon: Icon }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setChannel(value)}
+                          title={desc}
+                          className={`flex flex-col items-center gap-1 py-2.5 rounded-lg border text-xs font-medium transition-all ${
+                            channel === value
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
+                        >
+                          <Icon className="w-4 h-4" />
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {channel === "delivery" && (
+                      <div className="mt-2">
+                        <label className="text-xs font-medium text-[var(--color-text-muted)] block mb-1.5">Frete (R$)</label>
+                        <Input
+                          inputMode="decimal"
+                          placeholder="Ex: 8,00 (opcional)"
+                          icon={<Truck className="w-4 h-4" />}
+                          value={deliveryFee}
+                          onChange={e => setDeliveryFee(e.target.value)}
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   {/* Cliente vinculado (venda presencial) */}
                   <div>
                     <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Cliente</label>
@@ -580,7 +784,26 @@ export default function AdminSales() {
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    ) : (
+                    ) : null}
+
+                    {/* Clube Shark: pontuação vai para a conta do cliente vinculado */}
+                    {customer && (
+                      customerCpfPresent ? (
+                        estimatedPoints > 0 && (
+                          <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-warning)]">
+                            <Star className="w-3.5 h-3.5 shrink-0" />
+                            <span><strong>{estimatedPoints.toLocaleString("pt-BR")} pontos</strong> serão creditados para {customer.displayName}.</span>
+                          </div>
+                        )
+                      ) : (
+                        <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                          <Star className="w-3.5 h-3.5 shrink-0" />
+                          <span>Cliente sem CPF cadastrado — a venda não pontua no Clube Shark.</span>
+                        </div>
+                      )
+                    )}
+
+                    {!customer && (
                       <div className="relative">
                         <Input
                           placeholder="Buscar cliente por nome, telefone ou e-mail..."
@@ -669,6 +892,70 @@ export default function AdminSales() {
                         </button>
                       ))}
                     </div>
+
+                    {/* Parcelamento no crédito — usa a tabela cadastrada em Pagamentos */}
+                    {payment === "credit" && (
+                      <div className="mt-2">
+                        <label className="text-xs font-medium text-[var(--color-text-muted)] block mb-1.5">Parcelas (na maquininha)</label>
+                        <select
+                          value={creditInstallments}
+                          onChange={e => setCreditInstallments(Number(e.target.value))}
+                          className={inputCls}
+                        >
+                          <option value={1}>
+                            À vista (direto) — {formatCurrency(cardTotalFor(cardBase, creditFeePercent ?? 0, 0))}
+                          </option>
+                          {installmentOptions.map(({ installments: n, feePercent }) => (
+                            <option key={n} value={n}>
+                              {n}x de {formatCurrency(cardTotalFor(cardBase, feePercent, 0) / n)}
+                              {feePercent !== 0 ? ` (taxa ${formatFeePercent(feePercent)})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {installmentOptions.length === 0 && (
+                          <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                            Nenhuma taxa de parcelamento cadastrada. Configure em Admin → Pagamentos.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Cupom de desconto */}
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Cupom</label>
+                    {appliedCoupon ? (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+                        <span className="flex items-center gap-2 min-w-0 text-sm font-medium text-emerald-400 truncate">
+                          <Ticket className="w-4 h-4 shrink-0" />
+                          {appliedCoupon.code} · −{formatCurrency(discount)}
+                        </span>
+                        <button onClick={removeCoupon} className="text-xs text-[var(--color-text-muted)] hover:text-red-400 shrink-0">
+                          Remover
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex gap-1.5">
+                          <div className="relative flex-1">
+                            <Ticket className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
+                            <input
+                              value={couponInput}
+                              onChange={e => { setCouponInput(normalizeCouponCode(e.target.value)); setCouponError(""); }}
+                              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); applyCoupon(); } }}
+                              placeholder="Código do cupom"
+                              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-9 pr-3 py-2.5 text-sm uppercase text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] placeholder:normal-case focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                            />
+                          </div>
+                          <Button variant="secondary" onClick={applyCoupon} disabled={couponLoading || !couponInput.trim()}>
+                            {couponLoading
+                              ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                              : "Aplicar"}
+                          </Button>
+                        </div>
+                        {couponError && <p className="text-xs text-red-400 mt-1.5">{couponError}</p>}
+                      </>
+                    )}
                   </div>
 
                   {/* Notes */}
@@ -685,9 +972,37 @@ export default function AdminSales() {
 
                   {/* Total + button */}
                   <div className="border-t border-[var(--color-border)] pt-3 space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--color-text-muted)]">Subtotal (produtos)</span>
+                        <span className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</span>
+                      </div>
+                      {discount > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-emerald-400">Desconto{appliedCoupon ? ` · ${appliedCoupon.code}` : ""}</span>
+                          <span className="text-emerald-400">−{formatCurrency(discount)}</span>
+                        </div>
+                      )}
+                      {deliveryFeeNum > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-[var(--color-text-muted)]">Frete</span>
+                          <span className="text-[var(--color-text-secondary)]">{formatCurrency(deliveryFeeNum)}</span>
+                        </div>
+                      )}
+                      {cardFeeAmount > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-[var(--color-text-muted)]">
+                            {payment === "credit" && creditInstallments > 1
+                              ? `Taxa de parcelamento (${creditInstallments}x)`
+                              : "Taxa do cartão"}
+                          </span>
+                          <span className="text-[var(--color-text-secondary)]">+{formatCurrency(cardFeeAmount)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2.5">
                       <span className="text-sm text-[var(--color-text-muted)]">Total</span>
-                      <span className="text-2xl font-black text-[var(--color-neon-blue)]">{formatCurrency(total)}</span>
+                      <span className="text-2xl font-black text-[var(--color-neon-blue)]">{formatCurrency(grandTotal)}</span>
                     </div>
                     <Button
                       variant="premium"
@@ -833,7 +1148,8 @@ export default function AdminSales() {
                                 </span>
                               </div>
                               <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                                {sale.items.length} {sale.items.length === 1 ? "item" : "itens"} · {PAYMENT_LABELS[sale.paymentMethod]}
+                                {sale.items.length} {sale.items.length === 1 ? "item" : "itens"} · {SALE_CHANNEL_LABELS[sale.channel ?? "in_store"]} · {PAYMENT_LABELS[sale.paymentMethod]}
+                                {(sale.installments ?? 1) > 1 && ` ${sale.installments}x`}
                                 {sale.customerName && ` · ${sale.customerName}`}
                                 {(() => {
                                   const c = saleCommission(sale);
@@ -908,6 +1224,49 @@ export default function AdminSales() {
                                       </span>
                                     </div>
                                   ))}
+
+                                  {/* Detalhamento financeiro da venda */}
+                                  <div className="pt-1.5 mt-1 border-t border-[var(--color-border)]/60 space-y-1">
+                                    <div className="flex items-center justify-between text-sm">
+                                      <span className="text-[var(--color-text-muted)]">Subtotal (produtos)</span>
+                                      <span className="text-[var(--color-text-secondary)]">{formatCurrency(sale.subtotal ?? sale.total)}</span>
+                                    </div>
+                                    {!!sale.discount && (
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-emerald-400">Desconto{sale.couponCode ? ` · ${sale.couponCode}` : ""}</span>
+                                        <span className="text-emerald-400">−{formatCurrency(sale.discount)}</span>
+                                      </div>
+                                    )}
+                                    {!!sale.deliveryFee && (
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-[var(--color-text-muted)]">Frete</span>
+                                        <span className="text-[var(--color-text-secondary)]">{formatCurrency(sale.deliveryFee)}</span>
+                                      </div>
+                                    )}
+                                    {!!sale.cardFee && (
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-[var(--color-text-muted)]">
+                                          {(sale.installments ?? 1) > 1
+                                            ? `Taxa de parcelamento (${sale.installments}x)`
+                                            : "Taxa do cartão"}
+                                          {sale.cardFeePercent ? ` · ${formatFeePercent(sale.cardFeePercent)}` : ""}
+                                        </span>
+                                        <span className="text-[var(--color-text-secondary)]">+{formatCurrency(sale.cardFee)}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center justify-between text-sm font-semibold">
+                                      <span className="text-[var(--color-text-secondary)]">Total cobrado</span>
+                                      <span className="text-[var(--color-neon-blue)]">{formatCurrency(sale.total)}</span>
+                                    </div>
+                                    {!!sale.pointsEarned && (
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="flex items-center gap-1.5 text-[var(--color-warning)]">
+                                          <Star className="w-3.5 h-3.5" /> Pontos creditados
+                                        </span>
+                                        <span className="font-semibold text-[var(--color-warning)]">+{sale.pointsEarned.toLocaleString("pt-BR")}</span>
+                                      </div>
+                                    )}
+                                  </div>
 
                                   {/* Comissão do vendedor sobre esta venda (taxa atual do perfil) */}
                                   {(() => {

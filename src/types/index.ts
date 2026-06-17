@@ -471,6 +471,9 @@ export interface SiteSettings {
  *  separar em crédito/débito) — mantido só para exibição do histórico. */
 export type SalePaymentMethod = "pix" | "credit" | "debit" | "cash" | "card";
 
+/** Onde a venda foi feita: presencial na loja, entrega em casa (maquineta) ou online. */
+export type SaleChannel = "in_store" | "delivery" | "online";
+
 export interface SaleItem {
   productId: string;
   productName: string;
@@ -489,8 +492,27 @@ export interface Sale {
   sellerId: string;
   sellerName: string;
   items: SaleItem[];
+  /** Total cobrado do cliente = subtotal de produtos + frete + taxa do cartão. */
   total: number;
+  /** Subtotal só dos produtos (sem frete e sem taxa de cartão). Ausente em
+   *  vendas antigas — nesses casos `total` já era só os produtos. */
+  subtotal?: number;
   paymentMethod: SalePaymentMethod;
+  /** Onde a venda foi feita. Ausente = vendas antigas (presencial por padrão). */
+  channel?: SaleChannel;
+  /** Frete cobrado (venda com entrega em casa). */
+  deliveryFee?: number;
+  /** Taxa do cartão (R$) somada ao total — crédito/débito (Lei 13.455/2017). */
+  cardFee?: number;
+  /** % da taxa do cartão aplicada (espelho da taxa usada no cálculo). */
+  cardFeePercent?: number;
+  /** Parcelas no crédito: 1 = à vista (direto), 2+ = parcelado na maquininha. */
+  installments?: number;
+  /** Cupom aplicado na venda (código) e o desconto concedido (R$). */
+  couponCode?: string;
+  discount?: number;
+  /** Pontos do Clube Shark creditados ao cliente vinculado (0/ausente = nenhum). */
+  pointsEarned?: number;
   notes?: string;
   /** Cliente vinculado à venda presencial (opcional — busca no cadastro). */
   customerId?: string;
