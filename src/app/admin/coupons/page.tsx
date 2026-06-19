@@ -241,8 +241,13 @@ export default function AdminCouponsPage() {
       const [cs, cats] = await Promise.all([getCoupons(true), getCategories()]);
       setCoupons(cs);
       setCategories(cats);
-    } catch {
-      toast.error("Não foi possível carregar os cupons.");
+    } catch (err) {
+      // Surface the real cause (permission-denied, project mismatch, etc.) —
+      // sem isso o erro fica invisível e impossível de diagnosticar em produção.
+      console.error("[coupons] falha ao carregar:", err);
+      const code = (err as { code?: string })?.code;
+      const msg = (err as Error)?.message ?? String(err);
+      toast.error(`Não foi possível carregar os cupons.${code ? ` (${code})` : ""} ${msg}`);
     } finally {
       setLoading(false);
     }
