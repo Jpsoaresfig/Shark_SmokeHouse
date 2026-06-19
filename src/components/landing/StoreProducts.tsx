@@ -68,7 +68,7 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
                 -{discount}%
               </Badge>
             )}
-            {product.featured && (
+            {product.storeHighlight && (
               <Badge
                 variant="premium"
                 className="text-xs border-0 bg-gradient-to-r from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] text-white shadow-md shadow-black/30"
@@ -134,7 +134,13 @@ export function StoreProducts() {
 
   useEffect(() => {
     getActiveProducts()
-      .then((all) => setProducts(all.slice(0, MAX_PRODUCTS)))
+      // "Exibição destacada" primeiro (sort estável preserva a ordem por data).
+      .then((all) => {
+        const highlightedFirst = [...all].sort(
+          (a, b) => Number(b.storeHighlight ?? false) - Number(a.storeHighlight ?? false),
+        );
+        setProducts(highlightedFirst.slice(0, MAX_PRODUCTS));
+      })
       .finally(() => setLoading(false));
   }, []);
 

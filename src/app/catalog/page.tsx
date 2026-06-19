@@ -54,7 +54,7 @@ function ProductCard({ product, categoryLabel, added, onSelect, onAdd }: {
 
         <div className="absolute top-2 left-2 flex flex-col gap-1">
           {discount && <Badge variant="orange" className="text-[10px] px-1.5 py-0.5">-{discount}%</Badge>}
-          {product.featured && <Badge variant="premium" className="text-[10px] px-1.5 py-0.5">Destaque</Badge>}
+          {product.storeHighlight && <Badge variant="premium" className="text-[10px] px-1.5 py-0.5">Destaque</Badge>}
           {product.doublePoints && <Badge variant="warning" className="text-[10px] px-1.5 py-0.5">Pontos 2×</Badge>}
           {product.stock === 0 && <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">Esgotado</Badge>}
         </div>
@@ -121,7 +121,10 @@ function CatalogContent() {
 
   useEffect(() => {
     getActiveProducts()
-      .then(setProducts)
+      // "Exibição destacada" primeiro (sort estável mantém a ordem por data).
+      .then((all) => setProducts(
+        [...all].sort((a, b) => Number(b.storeHighlight ?? false) - Number(a.storeHighlight ?? false)),
+      ))
       .finally(() => setLoading(false));
     getCategories().then(setCats).catch(() => {});
   }, []);

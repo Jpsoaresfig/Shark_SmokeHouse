@@ -83,7 +83,12 @@ export interface Product {
   minStock: number;
   sku?: string;
   weight?: number;
+  /** Aparece na seção dedicada "Produtos em Destaque" (vitrine da home). */
   featured?: boolean;
+  /** Exibição destacada DENTRO de "Nossos Produtos" (home + catálogo): priorizado
+   *  na ordem e com selo. Independente de `featured` — controla só a vitrine geral,
+   *  não a seção "Produtos em Destaque". */
+  storeHighlight?: boolean;
   active: boolean;
   /** Marca do produto (ex.: "Zomo", "Adalya"). Visível no admin e na importação. */
   brand?: string;

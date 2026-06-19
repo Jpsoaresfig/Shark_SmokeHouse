@@ -13,8 +13,9 @@ export function PageSections() {
   return (
     <>
       {sections.hero && <HeroSection />}
-      <StoreProducts />
+      {/* Destaque primeiro (vitrine comercial), depois o catálogo completo. */}
       {sections.featuredProducts && <FeaturedProducts />}
+      <StoreProducts />
       {sections.events && <EventsSection />}
       {sections.lounge && <LoungeSection />}
     </>

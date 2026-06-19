@@ -27,7 +27,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
   price: 0, compareAtPrice: undefined, category: "",
   tags: [], images: [], stock: 0, minStock: 5,
-  sku: "", featured: false, active: true, doublePoints: false, loyaltyPoints: undefined,
+  sku: "", featured: false, storeHighlight: false, active: true, doublePoints: false, loyaltyPoints: undefined,
   redeemDisabled: false, loyaltyPointsOverride: undefined,
   pointsEarned: undefined, colors: [], variations: [],
   brand: "", size: "", costPrice: undefined, taxPercent: undefined,
@@ -248,7 +248,8 @@ export default function AdminProducts() {
       price: p.price, compareAtPrice: p.compareAtPrice,
       category: p.category, tags: p.tags ?? [],
       images: p.images, stock: p.stock, minStock: p.minStock,
-      sku: p.sku ?? "", featured: p.featured ?? false, active: p.active,
+      sku: p.sku ?? "", featured: p.featured ?? false,
+      storeHighlight: p.storeHighlight ?? false, active: p.active,
       doublePoints: p.doublePoints ?? false,
       loyaltyPoints: p.loyaltyPoints,
       redeemDisabled: p.redeemDisabled ?? false,
@@ -432,7 +433,8 @@ export default function AdminProducts() {
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-semibold text-[var(--color-text-primary)]">{p.name}</span>
                             <Badge variant="secondary">{categoryLabel(p.category)}</Badge>
-                            {p.featured && <Badge variant="premium">Destaque</Badge>}
+                            {p.featured && <Badge variant="premium">Em Destaque</Badge>}
+                            {p.storeHighlight && <Badge variant="default">Vitrine</Badge>}
                             {p.doublePoints && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
                                 <Star className="w-3 h-3" /> Pontos 2×
@@ -910,14 +912,23 @@ export default function AdminProducts() {
                 />
                 <span className="text-sm text-[var(--color-text-secondary)]">Ativo</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 cursor-pointer" title="Aparece na seção dedicada 'Produtos em Destaque' da página inicial">
                 <input
                   type="checkbox"
                   checked={form.featured}
                   onChange={e => set("featured", e.target.checked)}
                   className="w-4 h-4 accent-[var(--color-neon-blue)]"
                 />
-                <span className="text-sm text-[var(--color-text-secondary)]">Destaque</span>
+                <span className="text-sm text-[var(--color-text-secondary)]">Seção “Produtos em Destaque”</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer" title="Aparece primeiro e com selo dentro de 'Nossos Produtos' (vitrine e catálogo) — independente da seção de destaque">
+                <input
+                  type="checkbox"
+                  checked={!!form.storeHighlight}
+                  onChange={e => set("storeHighlight", e.target.checked)}
+                  className="w-4 h-4 accent-[var(--color-neon-blue)]"
+                />
+                <span className="text-sm text-[var(--color-text-secondary)]">Exibição destacada em “Nossos Produtos”</span>
               </label>
               <label className="flex items-center gap-2 cursor-pointer" title="Compras com este produto pontuam em dobro no Clube Shark">
                 <input

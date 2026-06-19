@@ -139,8 +139,11 @@ export function FeaturedProducts() {
   if (!loading && products.length === 0) return null;
 
   return (
-    <section className="py-24 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
+    <section className="relative py-24 px-4 sm:px-6 lg:px-8 overflow-hidden">
+      {/* Fundo diferenciado: a vitrine de destaque ganha presença própria na página. */}
+      <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-neon-blue-glow)]/40 via-transparent to-transparent pointer-events-none" />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[var(--color-neon-blue)]/40 to-transparent" />
+      <div className="relative max-w-7xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -148,15 +151,17 @@ export function FeaturedProducts() {
           className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 mb-12"
         >
           <div>
-            <Badge variant="default" className="mb-3">Produtos Selecionados</Badge>
-            <h2 className="text-3xl sm:text-4xl font-black text-[var(--color-text-primary)]">
+            <Badge variant="premium" className="mb-3 gap-1.5">
+              <Star className="w-3 h-3 fill-current" /> Produtos Selecionados
+            </Badge>
+            <h2 className="text-3xl sm:text-5xl font-black text-[var(--color-text-primary)]">
               Produtos em <span className="text-neon">Destaque</span>
             </h2>
             <p className="text-[var(--color-text-secondary)] mt-2 max-w-md">
               Qualidade e variedade para sua melhor experiência.
             </p>
           </div>
-          <Button variant="outline" asChild>
+          <Button variant="premium" asChild>
             <Link href="/catalog">Ver todos <ArrowRight className="w-4 h-4" /></Link>
           </Button>
         </motion.div>

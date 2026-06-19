@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  query, where, serverTimestamp, addDoc,
+  query, where, serverTimestamp, addDoc, Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
@@ -10,12 +10,29 @@ import type { Coupon } from "@/types";
 const COL = "coupons";
 const REDEMPTIONS = "couponRedemptions";
 
+/** serverTimestamp() volta como Timestamp na leitura — normaliza para ISO string
+ * (o tipo Coupon declara createdAt/updatedAt como string). */
+function tsToISO(v: unknown): string {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (v instanceof Timestamp) return v.toDate().toISOString();
+  return "";
+}
+
 /** Lista todos os cupons (painel admin). */
 export async function getCoupons(force = false): Promise<Coupon[]> {
   return cached(COL, async () => {
     const snap = await getDocs(collection(db, COL));
     return snap.docs
-      .map((d) => ({ id: d.id, ...d.data() } as Coupon))
+      .map((d) => {
+        const data = d.data();
+        return {
+          ...data,
+          id: d.id,
+          createdAt: tsToISO(data.createdAt),
+          updatedAt: tsToISO(data.updatedAt),
+        } as Coupon;
+      })
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
   }, force);
 }
@@ -25,7 +42,14 @@ export async function getCouponByCode(code: string): Promise<Coupon | null> {
   const id = normalizeCouponCode(code);
   if (!id) return null;
   const snap = await getDoc(doc(db, COL, id));
-  return snap.exists() ? ({ id: snap.id, ...snap.data() } as Coupon) : null;
+  if (!snap.exists()) return null;
+  const data = snap.data();
+  return {
+    ...data,
+    id: snap.id,
+    createdAt: tsToISO(data.createdAt),
+    updatedAt: tsToISO(data.updatedAt),
+  } as Coupon;
 }
 
 /** Dados de criação/edição de cupom (sem campos derivados). */

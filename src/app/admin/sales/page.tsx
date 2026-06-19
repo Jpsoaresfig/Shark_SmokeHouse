@@ -6,16 +6,20 @@ import {
   Plus, Minus, Trash2, Search, ShoppingCart,
   History, Download, Receipt, TrendingUp, Package,
   ChevronDown, ChevronUp, User, X, Truck, CheckCircle, Percent,
-  Store, Globe, Ticket, Star,
+  Store, Globe, Ticket, Star, AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales, createSale, exportSalesCSV, markSaleDelivered, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
+import { resetSalesData } from "@/lib/firebase/maintenance";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
 import { getCategories } from "@/lib/firebase/categories";
@@ -105,6 +109,11 @@ export default function AdminSales() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  /* ── Zerar dados de vendas (operação limpa para produção) ── */
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
@@ -505,6 +514,28 @@ export default function AdminSales() {
       toast.error("Não foi possível atualizar a entrega.");
     } finally {
       setDeliveringId(null);
+    }
+  }
+
+  /* ── Zerar dados de vendas ──
+     Remove TODAS as vendas do PDV e os pedidos online, para iniciar a operação
+     com a base limpa. Mantém produtos e estoque. Exige confirmação digitada. */
+  async function handleReset() {
+    setResetting(true);
+    try {
+      const { sales: s, orders: o } = await resetSalesData();
+      toast.success(
+        `Dados zerados: ${s} venda${s !== 1 ? "s" : ""} e ${o} pedido${o !== 1 ? "s" : ""} removido${o !== 1 ? "s" : ""}.`,
+      );
+      setResetOpen(false);
+      setResetConfirm("");
+      setSales([]);
+      await loadHistory(startDate, endDate);
+    } catch (err) {
+      console.error("[resetSalesData]", err);
+      toast.error("Não foi possível zerar os dados. Tente novamente.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -1297,9 +1328,80 @@ export default function AdminSales() {
                 })}
               </motion.div>
             )}
+
+            {/* Zona de perigo — zerar dados de vendas (apenas admin) */}
+            {isAdmin && (
+              <Card className="border-red-500/30">
+                <CardHeader className="pb-0">
+                  <CardTitle className="text-base flex items-center gap-2 text-red-400">
+                    <AlertTriangle className="w-4 h-4" />
+                    Zerar dados de vendas
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-3">
+                  <p className="text-sm text-[var(--color-text-secondary)] mb-1">
+                    Remove <strong>todas as vendas do PDV</strong> e <strong>todos os pedidos online</strong> para
+                    iniciar a operação com a base limpa.
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)] mb-4">
+                    Os produtos e o estoque atual são mantidos. As métricas do dashboard zeram automaticamente.
+                    Esta ação não pode ser desfeita.
+                  </p>
+                  <Button
+                    variant="default"
+                    className="bg-red-500 hover:bg-red-600 text-white border-0"
+                    onClick={() => { setResetConfirm(""); setResetOpen(true); }}
+                  >
+                    <Trash2 className="w-4 h-4" /> Zerar dados de vendas
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </div>
+
+      {/* Confirmação do reset — exige digitar ZERAR */}
+      <Dialog open={resetOpen} onOpenChange={(v) => { if (!resetting) { setResetOpen(v); if (!v) setResetConfirm(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <AlertTriangle className="w-5 h-5" /> Zerar dados de vendas
+            </DialogTitle>
+            <DialogDescription>
+              Isso vai apagar <strong>permanentemente</strong> todas as vendas do PDV e todos os pedidos online.
+              Produtos e estoque não são afetados. Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">
+              Digite <span className="font-mono font-bold text-red-400">ZERAR</span> para confirmar
+            </label>
+            <input
+              value={resetConfirm}
+              onChange={(e) => setResetConfirm(e.target.value)}
+              placeholder="ZERAR"
+              className={inputCls}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setResetOpen(false)} disabled={resetting}>
+              Cancelar
+            </Button>
+            <Button
+              variant="default"
+              className="bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={handleReset}
+              disabled={resetting || resetConfirm.trim().toUpperCase() !== "ZERAR"}
+            >
+              {resetting
+                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : "Zerar agora"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

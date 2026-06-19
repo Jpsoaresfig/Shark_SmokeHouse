@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Wrench, Package, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, RefreshCw, Wrench, Package, ChevronDown, ChevronUp, Wallet, TrendingUp, Boxes, Search, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { formatDateTime } from "@/lib/utils";
+import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
 import { getStockMovements, addStockMovement } from "@/lib/firebase/inventory";
 import { getAllUsers } from "@/lib/firebase/users";
@@ -37,6 +37,8 @@ export default function AdminInventory() {
   const [form, setForm] = useState(EMPTY_FORM);
   /* Quais produtos com grade estão expandidos na lista de estoque. */
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
+  /* Busca dentro da lista "Todos os Produtos" (nome, SKU ou variação). */
+  const [stockSearch, setStockSearch] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +101,34 @@ export default function AdminInventory() {
     }
   }
 
+  /* Indicadores financeiros do estoque — derivados dos próprios produtos (custo e
+     preço já cadastrados). Recalculam sozinhos a cada cadastro/venda/reposição,
+     pois `products` é recarregado após cada movimentação e a venda/checkout
+     invalidam o cache de produtos. */
+  const stockValue = useMemo(() => {
+    let units = 0, cost = 0, sale = 0;
+    for (const p of products) {
+      const qty = p.stock ?? 0;
+      units += qty;
+      cost += qty * (p.costPrice ?? 0);
+      sale += qty * (p.price ?? 0);
+    }
+    return { units, cost, sale };
+  }, [products]);
+
+  /* Lista filtrada pela busca (nome, SKU do produto ou nome/SKU de variação). */
+  const filteredProducts = useMemo(() => {
+    const q = stockSearch.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter(p =>
+      p.name.toLowerCase().includes(q) ||
+      (p.sku?.toLowerCase().includes(q) ?? false) ||
+      (p.variations ?? []).some(v =>
+        v.name.toLowerCase().includes(q) || (v.sku?.toLowerCase().includes(q) ?? false),
+      ),
+    );
+  }, [products, stockSearch]);
+
   const lowStock = products.filter(p => p.active && p.stock <= p.minStock);
   const selected = products.find(p => p.id === form.productId);
   const selectedHasVars = (selected?.variations?.length ?? 0) > 0;
@@ -113,6 +143,58 @@ export default function AdminInventory() {
           title="Estoque"
           subtitle={`${products.length} produtos · ${lowStock.length} abaixo do mínimo`}
         />
+
+        {/* Indicadores financeiros do estoque (capital investido × potencial de venda) */}
+        {!loading && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"
+          >
+            {[
+              {
+                label: "Estoque (custo)",
+                hint: "Capital investido em mercadorias",
+                value: formatCurrency(stockValue.cost),
+                icon: Wallet,
+                color: "text-amber-400",
+                bg: "bg-amber-500/10",
+              },
+              {
+                label: "Estoque (valor de venda)",
+                hint: "Faturamento potencial da loja",
+                value: formatCurrency(stockValue.sale),
+                icon: TrendingUp,
+                color: "text-emerald-400",
+                bg: "bg-emerald-500/10",
+              },
+              {
+                label: "Quantidade total",
+                hint: `${products.length} produto${products.length !== 1 ? "s" : ""} em estoque`,
+                value: `${stockValue.units.toLocaleString("pt-BR")} un.`,
+                icon: Boxes,
+                color: "text-[var(--color-neon-blue)]",
+                bg: "bg-[var(--color-neon-blue-glow)]",
+              },
+            ].map((card) => {
+              const Icon = card.icon;
+              return (
+                <Card key={card.label}>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl ${card.bg} flex items-center justify-center shrink-0`}>
+                      <Icon className={`w-5 h-5 ${card.color}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-[var(--color-text-primary)] truncate">{card.value}</p>
+                      <p className="text-xs font-medium text-[var(--color-text-secondary)]">{card.label}</p>
+                      <p className="text-[11px] text-[var(--color-text-muted)]">{card.hint}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </motion.div>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-20">
@@ -163,8 +245,27 @@ export default function AdminInventory() {
               {/* All products stock */}
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                 <Card>
-                  <CardHeader className="pb-0">
-                    <CardTitle className="text-base">Todos os Produtos</CardTitle>
+                  <CardHeader className="pb-0 flex-row items-center justify-between gap-3">
+                    <CardTitle className="text-base shrink-0">Todos os Produtos</CardTitle>
+                    {/* Busca rápida na lista de estoque */}
+                    <div className="relative w-full max-w-[220px]">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
+                      <input
+                        value={stockSearch}
+                        onChange={e => setStockSearch(e.target.value)}
+                        placeholder="Buscar produto..."
+                        className="w-full h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-8 pr-8 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
+                      />
+                      {stockSearch && (
+                        <button
+                          onClick={() => setStockSearch("")}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                          aria-label="Limpar busca"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent className="pt-4">
                     {products.length === 0 ? (
@@ -172,8 +273,13 @@ export default function AdminInventory() {
                         <Package className="w-8 h-8 text-[var(--color-text-muted)]" />
                         <p className="text-sm text-[var(--color-text-muted)]">Nenhum produto cadastrado.</p>
                       </div>
+                    ) : filteredProducts.length === 0 ? (
+                      <div className="flex flex-col items-center py-8 gap-2">
+                        <Search className="w-8 h-8 text-[var(--color-text-muted)]" />
+                        <p className="text-sm text-[var(--color-text-muted)]">Nenhum produto encontrado para “{stockSearch}”.</p>
+                      </div>
                     ) : (
-                      products.map((p, i) => {
+                      filteredProducts.map((p, i) => {
                         const vars = p.variations ?? [];
                         const hasVars = vars.length > 0;
                         const isOpen = !!expandedProducts[p.id];
@@ -226,7 +332,7 @@ export default function AdminInventory() {
                             </div>
                           )}
 
-                          {i < products.length - 1 && <Separator />}
+                          {i < filteredProducts.length - 1 && <Separator />}
                         </div>
                         );
                       })
