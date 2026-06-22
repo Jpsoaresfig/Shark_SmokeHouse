@@ -39,8 +39,8 @@ export default function AdminInventory() {
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
   /* Busca dentro da lista de estoque (nome, SKU ou variação). */
   const [stockSearch, setStockSearch] = useState("");
-  /* Visão da lista de estoque: todos os produtos × só os críticos. */
-  const [stockView, setStockView] = useState<"all" | "critical">("all");
+  /* Visão da lista de estoque: todos os produtos × só os críticos × movimentações. */
+  const [stockView, setStockView] = useState<"all" | "critical" | "movements">("all");
   /* Filtro das movimentações recentes por tipo (todas/entrada/saída/ajuste/perda). */
   const [moveFilter, setMoveFilter] = useState<"all" | MovementType>("all");
 
@@ -253,31 +253,123 @@ export default function AdminInventory() {
                           <AlertTriangle className="w-4 h-4" /> Estoque Crítico
                           <span className={`text-xs font-bold ${lowStock.length > 0 ? "text-amber-400" : "opacity-70"}`}>{lowStock.length}</span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setStockView("movements")}
+                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
+                            stockView === "movements"
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
+                        >
+                          <RefreshCw className="w-4 h-4" /> Movimentação Recente
+                          <span className="text-xs opacity-70">{movements.length}</span>
+                        </button>
                       </div>
-                      {/* Busca rápida na lista de estoque */}
-                      <div className="relative w-full sm:max-w-[220px]">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
-                        <input
-                          value={stockSearch}
-                          onChange={e => setStockSearch(e.target.value)}
-                          placeholder="Buscar produto..."
-                          className="w-full h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-8 pr-8 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
-                        />
-                        {stockSearch && (
-                          <button
-                            onClick={() => setStockSearch("")}
-                            className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                            aria-label="Limpar busca"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
+                      {/* Busca rápida na lista de estoque (só nas visões de produtos) */}
+                      {stockView !== "movements" && (
+                        <div className="relative w-full sm:max-w-[220px]">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
+                          <input
+                            value={stockSearch}
+                            onChange={e => setStockSearch(e.target.value)}
+                            placeholder="Buscar produto..."
+                            className="w-full h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-8 pr-8 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
+                          />
+                          {stockSearch && (
+                            <button
+                              onClick={() => setStockSearch("")}
+                              className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                              aria-label="Limpar busca"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
+                    {/* Filtro por tipo — só na visão de movimentações */}
+                    {stockView === "movements" && (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setMoveFilter("all")}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                            moveFilter === "all"
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
+                        >
+                          Todas <span className="opacity-70">{movements.length}</span>
+                        </button>
+                        {(Object.keys(MOVEMENT_CONFIG) as MovementType[]).map(t => {
+                          const cfg = MOVEMENT_CONFIG[t];
+                          const Icon = cfg.icon;
+                          const count = movements.filter(m => m.type === t).length;
+                          const active = moveFilter === t;
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setMoveFilter(t)}
+                              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                                active
+                                  ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                              }`}
+                            >
+                              <Icon className={`w-3.5 h-3.5 ${active ? "" : cfg.color}`} />
+                              {cfg.label} <span className="opacity-70">{count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </CardHeader>
                   <CardContent className="pt-4">
-                    {/* ── Visão: Estoque Crítico ── */}
-                    {stockView === "critical" ? (
+                    {/* ── Visão: Movimentação Recente ── */}
+                    {stockView === "movements" ? (
+                      movements.length === 0 ? (
+                        <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação ainda.</p>
+                      ) : filteredMovements.length === 0 ? (
+                        <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação do tipo “{MOVEMENT_CONFIG[moveFilter as MovementType].label}”.</p>
+                      ) : (
+                        filteredMovements.slice(0, 20).map((m, i) => {
+                          const cfg = MOVEMENT_CONFIG[m.type];
+                          const Icon = cfg.icon;
+                          const isPositive = m.type === "in" || m.type === "adjustment";
+                          const who = userNames[m.userId];
+                          return (
+                            <div key={m.id}>
+                              <div className="flex items-center gap-3 py-2.5">
+                                <div className={`w-8 h-8 rounded-lg bg-[var(--color-bg-overlay)] flex items-center justify-center shrink-0 ${cfg.color}`}>
+                                  <Icon className="w-4 h-4" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">
+                                    {m.productName}
+                                    {m.variationName && <span className="text-[var(--color-neon-blue)]"> · {m.variationName}</span>}
+                                  </p>
+                                  <p className="text-xs text-[var(--color-text-muted)] truncate">
+                                    {m.reason}
+                                    {who && <> · por <span className="text-[var(--color-text-secondary)]">{who}</span></>}
+                                    {m.createdAt && ` · ${formatDateTime(m.createdAt)}`}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <Badge variant={cfg.badge}>{cfg.label}</Badge>
+                                  <span className={`text-sm font-bold ${isPositive ? "text-emerald-400" : "text-red-400"}`}>
+                                    {isPositive ? "+" : "-"}{m.quantity}
+                                  </span>
+                                </div>
+                              </div>
+                              {i < Math.min(filteredMovements.length, 20) - 1 && <Separator />}
+                            </div>
+                          );
+                        })
+                      )
+                    ) : /* ── Visão: Estoque Crítico ── */
+                    stockView === "critical" ? (
                       lowStock.length === 0 ? (
                         <div className="flex flex-col items-center py-8 gap-2">
                           <Package className="w-8 h-8 text-emerald-400" />
@@ -381,91 +473,6 @@ export default function AdminInventory() {
 
                           {i < filteredProducts.length - 1 && <Separator />}
                         </div>
-                        );
-                      })
-                    )}
-                  </CardContent>
-                </Card>
-              </motion.div>
-
-              {/* Recent movements */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-                <Card>
-                  <CardHeader className="pb-0 gap-3">
-                    <CardTitle className="text-base">Movimentações Recentes</CardTitle>
-                    {/* Seletor por tipo de movimento */}
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setMoveFilter("all")}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                          moveFilter === "all"
-                            ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
-                            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
-                        }`}
-                      >
-                        Todas <span className="opacity-70">{movements.length}</span>
-                      </button>
-                      {(Object.keys(MOVEMENT_CONFIG) as MovementType[]).map(t => {
-                        const cfg = MOVEMENT_CONFIG[t];
-                        const Icon = cfg.icon;
-                        const count = movements.filter(m => m.type === t).length;
-                        const active = moveFilter === t;
-                        return (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => setMoveFilter(t)}
-                            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                              active
-                                ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
-                                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
-                            }`}
-                          >
-                            <Icon className={`w-3.5 h-3.5 ${active ? "" : cfg.color}`} />
-                            {cfg.label} <span className="opacity-70">{count}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-4">
-                    {movements.length === 0 ? (
-                      <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação ainda.</p>
-                    ) : filteredMovements.length === 0 ? (
-                      <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação do tipo “{MOVEMENT_CONFIG[moveFilter as MovementType].label}”.</p>
-                    ) : (
-                      filteredMovements.slice(0, 20).map((m, i) => {
-                        const cfg = MOVEMENT_CONFIG[m.type];
-                        const Icon = cfg.icon;
-                        const isPositive = m.type === "in" || m.type === "adjustment";
-                        const who = userNames[m.userId];
-                        return (
-                          <div key={m.id}>
-                            <div className="flex items-center gap-3 py-2.5">
-                              <div className={`w-8 h-8 rounded-lg bg-[var(--color-bg-overlay)] flex items-center justify-center shrink-0 ${cfg.color}`}>
-                                <Icon className="w-4 h-4" />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">
-                                  {m.productName}
-                                  {m.variationName && <span className="text-[var(--color-neon-blue)]"> · {m.variationName}</span>}
-                                </p>
-                                <p className="text-xs text-[var(--color-text-muted)] truncate">
-                                  {m.reason}
-                                  {who && <> · por <span className="text-[var(--color-text-secondary)]">{who}</span></>}
-                                  {m.createdAt && ` · ${formatDateTime(m.createdAt)}`}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <Badge variant={cfg.badge}>{cfg.label}</Badge>
-                                <span className={`text-sm font-bold ${isPositive ? "text-emerald-400" : "text-red-400"}`}>
-                                  {isPositive ? "+" : "-"}{m.quantity}
-                                </span>
-                              </div>
-                            </div>
-                            {i < Math.min(filteredMovements.length, 20) - 1 && <Separator />}
-                          </div>
                         );
                       })
                     )}
