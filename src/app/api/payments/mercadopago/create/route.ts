@@ -45,7 +45,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "orderId é obrigatório." }, { status: 400 });
   }
 
-  const order = await getOrderAdmin(orderId);
+  let order;
+  try {
+    order = await getOrderAdmin(orderId);
+  } catch (err) {
+    // Falha ao acessar o Firestore via Admin SDK (ex.: credenciais ausentes/erradas
+    // na Vercel). Antes isso estourava como 500/502 cru, sem pista da causa.
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error("Erro ao carregar pedido (Admin SDK):", err);
+    return NextResponse.json(
+      { error: "Falha ao acessar o pedido no servidor.", reason },
+      { status: 500 },
+    );
+  }
   if (!order) {
     return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
   }
@@ -89,9 +101,15 @@ export async function POST(request: NextRequest) {
       ticketUrl: pix.ticketUrl,
     });
   } catch (err) {
+    // Surfaça o motivo real do Mercado Pago para diagnóstico (mensagem do gateway
+    // + status). A mensagem do MP não contém segredos. Ex. comum: conta sem chave
+    // PIX habilitada ("Collector user without key enabled for QR render").
     console.error("Erro ao criar cobrança PIX no Mercado Pago:", err);
+    const isMpError = err instanceof Error && err.name === "MercadoPagoError";
+    const reason = err instanceof Error ? err.message : String(err);
+    const mpStatus = isMpError ? (err as { status?: number }).status : undefined;
     return NextResponse.json(
-      { error: "Não foi possível iniciar o pagamento." },
+      { error: "Não foi possível iniciar o pagamento.", reason, mpStatus },
       { status: 502 },
     );
   }
