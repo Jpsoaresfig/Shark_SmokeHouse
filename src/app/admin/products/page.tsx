@@ -89,8 +89,8 @@ export default function AdminProducts() {
     }));
   }
 
-  /* Foto própria por variação: input de arquivo único compartilhado — guarda em
-     varImgTargetRef qual variação receberá a imagem enviada. */
+  /* Galeria por variação: input de arquivo compartilhado (aceita várias fotos) —
+     guarda em varImgTargetRef qual variação receberá as imagens enviadas. */
   const varImgInputRef = useRef<HTMLInputElement>(null);
   const varImgTargetRef = useRef<string | null>(null);
   const [varImgUploading, setVarImgUploading] = useState<string | null>(null);
@@ -100,18 +100,20 @@ export default function AdminProducts() {
     varImgInputRef.current?.click();
   }
 
-  async function handleVariationImage(file: File | undefined) {
+  async function handleVariationImages(files: FileList | null) {
     const id = varImgTargetRef.current;
-    if (!file || !id) return;
+    if (!files || files.length === 0 || !id) return;
     setVarImgUploading(id);
     try {
-      const url = await uploadToCloudinary(file);
+      const urls = await Promise.all(Array.from(files).map(f => uploadToCloudinary(f)));
       setForm(f => ({
         ...f,
-        variations: (f.variations ?? []).map(v => v.id === id ? { ...v, image: url } : v),
+        variations: (f.variations ?? []).map(v =>
+          v.id === id ? { ...v, images: [...(v.images ?? []), ...urls] } : v
+        ),
       }));
     } catch {
-      toast.error("Erro ao enviar a imagem da variação.");
+      toast.error("Erro ao enviar a(s) imagem(ns) da variação.");
     } finally {
       setVarImgUploading(null);
       varImgTargetRef.current = null;
@@ -119,10 +121,12 @@ export default function AdminProducts() {
     }
   }
 
-  function removeVariationImage(id: string) {
+  function removeVariationImage(id: string, url: string) {
     setForm(f => ({
       ...f,
-      variations: (f.variations ?? []).map(v => v.id === id ? { ...v, image: undefined } : v),
+      variations: (f.variations ?? []).map(v =>
+        v.id === id ? { ...v, images: (v.images ?? []).filter(u => u !== url) } : v
+      ),
     }));
   }
 
@@ -256,7 +260,11 @@ export default function AdminProducts() {
       loyaltyPointsOverride: p.loyaltyPointsOverride,
       pointsEarned: p.pointsEarned,
       colors: p.colors ?? [],
-      variations: p.variations ?? [],
+      // Migra a foto única legada (`image`) para a galeria (`images`) ao editar.
+      variations: (p.variations ?? []).map(v => ({
+        ...v,
+        images: v.images?.length ? v.images : v.image ? [v.image] : [],
+      })),
       brand: p.brand ?? "",
       size: p.size ?? "",
       costPrice: p.costPrice,
@@ -280,10 +288,13 @@ export default function AdminProducts() {
       // Com variações, o estoque do produto é a SOMA das variações; o campo
       // "Estoque" simples é ignorado. Sempre grava `variations` (mesmo []) para
       // permitir limpar a grade de um produto que antes tinha variações.
-      const cleanVariations = (form.variations ?? []).map(v => ({
-        id: v.id, name: v.name.trim(), sku: v.sku.trim(), stock: Number(v.stock) || 0,
-        ...(v.image ? { image: v.image } : {}), // sem undefined (Firestore rejeita)
-      }));
+      const cleanVariations = (form.variations ?? []).map(v => {
+        const imgs = (v.images ?? []).filter(Boolean);
+        return {
+          id: v.id, name: v.name.trim(), sku: v.sku.trim(), stock: Number(v.stock) || 0,
+          ...(imgs.length ? { images: imgs } : {}), // sem undefined (Firestore rejeita)
+        };
+      });
       const usesVariations = cleanVariations.length > 0;
       const priceNum = Number(form.price);
       const costNum = form.costPrice ? Number(form.costPrice) : undefined;
@@ -768,59 +779,66 @@ export default function AdminProducts() {
 
               {hasVariations && (
                 <div className="space-y-2 mb-3">
-                  {variations.map(v => (
-                    <div key={v.id} className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-2">
-                      {/* Foto própria da variação (opcional) */}
-                      <button
-                        type="button"
-                        onClick={() => pickVariationImage(v.id)}
-                        disabled={varImgUploading !== null}
-                        title={v.image ? "Trocar a foto desta variação" : "Adicionar foto a esta variação"}
-                        className="relative w-10 h-10 rounded-lg overflow-hidden border border-dashed border-[var(--color-border)] hover:border-[var(--color-neon-blue)] flex items-center justify-center shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] transition-colors group"
-                      >
-                        {varImgUploading === v.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin text-[var(--color-neon-blue)]" />
-                        ) : v.image ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img src={v.image} alt={v.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <ImageIcon className="w-4 h-4" />
-                        )}
-                      </button>
-                      {v.image && varImgUploading !== v.id && (
-                        <button
-                          type="button"
-                          onClick={() => removeVariationImage(v.id)}
-                          title="Remover a foto desta variação"
-                          className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-error)] shrink-0 -ml-1"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{v.name}</p>
-                        <p className="text-xs text-[var(--color-text-muted)] truncate">Cód.: {v.sku}</p>
+                  {variations.map(v => {
+                    const vImgs = v.images ?? [];
+                    return (
+                    <div key={v.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{v.name}</p>
+                          <p className="text-xs text-[var(--color-text-muted)] truncate">Cód.: {v.sku}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <label className="text-xs text-[var(--color-text-muted)]">Estoque</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={v.stock}
+                            onChange={e => setVariationStock(v.id, Number(e.target.value) || 0)}
+                            className="w-16 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-sm text-center text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeVariation(v.id)}
+                            className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                            aria-label={`Remover ${v.name}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <label className="text-xs text-[var(--color-text-muted)]">Estoque</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={v.stock}
-                          onChange={e => setVariationStock(v.id, Number(e.target.value) || 0)}
-                          className="w-16 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-base)] px-2 py-1.5 text-sm text-center text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)]"
-                        />
+
+                      {/* Galeria própria da variação (várias fotos) */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {vImgs.map(url => (
+                          <div key={url} className="relative w-12 h-12 rounded-lg overflow-hidden border border-[var(--color-border)] group">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={url} alt={v.name} className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => removeVariationImage(v.id, url)}
+                              title="Remover esta foto"
+                              className="absolute top-0 right-0 w-4 h-4 rounded-bl-lg bg-black/60 hover:bg-[var(--color-error)] flex items-center justify-center text-white"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
                         <button
                           type="button"
-                          onClick={() => removeVariation(v.id)}
-                          className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
-                          aria-label={`Remover ${v.name}`}
+                          onClick={() => pickVariationImage(v.id)}
+                          disabled={varImgUploading !== null}
+                          title="Adicionar foto(s) a esta variação"
+                          className="w-12 h-12 rounded-lg border border-dashed border-[var(--color-border)] hover:border-[var(--color-neon-blue)] flex items-center justify-center shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] transition-colors disabled:opacity-50"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          {varImgUploading === v.id
+                            ? <Loader2 className="w-4 h-4 animate-spin text-[var(--color-neon-blue)]" />
+                            : <ImageIcon className="w-4 h-4" />}
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   <p className="text-xs text-[var(--color-text-muted)]">
                     Estoque total: <strong className="text-[var(--color-text-secondary)]">{variationsTotalStock} un.</strong>
                   </p>
@@ -856,16 +874,17 @@ export default function AdminProducts() {
               </div>
               <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
                 Com variações, o cliente escolhe a opção no site e o leitor bipa o código de cada uma no PDV.
-                Clique no quadradinho de imagem para dar uma foto própria à variação — ela é exibida quando o cliente a escolhe.
+                Adicione fotos próprias à variação — elas aparecem primeiro na galeria quando o cliente a escolhe.
               </p>
 
-              {/* input compartilhado para a foto das variações */}
+              {/* input compartilhado para as fotos das variações (várias por vez) */}
               <input
                 ref={varImgInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 className="hidden"
-                onChange={e => handleVariationImage(e.target.files?.[0])}
+                onChange={e => handleVariationImages(e.target.files)}
               />
             </div>
 

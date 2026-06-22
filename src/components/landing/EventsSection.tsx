@@ -59,7 +59,7 @@ export function EventsSection() {
         {loading && (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-hidden">
+              <div key={i} className="rounded-2xl border border-[var(--color-border)] bg-(--color-bg-elevated) overflow-hidden">
                 <div className="skeleton aspect-video" />
                 <div className="p-5 space-y-3">
                   <div className="skeleton h-3 w-24 rounded" />
@@ -81,7 +81,7 @@ export function EventsSection() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.1, duration: 0.5 }}
-                className="group rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] overflow-hidden hover:border-[var(--color-neon-blue)] hover:shadow-[var(--shadow-neon-sm)] transition-all duration-300"
+                className="group rounded-2xl border border-[var(--color-border)] bg-(--color-bg-elevated) overflow-hidden hover:border-[var(--color-neon-blue)] hover:shadow-[var(--shadow-neon-sm)] transition-all duration-300"
               >
                 {/* Image */}
                 <div className="relative aspect-video bg-[var(--color-bg-overlay)] overflow-hidden">

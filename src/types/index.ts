@@ -132,9 +132,13 @@ export interface ProductVariation {
   sku: string;
   /** Estoque próprio desta variação. */
   stock: number;
-  /** Foto própria da variação (opcional). Quando o cliente escolhe a variação,
-   *  esta imagem é exibida no lugar da principal e vai para o carrinho. */
+  /** @deprecated Use `images`. Foto única legada — produtos antigos gravavam
+   *  apenas uma imagem por variação. Lida como fallback quando `images` é vazio. */
   image?: string;
+  /** Galeria própria da variação (opcional). Quando o cliente escolhe a variação,
+   *  estas fotos aparecem PRIMEIRO na galeria (antes das fotos gerais do produto),
+   *  e a primeira delas vai para o carrinho. */
+  images?: string[];
 }
 
 /* ── Cart ────────────────────────────────────────────────── */

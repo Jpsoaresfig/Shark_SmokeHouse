@@ -50,10 +50,14 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const hasVariations = variations.length > 0;
   const selectedVar = variations.find(v => v.id === selectedVarId) ?? null;
 
-  // Variação com foto própria: a foto dela vira a principal enquanto selecionada.
+  // Imagens da variação escolhida (galeria nova `images`, com fallback ao `image` legado).
+  const variationImages = selectedVar
+    ? (selectedVar.images?.length ? selectedVar.images : selectedVar.image ? [selectedVar.image] : [])
+    : [];
+  // Variação com foto própria: as fotos dela aparecem primeiro, seguidas das gerais.
   const baseImages = product.images.length > 0 ? product.images : [];
-  const images = selectedVar?.image
-    ? [selectedVar.image, ...baseImages.filter(u => u !== selectedVar.image)]
+  const images = variationImages.length
+    ? [...variationImages, ...baseImages.filter(u => !variationImages.includes(u))]
     : baseImages;
   const hasImages = images.length > 0;
   const hasMultiple = images.length > 1;
@@ -80,7 +84,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
         color: selectedVar.name,      // exibido no carrinho/pedido
         variationId: selectedVar.id,
         variationSku: selectedVar.sku,
-        image: selectedVar.image,     // foto da variação (quando houver)
+        image: variationImages[0],    // 1ª foto da variação (quando houver)
       });
     } else {
       addItem(product, qty, { color: selectedColor || undefined });
@@ -309,6 +313,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                       {variations.map((v) => {
                         const vOut = v.stock <= 0;
                         const selected = selectedVarId === v.id;
+                        const vThumb = v.images?.length ? v.images[0] : v.image;
                         return (
                           <button
                             key={v.id}
@@ -323,9 +328,9 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                                 : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/40"
                             }`}
                           >
-                            {v.image && (
+                            {vThumb && (
                               <Image
-                                src={v.image}
+                                src={vThumb}
                                 alt=""
                                 width={24}
                                 height={24}
