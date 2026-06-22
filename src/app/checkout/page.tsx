@@ -35,6 +35,7 @@ import { formatCurrency } from "@/lib/utils";
 import { computeOrderPoints } from "@/lib/loyalty/levels";
 import { isValidCpf, formatCpf } from "@/lib/cpf";
 import { QRCodeSVG } from "qrcode.react";
+import { MercadoPagoPix } from "@/components/checkout/MercadoPagoPix";
 import type { Address, PaymentMethod, DeliveryArea, Coupon } from "@/types";
 
 /* ── CEP lookup ──────────────────────────────────────────── */
@@ -117,36 +118,12 @@ function buildProofLink(orderId: string, total: number) {
 function SuccessScreen({ orderId, payment, waLink, total, installments }: { orderId: string; payment: PaymentMethod; waLink: string; total: number; installments: number }) {
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
-  const [mpLoading, setMpLoading] = useState(false);
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
 
   const copy = async () => {
     await navigator.clipboard.writeText(pixKey);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  /* Redireciona o cliente para o Checkout Pro do Mercado Pago. */
-  const payWithMercadoPago = async () => {
-    setMpLoading(true);
-    try {
-      const res = await fetch("/api/payments/mercadopago/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.initPoint) {
-        toast.error(data?.error ?? "Não foi possível iniciar o pagamento. Tente novamente.");
-        setMpLoading(false);
-        return;
-      }
-      window.location.href = data.initPoint as string;
-    } catch (err) {
-      console.error("[checkout] mercadopago", err);
-      toast.error("Não foi possível iniciar o pagamento. Tente novamente.");
-      setMpLoading(false);
-    }
   };
 
   /* Cliente responde se efetuou ou não a compra combinada pelo WhatsApp. */
@@ -197,27 +174,9 @@ function SuccessScreen({ orderId, payment, waLink, total, installments }: { orde
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="rounded-2xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]/20 p-5 mb-6 text-left"
+            className="mb-6"
           >
-            <div className="flex items-center gap-2 mb-3">
-              <Wallet className="w-4 h-4 text-[var(--color-neon-blue)]" />
-              <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pague com Mercado Pago</span>
-            </div>
-
-            {/* Valor a pagar */}
-            <div className="flex items-center justify-between gap-2 p-3 mb-4 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)]">
-              <span className="text-xs font-medium text-[var(--color-text-secondary)]">Valor a pagar</span>
-              <span className="text-xl font-black text-[var(--color-neon-blue)]">{formatCurrency(total)}</span>
-            </div>
-
-            <p className="text-xs text-[var(--color-text-muted)] mb-4">
-              Você será levado ao ambiente seguro do Mercado Pago para pagar via PIX. Assim que o pagamento for confirmado, seu pedido é liberado automaticamente.
-            </p>
-            <Button variant="premium" className="w-full" onClick={payWithMercadoPago} disabled={mpLoading}>
-              {mpLoading
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <><Wallet className="w-4 h-4" /> Pagar com Mercado Pago</>}
-            </Button>
+            <MercadoPagoPix orderId={orderId} amount={total} />
             <p className="text-[11px] text-[var(--color-text-muted)] mt-2 text-center">
               Você também pode pagar depois em <span className="text-[var(--color-neon-blue)]">Meus Pedidos</span>.
             </p>

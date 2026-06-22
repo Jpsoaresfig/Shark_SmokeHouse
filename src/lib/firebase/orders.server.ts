@@ -20,7 +20,7 @@ export async function getOrderAdmin(orderId: string): Promise<Order | null> {
   return { id: snap.id, ...snap.data() } as Order;
 }
 
-/** Localiza o pedido por `payment.providerRef` (id da preferência do Mercado Pago). */
+/** Localiza o pedido por `payment.providerRef` (id do pagamento do Mercado Pago). */
 export async function findOrderIdByProviderRef(providerRef: string): Promise<string | null> {
   const q = await getAdminDb()
     .collection(COL)
@@ -30,7 +30,7 @@ export async function findOrderIdByProviderRef(providerRef: string): Promise<str
   return q.empty ? null : q.docs[0].id;
 }
 
-/** Grava o id da preferência do Mercado Pago no pedido (correlação para o webhook). */
+/** Grava o id do pagamento do Mercado Pago no pedido (correlação para o webhook). */
 export async function setOrderProviderRef(orderId: string, providerRef: string): Promise<void> {
   await getAdminDb().collection(COL).doc(orderId).update({
     "payment.providerRef": providerRef,

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, ChevronDown, ChevronUp, ShoppingBag,
   Clock, CheckCircle, Truck, XCircle, AlertTriangle,
-  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2, Wallet,
+  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -13,6 +13,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { getOrdersByCustomer } from "@/lib/firebase/orders";
 import { createReview, getReviewsByCustomer } from "@/lib/firebase/reviews";
 import { resolveOrderPayment } from "@/lib/payments";
+import { MercadoPagoPix } from "@/components/checkout/MercadoPagoPix";
 import { PAYMENT_METHOD_LABELS, PAYMENT_STATUS_LABELS, PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { toast } from "@/stores/toastStore";
@@ -168,49 +169,26 @@ function ReviewBlock({ order, reviewedRating, onReviewed }: {
   );
 }
 
-function OrderCard({ order, index, reviewedRating, onReviewed }: {
+function OrderCard({ order, index, reviewedRating, onReviewed, onPaid }: {
   order: Order;
   index: number;
   reviewedRating?: number;
   onReviewed?: (orderId: string, rating: number) => void;
+  onPaid?: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [mpLoading, setMpLoading] = useState(false);
   const cfg = statusConfig[order.status];
   const StatusIcon = cfg.icon;
   const isActive = !["delivered", "cancelled"].includes(order.status);
 
   /* Pagamento via Mercado Pago ainda pendente: o cliente fechou o pedido mas não
-     concluiu o pagamento online. Mostra um botão para retomar o Checkout Pro; o
-     webhook marca o pagamento como "paid" e o botão some na próxima atualização. */
+     concluiu o pagamento online. Mostra o QR PIX inline; o webhook marca o
+     pagamento como "paid" e o componente detecta a confirmação automaticamente. */
   const pay = resolveOrderPayment(order);
   const needsMercadoPago =
     pay.method === "mercadopago" &&
     pay.status !== "paid" &&
     order.status !== "cancelled";
-
-  /* Recria a preferência de cobrança e redireciona ao ambiente do Mercado Pago. */
-  const payWithMercadoPago = async () => {
-    setMpLoading(true);
-    try {
-      const res = await fetch("/api/payments/mercadopago/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: order.id }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.initPoint) {
-        toast.error(data?.error ?? "Não foi possível iniciar o pagamento. Tente novamente.");
-        setMpLoading(false);
-        return;
-      }
-      window.location.href = data.initPoint as string;
-    } catch (err) {
-      console.error("[orders] mercadopago", err);
-      toast.error("Não foi possível iniciar o pagamento. Tente novamente.");
-      setMpLoading(false);
-    }
-  };
 
   return (
     <motion.div
@@ -290,23 +268,10 @@ function OrderCard({ order, index, reviewedRating, onReviewed }: {
         {isActive && <OrderProgress status={order.status} />}
       </button>
 
-      {/* Pagamento Mercado Pago pendente — CTA para concluir o pagamento online */}
+      {/* Pagamento Mercado Pago pendente — QR PIX inline com o valor já embutido */}
       {needsMercadoPago && (
         <div className="px-5 pb-5 -mt-1">
-          <div className="rounded-xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)]/20 p-4">
-            <div className="flex items-center gap-2 mb-1.5">
-              <Wallet className="w-4 h-4 text-[var(--color-neon-blue)]" />
-              <span className="text-sm font-bold text-[var(--color-neon-blue)]">Pagamento pendente</span>
-            </div>
-            <p className="text-xs text-[var(--color-text-muted)] mb-3">
-              Conclua o pagamento de <strong className="text-[var(--color-text-secondary)]">{formatCurrency(order.total)}</strong> via PIX no Mercado Pago. Seu pedido é liberado automaticamente assim que o pagamento for confirmado.
-            </p>
-            <Button variant="premium" size="sm" className="w-full sm:w-auto" onClick={payWithMercadoPago} disabled={mpLoading}>
-              {mpLoading
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <><Wallet className="w-4 h-4" /> Pagar com Mercado Pago</>}
-            </Button>
-          </div>
+          <MercadoPagoPix orderId={order.id} amount={order.total} onPaid={onPaid} />
         </div>
       )}
 
@@ -704,6 +669,7 @@ export default function OrdersPage() {
                 index={i}
                 reviewedRating={reviewed[order.id]}
                 onReviewed={(id, rating) => setReviewed((prev) => ({ ...prev, [id]: rating }))}
+                onPaid={load}
               />
             ))}
           </div>

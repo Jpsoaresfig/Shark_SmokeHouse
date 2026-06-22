@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isMercadoPagoConfigured, createPreference } from "@/lib/payments/mercadopago";
+import { isMercadoPagoConfigured, createPixPayment } from "@/lib/payments/mercadopago";
 import { getOrderAdmin, setOrderProviderRef } from "@/lib/firebase/orders.server";
 import { resolveOrderPayment } from "@/lib/payments";
 
 export const runtime = "nodejs";
 
-/** URL pública base para back_urls/webhook: env explícita ou origem da requisição. */
+/** URL pública base para notification_url: env explícita ou origem da requisição. */
 function resolveBaseUrl(request: NextRequest): string {
   const env = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   if (env) return env.replace(/\/$/, "");
@@ -13,13 +13,17 @@ function resolveBaseUrl(request: NextRequest): string {
 }
 
 /**
- * Cria uma preferência de Checkout Pro (Mercado Pago) para um pedido existente.
+ * Cria uma cobrança PIX (Mercado Pago) para um pedido existente e devolve o QR
+ * Code já com o valor embutido — exibido inline no checkout, sem redirecionar.
  *
  * Pré-requisito: o checkout cria o pedido com `mercadopagoGateway.createPayment(...)`
  * (provider "mercadopago", status "pending") e então chama esta rota.
  *
- * Body: { orderId }
- * Retorna: { initPoint } — URL para onde o cliente deve ser redirecionado.
+ * Body: { orderId, payerEmail?, payerCpf? }
+ * Retorna: { ok, paymentId, status, qrCode, qrCodeBase64, ticketUrl }
+ *
+ * A confirmação é assíncrona, via webhook (POST /api/webhooks/mercadopago); o
+ * cliente acompanha pelo polling de GET /api/payments/mercadopago/status.
  */
 export async function POST(request: NextRequest) {
   if (!isMercadoPagoConfigured()) {
@@ -29,7 +33,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { orderId?: string };
+  let body: { orderId?: string; payerEmail?: string; payerCpf?: string };
   try {
     body = await request.json();
   } catch {
@@ -50,24 +54,42 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Este pedido já foi pago." }, { status: 409 });
   }
 
+  // O MP exige um e-mail de pagador válido. Usa o informado pelo cliente quando
+  // disponível; senão, deriva um placeholder com formato válido (PIX não envia
+  // e-mail ao pagador, então não precisa ser entregável).
+  const clientEmail = String(body.payerEmail ?? "").trim();
+  const payerEmail =
+    clientEmail.includes("@") && clientEmail.length <= 254
+      ? clientEmail
+      : `pedido-${orderId.slice(-8).toLowerCase()}@shark-smokehouse.com.br`;
+  const payerCpf = String(body.payerCpf ?? "").replace(/\D/g, "") || undefined;
+  const [firstName, ...rest] = (order.customerName ?? "").trim().split(/\s+/);
+
   try {
     const ref = `#${orderId.slice(-8).toUpperCase()}`;
-    const preference = await createPreference({
+    const pix = await createPixPayment({
       orderId,
-      title: `Pedido ${ref} — Shark SmokeHouse`,
       amount: order.total,
-      payerName: order.customerName,
-      baseUrl: resolveBaseUrl(request),
+      description: `Pedido ${ref} — Shark SmokeHouse`,
+      payerEmail,
+      payerFirstName: firstName || undefined,
+      payerLastName: rest.join(" ") || undefined,
+      payerCpf,
+      notificationUrl: `${resolveBaseUrl(request)}/api/webhooks/mercadopago`,
     });
 
-    await setOrderProviderRef(orderId, preference.id);
+    await setOrderProviderRef(orderId, String(pix.id));
 
     return NextResponse.json({
       ok: true,
-      initPoint: preference.init_point || preference.sandbox_init_point,
+      paymentId: pix.id,
+      status: pix.status,
+      qrCode: pix.qrCode,
+      qrCodeBase64: pix.qrCodeBase64,
+      ticketUrl: pix.ticketUrl,
     });
   } catch (err) {
-    console.error("Erro ao criar preferência no Mercado Pago:", err);
+    console.error("Erro ao criar cobrança PIX no Mercado Pago:", err);
     return NextResponse.json(
       { error: "Não foi possível iniciar o pagamento." },
       { status: 502 },

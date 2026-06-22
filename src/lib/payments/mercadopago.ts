@@ -2,24 +2,26 @@ import type { PaymentInfo, PaymentStatus } from "@/types";
 import type { CreatePaymentInput, PaymentGateway } from "./index";
 
 /**
- * Integração com o Mercado Pago — Checkout Pro (https://www.mercadopago.com.br/developers).
+ * Integração com o Mercado Pago — PIX direto (https://www.mercadopago.com.br/developers).
  *
- * Modelo: Checkout Pro. O cliente é redirecionado para a tela do Mercado Pago
- * (restrita a PIX nesta loja), paga, e o Mercado Pago confirma o pagamento via
- * webhook — o mesmo gancho usado pela baixa manual do admin.
+ * Modelo: cobrança PIX via API de pagamentos (`/v1/payments`). O QR Code já vem
+ * com o valor embutido e é exibido inline no checkout — sem redirecionar. O
+ * Mercado Pago confirma o pagamento via webhook (o mesmo gancho usado pela baixa
+ * manual do admin).
  *
  * Fluxo:
  *   1. checkout cria o pedido com `mercadopagoGateway.createPayment(...)`
  *      (provider "mercadopago", status "pending");
  *   2. a tela de sucesso chama POST /api/payments/mercadopago/create { orderId }
- *      → este módulo cria uma "preferência" e devolve o link (`init_point`);
- *   3. o cliente é redirecionado, paga via PIX e volta pelas back_urls;
+ *      → este módulo cria o pagamento PIX (`createPixPayment`) e devolve o QR;
+ *   3. o cliente paga pelo QR/copia-e-cola; a tela faz polling de
+ *      GET /api/payments/mercadopago/status para detectar a confirmação;
  *   4. o webhook (POST /api/webhooks/mercadopago) busca o pagamento na API do MP
  *      e aplica a transição no pedido (correlação por `external_reference` = orderId).
  *
  * Variáveis de ambiente (servidor):
  *   MERCADOPAGO_ACCESS_TOKEN — Access Token (TEST-... no sandbox, APP_USR-... em produção)
- *   NEXT_PUBLIC_SITE_URL     — (opcional) URL pública do site para back_urls/webhook;
+ *   NEXT_PUBLIC_SITE_URL     — (opcional) URL pública do site para a notification_url;
  *                              se ausente, deriva-se da própria requisição.
  */
 
@@ -66,56 +68,84 @@ async function mpFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-/* ── Preferências (Checkout Pro) ────────────────────────────────────── */
+/* ── PIX direto (QR inline com valor) ───────────────────────────────── */
 
-export interface CreatePreferenceInput {
+export interface CreatePixPaymentInput {
   orderId: string;
-  title: string;
+  /** Valor da cobrança (R$). */
   amount: number;
-  payerName?: string;
-  /** URL pública base (sem barra no fim) para back_urls e notification_url. */
-  baseUrl: string;
+  description: string;
+  /** E-mail do pagador — obrigatório pela API de pagamentos do MP. */
+  payerEmail: string;
+  payerFirstName?: string;
+  payerLastName?: string;
+  /** CPF do pagador (só dígitos, 11 chars), quando disponível. */
+  payerCpf?: string;
+  /** URL pública do webhook (notification_url). */
+  notificationUrl: string;
 }
 
-export interface MercadoPagoPreference {
-  id: string;
-  init_point: string;
-  sandbox_init_point?: string;
+export interface MercadoPagoPixPayment {
+  id: number;
+  status: string;
+  /** PIX "copia e cola" (BR Code EMV, com o valor já embutido). */
+  qrCode: string;
+  /** Imagem do QR em PNG base64 (sem o prefixo `data:`). */
+  qrCodeBase64: string;
+  /** Página do MP com o QR (fallback). */
+  ticketUrl?: string;
+}
+
+interface MpPaymentResponse {
+  id: number;
+  status: string;
+  point_of_interaction?: {
+    transaction_data?: {
+      qr_code?: string;
+      qr_code_base64?: string;
+      ticket_url?: string;
+    };
+  };
 }
 
 /**
- * Cria uma preferência de Checkout Pro restrita a PIX. Retorna o link para onde
- * o cliente deve ser redirecionado (`init_point`).
+ * Cria um pagamento PIX direto (API `/v1/payments`) e devolve o QR Code já com o
+ * valor embutido — exibido inline no checkout, sem redirecionar. A confirmação
+ * usa o mesmo webhook do Checkout Pro (correlação por `external_reference` = orderId).
+ *
+ * Idempotência: a chave é o orderId, então recriar a cobrança do mesmo pedido
+ * devolve o mesmo PIX (evita cobrança duplicada em recargas da página).
  */
-export async function createPreference(input: CreatePreferenceInput): Promise<MercadoPagoPreference> {
-  const { orderId, title, amount, payerName, baseUrl } = input;
-  return mpFetch<MercadoPagoPreference>("/checkout/preferences", {
+export async function createPixPayment(
+  input: CreatePixPaymentInput,
+): Promise<MercadoPagoPixPayment> {
+  const data = await mpFetch<MpPaymentResponse>("/v1/payments", {
     method: "POST",
+    headers: { "X-Idempotency-Key": `order-${input.orderId}` },
     body: JSON.stringify({
-      items: [
-        { id: orderId, title, quantity: 1, unit_price: amount, currency_id: "BRL" },
-      ],
-      external_reference: orderId,
-      ...(payerName ? { payer: { name: payerName } } : {}),
-      back_urls: {
-        success: `${baseUrl}/orders?pago=sucesso`,
-        pending: `${baseUrl}/orders?pago=pendente`,
-        failure: `${baseUrl}/orders?pago=falhou`,
+      transaction_amount: Math.round(input.amount * 100) / 100,
+      description: input.description,
+      payment_method_id: "pix",
+      external_reference: input.orderId,
+      notification_url: input.notificationUrl,
+      payer: {
+        email: input.payerEmail,
+        ...(input.payerFirstName ? { first_name: input.payerFirstName } : {}),
+        ...(input.payerLastName ? { last_name: input.payerLastName } : {}),
+        ...(input.payerCpf?.length === 11
+          ? { identification: { type: "CPF", number: input.payerCpf } }
+          : {}),
       },
-      auto_return: "approved",
-      // Restringe o Checkout Pro a PIX: exclui cartão e boleto.
-      payment_methods: {
-        excluded_payment_types: [
-          { id: "credit_card" },
-          { id: "debit_card" },
-          { id: "ticket" },
-        ],
-        installments: 1,
-      },
-      notification_url: `${baseUrl}/api/webhooks/mercadopago`,
-      statement_descriptor: "SHARK SMOKEHOUSE",
     }),
   });
+  const tx = data.point_of_interaction?.transaction_data;
+  return {
+    id: data.id,
+    status: data.status,
+    qrCode: tx?.qr_code ?? "",
+    qrCodeBase64: tx?.qr_code_base64 ?? "",
+    ticketUrl: tx?.ticket_url,
+  };
 }
 
 /* ── Pagamentos ─────────────────────────────────────────────────────── */
@@ -158,8 +188,8 @@ export function mapMercadoPagoStatus(status: string): PaymentStatus | null {
 /**
  * Gateway do Mercado Pago. O `createPayment` é síncrono (igual ao manual):
  * apenas registra a intenção com provider "mercadopago" e status "pending". A
- * preferência de cobrança é criada na rota de servidor (`createPreference`),
- * que grava o `providerRef` no pedido.
+ * cobrança PIX é criada na rota de servidor (`createPixPayment`), que grava o
+ * `providerRef` (id do pagamento) no pedido.
  */
 export const mercadopagoGateway: PaymentGateway = {
   provider: "mercadopago",

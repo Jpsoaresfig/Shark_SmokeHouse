@@ -1,15 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  isMercadoPagoConfigured,
-  getPayment,
-  mapMercadoPagoStatus,
-} from "@/lib/payments/mercadopago";
-import {
-  applyPaymentStatusAdmin,
-  advanceOrderStatusAdmin,
-  getOrderAdmin,
-} from "@/lib/firebase/orders.server";
-import { qualifyReferralForPaidOrder } from "@/lib/firebase/referrals.server";
+import { isMercadoPagoConfigured } from "@/lib/payments/mercadopago";
+import { syncMercadoPagoPayment } from "@/lib/payments/mercadopago.server";
 
 export const runtime = "nodejs";
 
@@ -17,7 +8,7 @@ export const runtime = "nodejs";
  * Webhook do Mercado Pago — confirma/atualiza o pagamento de um pedido.
  *
  * Configure no painel do Mercado Pago (Suas integrações → Webhooks) ou via
- * `notification_url` da preferência (já enviada na criação):
+ * `notification_url` da cobrança (já enviada na criação):
  *   URL:  https://SEU_DOMINIO/api/webhooks/mercadopago
  *   Evento: Pagamentos (payment)
  *
@@ -26,12 +17,13 @@ export const runtime = "nodejs";
  * API é a fonte da verdade (status + external_reference = id do pedido). Uma
  * notificação forjada com id inexistente simplesmente falha o GET e é ignorada.
  *
+ * A lógica de baixa fica em `syncMercadoPagoPayment` (compartilhada com o polling
+ * de status do cliente), que é idempotente — reenvios do mesmo evento não dão
+ * baixa dupla.
+ *
  * Comportamento:
  *   - 200 quando processado OU sem ação necessária (para o MP parar de reenviar).
  *   - 500 só em falha real, para o MP tentar de novo.
- *
- * Idempotência: `applyPaymentStatusAdmin` ignora a transição se o pedido já está
- * no status alvo — reenvios do mesmo evento não dão baixa dupla.
  */
 export async function POST(request: NextRequest) {
   if (!isMercadoPagoConfigured()) {
@@ -66,54 +58,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const payment = await getPayment(paymentId);
-    const target = mapMercadoPagoStatus(payment.status);
-    if (!target) {
+    const result = await syncMercadoPagoPayment(paymentId);
+    if (!result.status) {
       // Status sem transição (pending, in_process, etc.).
-      return NextResponse.json({ received: true, skipped: payment.status });
+      return NextResponse.json({ received: true, skipped: "sem transição" });
     }
-
-    const orderId = payment.external_reference?.trim() || null;
-    if (!orderId || !(await getOrderAdmin(orderId))) {
-      console.warn("Webhook MP: pedido não encontrado", {
-        paymentId,
-        externalReference: payment.external_reference,
-      });
+    if (!result.orderId) {
+      console.warn("Webhook MP: pedido não encontrado", { paymentId });
       return NextResponse.json({ received: true, skipped: "pedido não encontrado" });
     }
-
-    const applied = await applyPaymentStatusAdmin(orderId, target, {
-      note: `Mercado Pago: pagamento ${paymentId} (${payment.status})`,
+    return NextResponse.json({
+      received: true,
+      orderId: result.orderId,
+      status: result.status,
+      applied: result.applied,
     });
-
-    // Pagamento confirmado → manda o pedido direto para "Preparando". O cliente
-    // pagou online, então pula a triagem manual (Recebido/Análise/Aprovado).
-    // Seguro: advanceOrderStatusAdmin nunca retrocede nem mexe em pedido
-    // entregue/cancelado, e é idempotente em reenvios. Não derruba o webhook se
-    // falhar — a baixa do pagamento já foi aplicada acima.
-    if (applied && target === "paid") {
-      try {
-        await advanceOrderStatusAdmin(orderId, "preparing", {
-          note: "Pagamento confirmado no Mercado Pago — pedido liberado para preparo.",
-        });
-      } catch (err) {
-        console.error("Webhook MP: falha ao avançar status do pedido", { orderId, err });
-      }
-    }
-
-    // Compra paga → libera a bonificação de indicação se for a 1ª compra do
-    // indicado (Task 3.2). Idempotente: só credita uma vez. Não derruba o webhook
-    // se falhar — a baixa do pagamento já foi aplicada acima.
-    if (applied && target === "paid") {
-      try {
-        const paidOrder = await getOrderAdmin(orderId);
-        if (paidOrder) await qualifyReferralForPaidOrder(paidOrder);
-      } catch (err) {
-        console.error("Webhook MP: falha ao qualificar indicação", { orderId, err });
-      }
-    }
-
-    return NextResponse.json({ received: true, orderId, status: target, applied });
   } catch (err) {
     console.error("Erro ao processar webhook do Mercado Pago:", err);
     // 500 → MP reenvia o evento mais tarde.
