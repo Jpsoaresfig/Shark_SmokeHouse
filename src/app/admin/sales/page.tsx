@@ -7,6 +7,7 @@ import {
   History, Download, Receipt, TrendingUp, Package,
   ChevronDown, ChevronUp, User, X, Truck, CheckCircle, Percent,
   Store, Globe, Ticket, Star, AlertTriangle,
+  CircleDollarSign, Ban, CalendarClock, Wallet, Clock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,9 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
-import { getSales, createSale, exportSalesCSV, markSaleDelivered, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
+import { getSales, createSale, exportSalesCSV, markSaleDelivered, registerSalePayment, cancelSale, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
+import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
+import { saleStatus, saleReceivedAmount, saleOutstanding, saleIsRevenue, saleCommission as saleCommissionOf } from "@/lib/sales/helpers";
 import { resetSalesData } from "@/lib/firebase/maintenance";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
@@ -31,7 +34,7 @@ import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
 import { normalizeInstallmentFees, installmentFeePercent, formatFeePercent, cardTotalFor } from "@/lib/payments/installments";
-import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, SaleChannel, Coupon, UserProfile } from "@/types";
+import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, SaleChannel, SalePaymentStatus, SaleManualDiscount, Coupon, UserProfile } from "@/types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toDate(v: any): Date {
@@ -93,6 +96,14 @@ export default function AdminSales() {
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
+  /* Desconto manual (≠ cupom): valor + tipo (%/R$) + motivo obrigatório. */
+  const [manualDiscType, setManualDiscType] = useState<"fixed" | "percent">("fixed");
+  const [manualDiscInput, setManualDiscInput] = useState("");
+  const [manualDiscReason, setManualDiscReason] = useState("");
+  /* Status do pagamento na criação: pago à vista, parcial (com sinal) ou pendente (fiado). */
+  const [payStatus, setPayStatus] = useState<SalePaymentStatus>("paid");
+  const [entryInput, setEntryInput] = useState("");   // sinal/entrada (status parcial)
+  const [dueDate, setDueDate] = useState("");          // vencimento opcional (fiado/parcial)
   /* Cliente vinculado + vendedor responsável + entrega posterior */
   const [customer, setCustomer] = useState<UserProfile | null>(null);
   const [customerQuery, setCustomerQuery] = useState("");
@@ -109,6 +120,15 @@ export default function AdminSales() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  /* ── Recebimento / cancelamento de venda (histórico) ── */
+  const [payTarget, setPayTarget] = useState<Sale | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState<SalePaymentMethod>("cash");
+  const [paySaving, setPaySaving] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelSaving, setCancelSaving] = useState(false);
 
   /* ── Zerar dados de vendas (operação limpa para produção) ── */
   const [resetOpen, setResetOpen] = useState(false);
@@ -127,12 +147,13 @@ export default function AdminSales() {
     }
   }, []);
 
-  const loadHistory = useCallback(async (start?: string, end?: string) => {
+  const loadHistory = useCallback(async (start?: string, end?: string, force = false) => {
     setLoadingHistory(true);
     try {
       setSales(await getSales(
         start ? new Date(start) : undefined,
         end ? new Date(end) : undefined,
+        force,
       ));
     } catch {
       toast.error("Não foi possível carregar o histórico de vendas.");
@@ -171,15 +192,10 @@ export default function AdminSales() {
     () => new Map(users.map(u => [u.uid, u])),
     [users],
   );
-  /** Comissão de uma venda a partir da taxa atual do vendedor (mesma regra do
-   *  painel do vendedor). Retorna null quando não há taxa definida. */
+  /** Comissão de uma venda a partir da taxa atual do vendedor. Delega ao helper
+   *  puro (que só conta comissão de venda quitada e abate cupom + desconto manual). */
   const saleCommission = useCallback((sale: Sale): { rate: number; amount: number } | null => {
-    const rate = sellerById.get(sale.sellerId)?.commissionRate;
-    if (rate == null || rate <= 0) return null;
-    // Comissão só sobre os produtos, já descontado o cupom. Vendas antigas (sem
-    // subtotal) tinham `total` = produtos, então o fallback mantém o cálculo.
-    const base = Math.max(0, (sale.subtotal ?? sale.total) - (sale.discount ?? 0));
-    return { rate, amount: base * (rate / 100) };
+    return saleCommissionOf(sale, sellerById.get(sale.sellerId)?.commissionRate);
   }, [sellerById]);
   const customerMatches = useMemo(() => {
     const q = customerQuery.trim().toLowerCase();
@@ -254,13 +270,22 @@ export default function AdminSales() {
           : (creditFeePercent ?? 0))
       : payment === "debit" ? (debitFeePercent ?? 0)
       : 0;
-  // Produtos líquidos (após o cupom) + frete = base da taxa de cartão.
-  const netProducts = Math.max(0, total - discount);
+  // Desconto manual (≠ cupom): % incide sobre os produtos; R$ é abatido direto.
+  // Mantido como expressão inline (React Compiler — sem helper importado aqui).
+  const manualDiscRaw = parseMoney(manualDiscInput);
+  const manualDiscount = manualDiscType === "percent"
+    ? Math.round(total * Math.min(100, manualDiscRaw) / 100 * 100) / 100
+    : Math.min(manualDiscRaw, Math.max(0, total - discount));
+  // Produtos líquidos (após cupom e desconto manual) + frete = base da taxa de cartão.
+  const netProducts = Math.max(0, total - discount - manualDiscount);
   const cardBase = netProducts + deliveryFeeNum;
   // Valores monetários centrais como expressões inline (React Compiler) — os
   // helpers importados ficam só nas opções do <select> de parcelas.
   const cardFeeAmount = Math.round(cardBase * (cardPct / 100) * 100) / 100;
   const grandTotal = Math.round((cardBase + cardFeeAmount) * 100) / 100;
+  // Entrada (sinal) quando a venda é parcial; recebido depende do status escolhido.
+  const entryAmount = Math.min(parseMoney(entryInput), grandTotal);
+  const receivedNow = payStatus === "paid" ? grandTotal : payStatus === "partial" ? entryAmount : 0;
 
   /* Clube Shark: estimativa de pontos para o cliente vinculado (exige CPF no
      cadastro dele). O crédito real é feito no momento de salvar a venda. */
@@ -269,8 +294,21 @@ export default function AdminSales() {
     ? computeOrderPoints({ eligibleReais: total, currentPoints: customer.loyaltyPoints ?? 0, cpfPresent: customerCpfPresent })
     : 0;
 
-  const historyTotal = useMemo(() =>
-    sales.reduce((s, sale) => s + sale.total, 0), [sales]);
+  /* Totais do histórico: vendido (competência, exclui canceladas), recebido
+     (caixa) e a receber (em aberto). Helpers usados em escopo isolado (useMemo). */
+  const historyStats = useMemo(() => {
+    let sold = 0, received = 0, pending = 0;
+    let countPaid = 0, countPending = 0, countCancelled = 0;
+    for (const sale of sales) {
+      const st = saleStatus(sale);
+      if (st === "cancelled") { countCancelled++; continue; }
+      if (st === "paid") countPaid++; else countPending++;
+      if (saleIsRevenue(sale)) sold += sale.total;
+      received += saleReceivedAmount(sale);
+      pending += saleOutstanding(sale);
+    }
+    return { sold, received, pending, countPaid, countPending, countCancelled };
+  }, [sales]);
 
   /* ── Item management ──
      Cada linha é identificada por produto + variação (productId + variationId).
@@ -402,6 +440,20 @@ export default function AdminSales() {
       toast.error(`Estoque insuficiente para "${label}" (disponível: ${stock} un).`);
       return;
     }
+    // Desconto manual exige motivo (rastreabilidade).
+    if (manualDiscount > 0 && !manualDiscReason.trim()) {
+      toast.error("Informe o motivo do desconto manual.");
+      return;
+    }
+    // Venda pendente/parcial é uma dívida — precisa de cliente vinculado.
+    if (payStatus !== "paid" && !customer) {
+      toast.error("Vincule um cliente para registrar venda pendente ou parcial.");
+      return;
+    }
+    if (payStatus === "partial" && !(entryAmount > 0)) {
+      toast.error("Informe o valor da entrada (sinal) para venda parcial.");
+      return;
+    }
     // Resolve o vendedor responsável (admin pode atribuir a outro; vendedor é ele mesmo).
     const seller = sellers.find(s => s.uid === sellerId);
     const finalSellerId = isAdmin ? (seller?.uid ?? user.uid) : user.uid;
@@ -430,22 +482,39 @@ export default function AdminSales() {
         });
       }
 
+      const manualDiscountObj: SaleManualDiscount | undefined = manualDiscount > 0
+        ? {
+            amount: manualDiscount,
+            type: manualDiscType,
+            ...(manualDiscType === "percent" ? { percent: Math.min(100, manualDiscRaw) } : {}),
+            reason: manualDiscReason.trim(),
+            grantedBy: user.uid,
+            grantedAt: new Date().toISOString(),
+          }
+        : undefined;
+
       const id = await createSale({
         sellerId: finalSellerId,
         sellerName: finalSellerName,
         items,
         subtotal: total,                 // produtos (base da comissão)
-        total: grandTotal,               // produtos + frete + taxa do cartão
+        total: grandTotal,               // produtos + frete + taxa do cartão − descontos
         channel,
         paymentMethod: payment,
         ...(deliveryFeeNum > 0 ? { deliveryFee: deliveryFeeNum } : {}),
         ...(cardFeeAmount > 0 ? { cardFee: cardFeeAmount, cardFeePercent: cardPct } : {}),
         ...(payment === "credit" && creditInstallments > 1 ? { installments: creditInstallments } : {}),
         ...(appliedCoupon && discount > 0 ? { couponCode: appliedCoupon.code, discount } : {}),
+        ...(manualDiscountObj ? { manualDiscount: manualDiscountObj } : {}),
         ...(pointsEarned > 0 ? { pointsEarned } : {}),
         notes: notes.trim() || undefined,
         ...(customer ? { customerId: customer.uid, customerName: customer.displayName } : {}),
         ...(deliveryLater ? { deliveryLater: true } : {}),
+        // Pagamento: status + valor recebido na criação (entrada/sinal ou total).
+        paymentStatus: payStatus,
+        amountReceived: receivedNow,
+        ...(payStatus !== "paid" && dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
+        createdBy: user.uid,
       });
 
       /* Registra o uso do cupom (auditoria + limite por CPF) — não bloqueia a venda. */
@@ -460,8 +529,10 @@ export default function AdminSales() {
         }).catch(err => console.error("Falha ao registrar uso do cupom:", err));
       }
 
-      /* Credita os pontos na conta do cliente vinculado (não bloqueia a venda). */
-      if (customer && pointsEarned > 0) {
+      /* Credita os pontos na conta do cliente — SOMENTE quando a venda já nasce
+         quitada. Em venda pendente/parcial os pontos são creditados ao quitar
+         (registerSalePayment), espelhando o e-commerce. */
+      if (payStatus === "paid" && customer && pointsEarned > 0) {
         await addLoyaltyPoints(
           customer.uid,
           pointsEarned,
@@ -475,9 +546,13 @@ export default function AdminSales() {
       toast.success(
         attributedToOther
           ? `Venda registrada para ${finalSellerName}!`
-          : "Venda registrada com sucesso!",
+          : payStatus === "paid"
+            ? "Venda registrada com sucesso!"
+            : payStatus === "partial"
+              ? "Venda parcial registrada — saldo em Contas a Receber."
+              : "Venda pendente registrada em Contas a Receber.",
       );
-      if (customer && pointsEarned > 0) {
+      if (payStatus === "paid" && customer && pointsEarned > 0) {
         toast.success(`+${pointsEarned.toLocaleString("pt-BR")} pontos creditados para ${customer.displayName}.`);
       }
       setItems([]);
@@ -487,6 +562,12 @@ export default function AdminSales() {
       setDeliveryFee("");
       setCreditInstallments(1);
       removeCoupon();
+      setManualDiscType("fixed");
+      setManualDiscInput("");
+      setManualDiscReason("");
+      setPayStatus("paid");
+      setEntryInput("");
+      setDueDate("");
       setCustomer(null);
       setCustomerQuery("");
       setDeliveryLater(false);
@@ -514,6 +595,49 @@ export default function AdminSales() {
       toast.error("Não foi possível atualizar a entrega.");
     } finally {
       setDeliveringId(null);
+    }
+  }
+
+  /* ── Registrar recebimento de uma venda pendente/parcial ── */
+  function openPayDialog(sale: Sale) {
+    setPayTarget(sale);
+    setPayAmount(saleOutstanding(sale).toFixed(2).replace(".", ","));
+    setPayMethod(sale.paymentMethod);
+  }
+  async function handleRegisterPayment() {
+    if (!payTarget || !user) return;
+    const amount = parseMoney(payAmount);
+    if (!(amount > 0)) { toast.error("Informe um valor de recebimento válido."); return; }
+    setPaySaving(true);
+    try {
+      await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
+      toast.success("Recebimento registrado.");
+      setPayTarget(null);
+      setPayAmount("");
+      await loadHistory(startDate, endDate, true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível registrar o recebimento.");
+    } finally {
+      setPaySaving(false);
+    }
+  }
+
+  /* ── Cancelar venda (somente admin) — estorna estoque e pontos ── */
+  async function handleCancelSale() {
+    if (!cancelTarget || !user) return;
+    if (!cancelReason.trim()) { toast.error("Informe o motivo do cancelamento."); return; }
+    setCancelSaving(true);
+    try {
+      await cancelSale(cancelTarget.id, cancelReason.trim(), user.uid);
+      toast.success("Venda cancelada — estoque estornado.");
+      setCancelTarget(null);
+      setCancelReason("");
+      await loadHistory(startDate, endDate, true);
+      await loadProducts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível cancelar a venda.");
+    } finally {
+      setCancelSaving(false);
     }
   }
 
@@ -952,6 +1076,101 @@ export default function AdminSales() {
                     )}
                   </div>
 
+                  {/* Status do pagamento (fiado / parcial / pago) */}
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Recebimento</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([
+                        { v: "paid", label: "Pago", icon: CheckCircle },
+                        { v: "partial", label: "Parcial", icon: Wallet },
+                        { v: "pending", label: "Pendente", icon: Clock },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          onClick={() => setPayStatus(opt.v)}
+                          className={`flex flex-col items-center gap-1 py-2 rounded-lg text-xs font-medium border transition-all ${
+                            payStatus === opt.v
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
+                        >
+                          <opt.icon className="w-3.5 h-3.5" />
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    {payStatus !== "paid" && (
+                      <div className="mt-2 space-y-2">
+                        {payStatus === "partial" && (
+                          <div>
+                            <label className="text-xs font-medium text-[var(--color-text-muted)] block mb-1.5">Entrada (sinal) — R$</label>
+                            <input
+                              value={entryInput}
+                              onChange={e => setEntryInput(e.target.value)}
+                              inputMode="decimal"
+                              placeholder="0,00"
+                              className={inputCls}
+                            />
+                          </div>
+                        )}
+                        <div>
+                          <label className="text-xs font-medium text-[var(--color-text-muted)] block mb-1.5">Vencimento (opcional)</label>
+                          <input
+                            type="date"
+                            value={dueDate}
+                            onChange={e => setDueDate(e.target.value)}
+                            className={inputCls}
+                          />
+                        </div>
+                        <p className="flex items-start gap-1.5 text-[11px] text-amber-400/90">
+                          <CircleDollarSign className="w-3.5 h-3.5 shrink-0 mt-px" />
+                          {payStatus === "partial"
+                            ? "O saldo restante fica em Contas a Receber. Vincule o cliente."
+                            : "Venda fiada: o valor total fica em Contas a Receber. Vincule o cliente."}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Desconto manual (≠ cupom) — exige motivo */}
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Desconto manual</label>
+                    <div className="flex gap-1.5">
+                      <div className="flex rounded-lg border border-[var(--color-border)] overflow-hidden shrink-0">
+                        {(["fixed", "percent"] as const).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setManualDiscType(t)}
+                            className={`px-3 text-sm font-medium transition-all ${
+                              manualDiscType === t
+                                ? "bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                                : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                            }`}
+                          >
+                            {t === "fixed" ? "R$" : "%"}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={manualDiscInput}
+                        onChange={e => setManualDiscInput(e.target.value)}
+                        inputMode="decimal"
+                        placeholder={manualDiscType === "fixed" ? "0,00" : "0"}
+                        className={inputCls}
+                      />
+                    </div>
+                    {manualDiscount > 0 && (
+                      <input
+                        value={manualDiscReason}
+                        onChange={e => setManualDiscReason(e.target.value)}
+                        placeholder="Motivo (obrigatório): amigo, fidelizado, defeito..."
+                        className={inputCls + " mt-1.5"}
+                      />
+                    )}
+                  </div>
+
                   {/* Cupom de desconto */}
                   <div>
                     <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Cupom</label>
@@ -1014,6 +1233,12 @@ export default function AdminSales() {
                           <span className="text-emerald-400">−{formatCurrency(discount)}</span>
                         </div>
                       )}
+                      {manualDiscount > 0 && (
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-emerald-400">Desconto manual{manualDiscType === "percent" ? ` · ${Math.min(100, manualDiscRaw)}%` : ""}</span>
+                          <span className="text-emerald-400">−{formatCurrency(manualDiscount)}</span>
+                        </div>
+                      )}
                       {deliveryFeeNum > 0 && (
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-[var(--color-text-muted)]">Frete</span>
@@ -1035,6 +1260,18 @@ export default function AdminSales() {
                       <span className="text-sm text-[var(--color-text-muted)]">Total</span>
                       <span className="text-2xl font-black text-[var(--color-neon-blue)]">{formatCurrency(grandTotal)}</span>
                     </div>
+                    {payStatus !== "paid" && (
+                      <div className="space-y-1 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-[var(--color-text-muted)]">Recebido agora</span>
+                          <span className="text-[var(--color-text-secondary)]">{formatCurrency(receivedNow)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm font-semibold">
+                          <span className="text-amber-400">A receber</span>
+                          <span className="text-amber-400">{formatCurrency(grandTotal - receivedNow)}</span>
+                        </div>
+                      </div>
+                    )}
                     <Button
                       variant="premium"
                       className="w-full"
@@ -1092,39 +1329,50 @@ export default function AdminSales() {
 
             {/* Stats */}
             {!loadingHistory && sales.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <Card>
                   <CardContent className="p-4 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-[var(--color-neon-blue-glow)] flex items-center justify-center">
-                      <Receipt className="w-4 h-4 text-[var(--color-neon-blue)]" />
-                    </div>
-                    <div>
-                      <p className="text-xl font-black text-[var(--color-text-primary)]">{sales.length}</p>
-                      <p className="text-xs text-[var(--color-text-muted)]">Vendas no período</p>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="p-4 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 flex items-center justify-center shrink-0">
                       <TrendingUp className="w-4 h-4 text-emerald-400" />
                     </div>
-                    <div>
-                      <p className="text-xl font-black text-[var(--color-text-primary)]">{formatCurrency(historyTotal)}</p>
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-[var(--color-text-primary)] truncate">{formatCurrency(historyStats.sold)}</p>
                       <p className="text-xs text-[var(--color-text-muted)]">Total vendido</p>
                     </div>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="p-4 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center">
-                      <TrendingUp className="w-4 h-4 text-purple-400" />
+                    <div className="w-9 h-9 rounded-xl bg-[var(--color-neon-blue-glow)] flex items-center justify-center shrink-0">
+                      <Wallet className="w-4 h-4 text-[var(--color-neon-blue)]" />
                     </div>
-                    <div>
-                      <p className="text-xl font-black text-[var(--color-text-primary)]">
-                        {formatCurrency(historyTotal / sales.length)}
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-[var(--color-text-primary)] truncate">{formatCurrency(historyStats.received)}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">Recebido (caixa)</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                      <CircleDollarSign className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-[var(--color-text-primary)] truncate">{formatCurrency(historyStats.pending)}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">A receber</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center shrink-0">
+                      <Receipt className="w-4 h-4 text-purple-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xl font-black text-[var(--color-text-primary)]">{sales.length}</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">
+                        {historyStats.countPaid} pagas · {historyStats.countPending} pend. · {historyStats.countCancelled} canc.
                       </p>
-                      <p className="text-xs text-[var(--color-text-muted)]">Ticket médio</p>
                     </div>
                   </CardContent>
                 </Card>
@@ -1190,12 +1438,17 @@ export default function AdminSales() {
                               </p>
                             </div>
                             <div className="flex items-center gap-3 shrink-0">
+                              {saleStatus(sale) !== "paid" && (
+                                <Badge variant={SALE_PAYMENT_STATUS_BADGE[saleStatus(sale)]} className="text-[10px] hidden sm:inline-flex">
+                                  {SALE_PAYMENT_STATUS_LABELS[saleStatus(sale)]}
+                                </Badge>
+                              )}
                               {sale.deliveryLater && (
                                 <Badge variant={sale.delivered ? "success" : "warning"} className="text-[10px] hidden sm:inline-flex">
                                   {sale.delivered ? "Entregue" : "Entrega pendente"}
                                 </Badge>
                               )}
-                              <span className="font-bold text-[var(--color-neon-blue)]">{formatCurrency(sale.total)}</span>
+                              <span className={`font-bold ${saleStatus(sale) === "cancelled" ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-neon-blue)]"}`}>{formatCurrency(sale.total)}</span>
                               {isOpen
                                 ? <ChevronUp className="w-4 h-4 text-[var(--color-text-muted)]" />
                                 : <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)]" />
@@ -1268,6 +1521,16 @@ export default function AdminSales() {
                                         <span className="text-emerald-400">−{formatCurrency(sale.discount)}</span>
                                       </div>
                                     )}
+                                    {!!sale.manualDiscount && (
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-emerald-400">
+                                          Desconto manual
+                                          {sale.manualDiscount.type === "percent" && sale.manualDiscount.percent != null ? ` · ${sale.manualDiscount.percent}%` : ""}
+                                          <span className="text-[var(--color-text-muted)]"> · {sale.manualDiscount.reason}</span>
+                                        </span>
+                                        <span className="text-emerald-400">−{formatCurrency(sale.manualDiscount.amount)}</span>
+                                      </div>
+                                    )}
                                     {!!sale.deliveryFee && (
                                       <div className="flex items-center justify-between text-sm">
                                         <span className="text-[var(--color-text-muted)]">Frete</span>
@@ -1292,25 +1555,95 @@ export default function AdminSales() {
                                     {!!sale.pointsEarned && (
                                       <div className="flex items-center justify-between text-sm">
                                         <span className="flex items-center gap-1.5 text-[var(--color-warning)]">
-                                          <Star className="w-3.5 h-3.5" /> Pontos creditados
+                                          <Star className="w-3.5 h-3.5" />
+                                          {sale.pointsReversed
+                                            ? "Pontos estornados"
+                                            : sale.pointsAwarded === false
+                                              ? "Pontos a creditar (ao quitar)"
+                                              : "Pontos creditados"}
                                         </span>
-                                        <span className="font-semibold text-[var(--color-warning)]">+{sale.pointsEarned.toLocaleString("pt-BR")}</span>
+                                        <span className={`font-semibold ${sale.pointsReversed ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-warning)]"}`}>+{sale.pointsEarned.toLocaleString("pt-BR")}</span>
                                       </div>
                                     )}
                                   </div>
 
+                                  {/* Pagamento (fiado / parcial) + ações */}
+                                  {(saleStatus(sale) !== "paid" || (sale.payments && sale.payments.length > 1)) && (
+                                    <div className="pt-1.5 mt-1 border-t border-[var(--color-border)]/60 space-y-1">
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
+                                          <Wallet className="w-3.5 h-3.5 text-[var(--color-neon-blue)]" /> Status
+                                        </span>
+                                        <Badge variant={SALE_PAYMENT_STATUS_BADGE[saleStatus(sale)]} className="text-[10px]">
+                                          {SALE_PAYMENT_STATUS_LABELS[saleStatus(sale)]}
+                                        </Badge>
+                                      </div>
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-[var(--color-text-muted)]">Recebido</span>
+                                        <span className="text-[var(--color-text-secondary)]">{formatCurrency(saleReceivedAmount(sale))}</span>
+                                      </div>
+                                      {saleOutstanding(sale) > 0 && (
+                                        <div className="flex items-center justify-between text-sm font-semibold">
+                                          <span className="text-amber-400">A receber</span>
+                                          <span className="text-amber-400">{formatCurrency(saleOutstanding(sale))}</span>
+                                        </div>
+                                      )}
+                                      {sale.dueDate && saleStatus(sale) !== "cancelled" && (
+                                        <div className="flex items-center justify-between text-sm">
+                                          <span className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
+                                            <CalendarClock className="w-3.5 h-3.5" /> Vencimento
+                                          </span>
+                                          <span className="text-[var(--color-text-secondary)]">{toDate(sale.dueDate).toLocaleDateString("pt-BR")}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {saleStatus(sale) === "cancelled" && (
+                                    <div className="flex items-start gap-1.5 text-xs text-red-400 pt-1.5 mt-1 border-t border-[var(--color-border)]/60">
+                                      <Ban className="w-3.5 h-3.5 shrink-0 mt-px" />
+                                      Cancelada{sale.cancelReason ? ` · ${sale.cancelReason}` : ""}
+                                    </div>
+                                  )}
+
+                                  {/* Ações: receber (vendedor) / cancelar (admin) */}
+                                  {saleStatus(sale) !== "cancelled" && (saleOutstanding(sale) > 0 || isAdmin) && (
+                                    <div className="flex flex-wrap gap-2 pt-2">
+                                      {saleOutstanding(sale) > 0 && (
+                                        <button
+                                          onClick={() => openPayDialog(sale)}
+                                          className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-[var(--color-neon-blue)]/40 bg-[var(--color-neon-blue-glow)] text-xs font-medium text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue)]/20 transition-colors"
+                                        >
+                                          <CircleDollarSign className="w-3.5 h-3.5" /> Registrar recebimento
+                                        </button>
+                                      )}
+                                      {isAdmin && (
+                                        <button
+                                          onClick={() => { setCancelTarget(sale); setCancelReason(""); }}
+                                          className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-red-500/30 bg-red-500/10 text-xs font-medium text-red-400 hover:bg-red-500/20 transition-colors"
+                                        >
+                                          <Ban className="w-3.5 h-3.5" /> Cancelar venda
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
+
                                   {/* Comissão do vendedor sobre esta venda (taxa atual do perfil) */}
                                   {(() => {
-                                    const c = saleCommission(sale);
+                                    const rate = sellerById.get(sale.sellerId)?.commissionRate;
+                                    const c = saleCommission(sale); // null se não quitada ou sem taxa
+                                    const pendingCommission = !c && rate != null && rate > 0 && saleStatus(sale) !== "cancelled";
                                     return (
                                       <div className="flex items-center justify-between text-sm pt-1.5 mt-1 border-t border-[var(--color-border)]/60">
                                         <span className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
                                           <Percent className="w-3.5 h-3.5 text-emerald-400" />
                                           Comissão {sale.sellerName}
-                                          {c && <span className="text-[var(--color-text-muted)]">({c.rate}%)</span>}
+                                          {(c || pendingCommission) && <span className="text-[var(--color-text-muted)]">({rate}%)</span>}
                                         </span>
                                         {c ? (
                                           <span className="font-semibold text-emerald-400">{formatCurrency(c.amount)}</span>
+                                        ) : pendingCommission ? (
+                                          <span className="text-xs text-amber-400">aguardando quitação</span>
                                         ) : (
                                           <span className="text-xs text-[var(--color-text-muted)]">sem comissão definida</span>
                                         )}
@@ -1398,6 +1731,110 @@ export default function AdminSales() {
               {resetting
                 ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 : "Zerar agora"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Registrar recebimento de venda pendente/parcial */}
+      <Dialog open={!!payTarget} onOpenChange={(v) => { if (!paySaving && !v) { setPayTarget(null); setPayAmount(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[var(--color-neon-blue)]">
+              <CircleDollarSign className="w-5 h-5" /> Registrar recebimento
+            </DialogTitle>
+            <DialogDescription>
+              {payTarget && (
+                <>Venda #{payTarget.id.slice(-8).toUpperCase()}{payTarget.customerName ? ` · ${payTarget.customerName}` : ""}.
+                Em aberto: <strong className="text-amber-400">{formatCurrency(saleOutstanding(payTarget))}</strong>.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Valor recebido — R$</label>
+              <input
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                inputMode="decimal"
+                placeholder="0,00"
+                className={inputCls}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Forma</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {PAYMENT_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPayMethod(opt.value)}
+                    className={`py-2 rounded-lg text-sm font-medium border transition-all ${
+                      payMethod === opt.value
+                        ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                        : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => { setPayTarget(null); setPayAmount(""); }} disabled={paySaving}>
+              Cancelar
+            </Button>
+            <Button variant="premium" onClick={handleRegisterPayment} disabled={paySaving || !(parseMoney(payAmount) > 0)}>
+              {paySaving
+                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : "Registrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cancelar venda (admin) — estorna estoque e pontos */}
+      <Dialog open={!!cancelTarget} onOpenChange={(v) => { if (!cancelSaving && !v) { setCancelTarget(null); setCancelReason(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <Ban className="w-5 h-5" /> Cancelar venda
+            </DialogTitle>
+            <DialogDescription>
+              {cancelTarget && (
+                <>Venda #{cancelTarget.id.slice(-8).toUpperCase()} ({formatCurrency(cancelTarget.total)}).
+                O <strong>estoque será estornado</strong> e os pontos creditados serão revertidos.
+                {saleReceivedAmount(cancelTarget) > 0 && (
+                  <> Havia <strong className="text-amber-400">{formatCurrency(saleReceivedAmount(cancelTarget))}</strong> recebido — registre a devolução manualmente, se houver.</>
+                )}</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Motivo do cancelamento</label>
+            <input
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ex.: desistência do cliente, erro de lançamento..."
+              className={inputCls}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => { setCancelTarget(null); setCancelReason(""); }} disabled={cancelSaving}>
+              Voltar
+            </Button>
+            <Button
+              variant="default"
+              className="bg-red-500 hover:bg-red-600 text-white border-0"
+              onClick={handleCancelSale}
+              disabled={cancelSaving || !cancelReason.trim()}
+            >
+              {cancelSaving
+                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : "Cancelar venda"}
             </Button>
           </DialogFooter>
         </DialogContent>

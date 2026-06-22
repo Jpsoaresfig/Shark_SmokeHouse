@@ -41,3 +41,18 @@ export const PAYMENT_STATUS_BADGE: Record<string, PaymentBadgeVariant> = {
   refunded: "secondary",
   cancelled: "destructive",
 };
+
+/* ── Status financeiro da venda PDV (fiado / parcial) ────── */
+export const SALE_PAYMENT_STATUS_LABELS: Record<string, string> = {
+  paid: "Pago",
+  partial: "Parcialmente pago",
+  pending: "Pendente",
+  cancelled: "Cancelada",
+};
+
+export const SALE_PAYMENT_STATUS_BADGE: Record<string, PaymentBadgeVariant> = {
+  paid: "success",
+  partial: "warning",
+  pending: "secondary",
+  cancelled: "destructive",
+};

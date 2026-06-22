@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
-  Receipt, TrendingUp, Percent, ShoppingCart, RefreshCw, History,
+  Receipt, TrendingUp, Percent, ShoppingCart, RefreshCw, History, CircleDollarSign,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { AdminTopNav } from "@/components/admin/AdminTopNav";
 import { getSales, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
+import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
+import { saleStatus, saleOutstanding, saleCommission as saleCommissionOf } from "@/lib/sales/helpers";
 import { formatCurrency, toDate } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
@@ -40,35 +42,33 @@ export default function SellerDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
-  /* ── Resumo: mês atual e total ── */
+  /* ── Resumo: mês atual e total ──
+     Comissão conta SÓ em venda quitada (helper saleCommission). Vendas canceladas
+     são ignoradas. "A receber" soma o saldo em aberto das vendas pendentes/parciais. */
   const stats = useMemo(() => {
     const now = new Date();
     const m = now.getMonth();
     const y = now.getFullYear();
-    // `*Total` = total cobrado (com frete/taxa) para exibição; `*Base` = só produtos,
-    // que é a base da comissão. Vendas antigas (sem subtotal) tinham total = produtos.
-    let monthCount = 0, monthTotal = 0, allTotal = 0, monthBase = 0, allBase = 0;
+    let monthCount = 0, allCount = 0;
+    let monthTotal = 0, allTotal = 0;
+    let monthCommission = 0, allCommission = 0;
+    let allPending = 0;
     for (const s of sales) {
-      const base = Math.max(0, (s.subtotal ?? s.total ?? 0) - (s.discount ?? 0));
+      if (saleStatus(s) === "cancelled") continue;
+      allCount++;
       allTotal += s.total ?? 0;
-      allBase += base;
+      allPending += saleOutstanding(s);
+      const c = saleCommissionOf(s, rate);   // null se não quitada ou sem taxa
+      if (c) allCommission += c.amount;
       const d = toDate(s.createdAt);
       if (d.getMonth() === m && d.getFullYear() === y) {
         monthCount++;
         monthTotal += s.total ?? 0;
-        monthBase += base;
+        if (c) monthCommission += c.amount;
       }
     }
-    const commission = (v: number) => (hasCommission ? v * (rate! / 100) : 0);
-    return {
-      monthCount,
-      monthTotal,
-      monthCommission: commission(monthBase),
-      allCount: sales.length,
-      allTotal,
-      allCommission: commission(allBase),
-    };
-  }, [sales, hasCommission, rate]);
+    return { monthCount, monthTotal, monthCommission, allCount, allTotal, allCommission, allPending };
+  }, [sales, rate]);
 
   const recent = useMemo(
     () => [...sales].sort((a, b) => toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime()).slice(0, 8),
@@ -78,8 +78,8 @@ export default function SellerDashboard() {
   const statCards = [
     { title: "Vendido no mês", value: formatCurrency(stats.monthTotal), icon: TrendingUp, color: "text-[var(--color-neon-blue)]", bg: "bg-[var(--color-neon-blue-glow)]" },
     { title: "Comissão no mês", value: hasCommission ? formatCurrency(stats.monthCommission) : "—", icon: Percent, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-    { title: "Vendido total", value: formatCurrency(stats.allTotal), icon: Receipt, color: "text-purple-400", bg: "bg-purple-500/10" },
-    { title: "Comissão total", value: hasCommission ? formatCurrency(stats.allCommission) : "—", icon: Percent, color: "text-amber-400", bg: "bg-amber-500/10" },
+    { title: "A receber", value: formatCurrency(stats.allPending), icon: CircleDollarSign, color: "text-amber-400", bg: "bg-amber-500/10" },
+    { title: "Comissão total", value: hasCommission ? formatCurrency(stats.allCommission) : "—", icon: Percent, color: "text-purple-400", bg: "bg-purple-500/10" },
   ];
 
   return (
@@ -144,6 +144,7 @@ export default function SellerDashboard() {
 
         <p className="text-xs text-[var(--color-text-muted)] mb-8">
           {stats.monthCount} venda{stats.monthCount !== 1 ? "s" : ""} este mês · {stats.allCount} no total
+          {hasCommission && " · comissão contabilizada apenas em vendas quitadas"}
           {!hasCommission && " · defina uma comissão com o administrador para acompanhar seus ganhos"}
         </p>
 
@@ -190,12 +191,17 @@ export default function SellerDashboard() {
                         </p>
                       </div>
                       <div className="text-right shrink-0">
-                        <span className="text-sm font-bold text-[var(--color-neon-blue)] block">{formatCurrency(sale.total)}</span>
-                        {hasCommission && (
-                          <Badge variant="success" className="text-[10px] mt-0.5">
-                            +{formatCurrency(Math.max(0, (sale.subtotal ?? sale.total) - (sale.discount ?? 0)) * (rate! / 100))}
-                          </Badge>
-                        )}
+                        <span className={`text-sm font-bold block ${saleStatus(sale) === "cancelled" ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-neon-blue)]"}`}>{formatCurrency(sale.total)}</span>
+                        {(() => {
+                          const c = saleCommissionOf(sale, rate);
+                          if (c) return <Badge variant="success" className="text-[10px] mt-0.5">+{formatCurrency(c.amount)}</Badge>;
+                          if (saleStatus(sale) !== "paid") return (
+                            <Badge variant={SALE_PAYMENT_STATUS_BADGE[saleStatus(sale)]} className="text-[10px] mt-0.5">
+                              {SALE_PAYMENT_STATUS_LABELS[saleStatus(sale)]}
+                            </Badge>
+                          );
+                          return null;
+                        })()}
                       </div>
                     </div>
                     {i < recent.length - 1 && <Separator />}

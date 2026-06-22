@@ -479,6 +479,51 @@ export type SalePaymentMethod = "pix" | "credit" | "debit" | "cash" | "card";
 /** Onde a venda foi feita: presencial na loja, entrega em casa (maquineta) ou online. */
 export type SaleChannel = "in_store" | "delivery" | "online";
 
+/** Status financeiro da venda PDV. Ausente (vendas legadas) = "paid" (quitada). */
+export type SalePaymentStatus = "paid" | "partial" | "pending" | "cancelled";
+
+/** Um recebimento individual lançado numa venda (caixa registrou entrada). */
+export interface SalePayment {
+  amount: number;
+  method: SalePaymentMethod;
+  receivedAt: string;
+  receivedBy: string;
+  note?: string;
+}
+
+/** Desconto manual concedido pelo operador (distinto do cupom). */
+export interface SaleManualDiscount {
+  /** Valor em R$ efetivamente abatido (snapshot já resolvido). */
+  amount: number;
+  /** Como foi informado: porcentagem ou valor fixo. */
+  type: "percent" | "fixed";
+  /** % aplicada quando type === "percent" (snapshot). */
+  percent?: number;
+  /** Motivo da concessão — obrigatório. */
+  reason: string;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+/** Evento de auditoria/rastreabilidade de uma venda. */
+export interface SaleAuditEvent {
+  type:
+    | "created"
+    | "payment"
+    | "status_change"
+    | "cancelled"
+    | "stock_reversed"
+    | "points_reversed";
+  at: string;
+  /** uid do responsável ("system" para automações). */
+  by: string;
+  note?: string;
+  /** Valor envolvido (recebimento/desconto). */
+  amount?: number;
+  from?: SalePaymentStatus;
+  to?: SalePaymentStatus;
+}
+
 export interface SaleItem {
   productId: string;
   productName: string;
@@ -528,6 +573,34 @@ export interface Sale {
   delivered?: boolean;
   deliveredAt?: string;
   createdAt: string;
+
+  /* ── Pagamento (fiado / parcial / pendente) ──────────────
+   * Todos opcionais: venda legada sem `paymentStatus` é tratada como
+   * "paid" e `amountReceived = total` pelos helpers em @/lib/sales/helpers. */
+  /** Status financeiro. Ausente = "paid" (compatibilidade retroativa). */
+  paymentStatus?: SalePaymentStatus;
+  /** Total já recebido. Ausente = `total` (venda legada estava quitada).
+   *  ⚠ `0` é um valor legítimo (nada recebido) — nunca use `|| total`. */
+  amountReceived?: number;
+  /** Histórico de recebimentos lançados na venda. */
+  payments?: SalePayment[];
+  /** Desconto manual concedido (≠ cupom). */
+  manualDiscount?: SaleManualDiscount;
+  /** Vencimento da cobrança (opcional). */
+  dueDate?: string;
+  /** Trilha de auditoria (criação, recebimentos, cancelamento). */
+  audit?: SaleAuditEvent[];
+  /** uid de quem registrou a venda (pode diferir do vendedor responsável). */
+  createdBy?: string;
+  canceledAt?: string;
+  canceledBy?: string;
+  cancelReason?: string;
+  /** Guard: estoque já estornado (evita estorno duplo no cancelamento). */
+  stockReversed?: boolean;
+  /** Guard: pontos do Clube Shark já creditados (crédito ocorre ao quitar). */
+  pointsAwarded?: boolean;
+  /** Guard: pontos já revertidos no cancelamento. */
+  pointsReversed?: boolean;
 }
 
 /* ── Review (avaliação de pedido) ────────────────────────── */
@@ -543,6 +616,8 @@ export interface Review {
 }
 
 /* ── Commission ──────────────────────────────────────────── */
+/** @deprecated Tipo legado nunca utilizado — comissão é derivada em tempo de
+ *  exibição via saleCommission() em @/lib/sales/helpers, não persistida. */
 export interface Commission {
   id: string;
   sellerId: string;

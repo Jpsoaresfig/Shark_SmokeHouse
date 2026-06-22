@@ -102,7 +102,16 @@ service cloud.firestore {
 
     // ── Sales ─────────────────────────────────────────────────
     match /sales/{saleId} {
-      allow read, write: if isAdmin() || isSeller();
+      allow read:   if isAdmin() || isSeller();
+      allow create: if isAdmin() || isSeller();
+      // Vendedor registra venda e recebimentos (paid/partial/pending), mas NÃO pode
+      // cancelar (paymentStatus = "cancelled") nem mexer numa venda já cancelada —
+      // cancelamento/estorno é exclusivo do admin.
+      allow update: if isAdmin()
+        || (isSeller()
+            && resource.data.paymentStatus != 'cancelled'
+            && request.resource.data.paymentStatus != 'cancelled');
+      allow delete: if isAdmin();
     }
 
     // ── Loyalty Transactions ──────────────────────────────────

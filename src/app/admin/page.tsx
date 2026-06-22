@@ -21,6 +21,7 @@ import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales } from "@/lib/firebase/sales";
+import { saleStatus, saleReceivedAmount, saleOutstanding } from "@/lib/sales/helpers";
 import { resolveOrderPayment } from "@/lib/payments";
 import { toast } from "@/stores/toastStore";
 import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
@@ -74,12 +75,20 @@ export default function AdminDashboard() {
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [chartRange, setChartRange] = useState<"daily" | "monthly">("daily");
   const [dashStats, setDashStats] = useState({
-    monthRevenue: 0,
+    monthRevenue: 0,        // recebido no mês (caixa: pedidos pagos + recebido das vendas PDV)
     prevMonthRevenue: 0,
     todayOrders: 0,
     yesterdayOrders: 0,
     totalCustomers: 0,
     criticalStock: 0,
+    // PDV (regime de competência × caixa)
+    pdvSold: 0,            // vendido no mês (exclui canceladas)
+    pdvReceived: 0,        // recebido no mês (das vendas PDV)
+    pdvPending: 0,         // a receber (em aberto) no mês
+    pdvDiscounts: 0,       // descontos concedidos (cupom + manual) no mês
+    countPaid: 0,
+    countPending: 0,
+    countCancelled: 0,
   });
 
   const load = useCallback(async (force = false) => {
@@ -109,6 +118,8 @@ export default function AdminDashboard() {
         let prevMonthRevenue = 0;
         let todayOrders = 0;
         let yesterdayOrders = 0;
+        let pdvSold = 0, pdvReceived = 0, pdvPending = 0, pdvDiscounts = 0;
+        let countPaid = 0, countPending = 0, countCancelled = 0;
 
         // Online orders: só entram na RECEITA quando o pagamento foi confirmado
         // (admin clicou em "Confirmar pagamento" → paid). Pagamentos cancelados
@@ -128,17 +139,31 @@ export default function AdminDashboard() {
           }
         }
 
-        // PDV sales — todas as vendas presenciais
+        // PDV sales — a RECEITA (caixa) considera apenas o valor efetivamente
+        // recebido; vendas pendentes/parciais entram só como "a receber".
+        // Canceladas não contam como venda nem receita.
         for (const sale of sales) {
           const d = toDate(sale.createdAt);
           const m = d.getMonth();
           const y = d.getFullYear();
-          if (m === thisMonth && y === thisYear) {
-            monthRevenue += sale.total ?? 0;
+          const inThisMonth = m === thisMonth && y === thisYear;
+          const st = saleStatus(sale);
+          if (st === "cancelled") {
+            if (inThisMonth) countCancelled++;
+            continue;
+          }
+          if (inThisMonth) {
+            const received = saleReceivedAmount(sale);
+            monthRevenue += received;            // caixa
+            pdvReceived += received;
+            pdvSold += sale.total ?? 0;          // competência (exclui canceladas)
+            pdvPending += saleOutstanding(sale);
+            pdvDiscounts += (sale.discount ?? 0) + (sale.manualDiscount?.amount ?? 0);
+            if (st === "paid") countPaid++; else countPending++;
             if (d >= todayStart) todayOrders++;
             else if (d >= yesterdayStart) yesterdayOrders++;
           } else if (m === prevMonth && y === prevYear) {
-            prevMonthRevenue += sale.total ?? 0;
+            prevMonthRevenue += saleReceivedAmount(sale);
           }
         }
 
@@ -155,6 +180,13 @@ export default function AdminDashboard() {
           yesterdayOrders,
           totalCustomers: customers.length,
           criticalStock: critical.length,
+          pdvSold,
+          pdvReceived,
+          pdvPending,
+          pdvDiscounts,
+          countPaid,
+          countPending,
+          countCancelled,
         });
         setAllSales(sales);
         setLowStockItems(critical.slice(0, 5));
@@ -210,7 +242,7 @@ export default function AdminDashboard() {
       addToDay(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
-      addToDay(sale.createdAt, sale.total ?? 0);
+      addToDay(sale.createdAt, saleReceivedAmount(sale)); // caixa (cancelada/pendente não infla)
     }
     return Array.from(buckets.entries()).map(([key, value]) => {
       const [y, m, d] = key.split("-").map(Number);
@@ -242,7 +274,7 @@ export default function AdminDashboard() {
       addToMonth(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
-      addToMonth(sale.createdAt, sale.total ?? 0);
+      addToMonth(sale.createdAt, saleReceivedAmount(sale)); // caixa
     }
     return Array.from(buckets.entries()).map(([key, value]) => {
       const [y, m] = key.split("-").map(Number);
@@ -267,7 +299,7 @@ export default function AdminDashboard() {
 
   const stats = [
     {
-      title: "Receita do Mês",
+      title: "Recebido no Mês",
       value: formatCurrency(dashStats.monthRevenue),
       change: revenueChange,
       icon: TrendingUp,
@@ -405,6 +437,35 @@ export default function AdminDashboard() {
             );
           })}
         </div>
+
+        {/* Faixa financeira do PDV (mês) — vendido (competência) × recebido (caixa) */}
+        {!loading && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8"
+          >
+            {[
+              { label: "Vendido (mês)", value: formatCurrency(dashStats.pdvSold), hint: `${dashStats.countPaid + dashStats.countPending} vendas`, color: "text-emerald-400" },
+              { label: "Recebido (caixa)", value: formatCurrency(dashStats.pdvReceived), hint: `${dashStats.countPaid} pagas`, color: "text-[var(--color-neon-blue)]" },
+              { label: "A receber", value: formatCurrency(dashStats.pdvPending), hint: `${dashStats.countPending} pendentes`, color: "text-amber-400", href: "/admin/receivables" },
+              { label: "Descontos (mês)", value: formatCurrency(dashStats.pdvDiscounts), hint: `${dashStats.countCancelled} canceladas`, color: "text-purple-400" },
+            ].map((c) => (
+              <Card
+                key={c.label}
+                onClick={c.href ? () => router.push(c.href!) : undefined}
+                className={c.href ? "cursor-pointer hover:border-[var(--color-neon-blue)]/60 transition-all" : ""}
+              >
+                <CardContent className="p-4">
+                  <p className={`text-xl font-black ${c.color}`}>{c.value}</p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{c.label}</p>
+                  <p className="text-[10px] text-[var(--color-text-muted)] mt-1">{c.hint}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </motion.div>
+        )}
 
         {/* Content grid */}
         <div className="grid lg:grid-cols-3 gap-6">
