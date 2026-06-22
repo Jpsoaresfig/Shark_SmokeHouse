@@ -430,7 +430,7 @@ export default function AboutPage() {
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
               <a
-                href="https://www.instagram.com/shark_smokehouse_"
+                href="https://www.instagram.com/shark.smokehouse.ofc"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-accent-pink)] hover:border-[var(--color-accent-pink)] hover:bg-pink-500/10 transition-all"

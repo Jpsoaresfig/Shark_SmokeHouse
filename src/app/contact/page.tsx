@@ -59,8 +59,8 @@ const channels = [
   {
     icon: InstagramGlyph,
     label: "Instagram",
-    value: "@shark_smokehouse_",
-    href: "https://www.instagram.com/shark_smokehouse_",
+    value: "@shark.smokehouse.ofc",
+    href: "https://www.instagram.com/shark.smokehouse.ofc",
     color: "text-[var(--color-accent-pink)]",
     bg: "bg-pink-500/10",
     border: "border-pink-500/20",

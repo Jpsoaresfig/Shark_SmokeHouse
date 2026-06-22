@@ -90,7 +90,7 @@ export function Footer() {
             {/* Social */}
             <div className="flex items-center gap-3 mt-6">
               <a
-                href="https://www.instagram.com/shark_smokehouse_"
+                href="https://www.instagram.com/shark.smokehouse.ofc"
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Instagram da Shark Smokehouse"
