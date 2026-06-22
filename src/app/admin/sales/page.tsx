@@ -346,6 +346,8 @@ export default function AdminSales() {
         price: product.price,
         quantity: 1,
         subtotal: product.price,
+        // Custo congelado na venda (base do lucro). Só grava se houver custo.
+        ...(product.costPrice ? { costPrice: product.costPrice } : {}),
         ...(variation ? { variationId: variation.id, variationName: variation.name } : {}),
       }];
     });
@@ -1653,6 +1655,39 @@ export default function AdminSales() {
                                       </div>
                                     );
                                   })()}
+
+                                  {/* Auditoria / rastreabilidade da venda */}
+                                  {sale.audit && sale.audit.length > 0 && (
+                                    <details className="pt-1.5 mt-1 border-t border-[var(--color-border)]/60">
+                                      <summary className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-text-muted)] cursor-pointer select-none">
+                                        <History className="w-3.5 h-3.5" /> Auditoria ({sale.audit.length})
+                                      </summary>
+                                      <div className="mt-2 space-y-1.5 pl-1">
+                                        {sale.audit.map((ev, idx) => {
+                                          const who = sellerById.get(ev.by)?.displayName ?? (ev.by === "system" ? "Sistema" : ev.by.slice(-6).toUpperCase());
+                                          const when = toDate(ev.at);
+                                          const label =
+                                            ev.type === "created" ? "Venda registrada"
+                                            : ev.type === "payment" ? (ev.note ? ev.note : `Recebimento${ev.amount != null ? ` de ${formatCurrency(ev.amount)}` : ""}`)
+                                            : ev.type === "status_change" ? `Status: ${SALE_PAYMENT_STATUS_LABELS[ev.from ?? "paid"]} → ${SALE_PAYMENT_STATUS_LABELS[ev.to ?? "paid"]}`
+                                            : ev.type === "cancelled" ? `Cancelada${ev.note ? ` · ${ev.note}` : ""}`
+                                            : ev.type === "stock_reversed" ? "Estoque estornado"
+                                            : ev.type === "points_reversed" ? `Pontos revertidos${ev.amount != null ? ` (${ev.amount})` : ""}`
+                                            : ev.type;
+                                          return (
+                                            <div key={idx} className="flex items-start gap-2 text-[11px]">
+                                              <span className="text-[var(--color-text-muted)] shrink-0 w-24 tabular-nums">
+                                                {when.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} {when.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                              </span>
+                                              <span className="text-[var(--color-text-secondary)] flex-1">
+                                                {label} <span className="text-[var(--color-text-muted)]">· {who}</span>
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </details>
+                                  )}
                                 </div>
                               </motion.div>
                             )}

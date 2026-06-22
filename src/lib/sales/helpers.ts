@@ -7,7 +7,7 @@
  * são tratadas como quitadas (`paid`, recebido = total). Nunca recalcular status
  * a partir de `amountReceived` quando `paymentStatus` está ausente.
  */
-import type { Sale, SalePaymentStatus } from "@/types";
+import type { Sale, SalePaymentStatus, SalePaymentMethod } from "@/types";
 
 /** Tolerância de centavos para fechar a conta (arredondamentos). */
 export const CENTS_EPSILON = 0.005;
@@ -67,4 +67,67 @@ export function saleCommission(
   if (saleStatus(sale) !== "paid") return null;
   const base = saleCommissionBase(sale);
   return { rate: commissionRate, amount: base * (commissionRate / 100) };
+}
+
+/* ── Custo e lucro ────────────────────────────────────────
+ * O custo é congelado por item (SaleItem.costPrice) no momento da venda.
+ * Para vendas antigas (sem custo), um `costMap` opcional (productId → custo
+ * atual) serve de estimativa de fallback. */
+
+/** Soma total de descontos concedidos (cupom + manual). */
+export function saleDiscountTotal(sale: Sale): number {
+  return (sale.discount ?? 0) + (sale.manualDiscount?.amount ?? 0);
+}
+
+/** Receita só dos produtos, já abatidos cupom e desconto manual (>= 0). */
+export function saleNetProducts(sale: Sale): number {
+  return saleCommissionBase(sale); // mesma base: (subtotal ?? total) − descontos
+}
+
+/** Custo total dos produtos vendidos. `costMap` é fallback p/ itens sem custo. */
+export function saleCost(sale: Sale, costMap?: Map<string, number>): number {
+  let cost = 0;
+  for (const item of sale.items) {
+    const unit = item.costPrice ?? costMap?.get(item.productId) ?? 0;
+    cost += unit * item.quantity;
+  }
+  return cost;
+}
+
+/** Lucro bruto PROJETADO (competência): receita de produtos − custo. Cancelada ⇒ 0. */
+export function saleGrossProfit(sale: Sale, costMap?: Map<string, number>): number {
+  if (saleStatus(sale) === "cancelled") return 0;
+  return saleNetProducts(sale) - saleCost(sale, costMap);
+}
+
+/** Lucro REALIZADO (caixa): lucro projetado ponderado pela fração já recebida. */
+export function saleRealizedProfit(sale: Sale, costMap?: Map<string, number>): number {
+  if (saleStatus(sale) === "cancelled") return 0;
+  const projected = saleGrossProfit(sale, costMap);
+  if (sale.total <= 0) return projected;
+  const factor = Math.min(1, saleReceivedAmount(sale) / sale.total);
+  return projected * factor;
+}
+
+/** Uma entrada de caixa (recebimento efetivo). */
+export interface CashEntry {
+  at: string;            // ISO ou Timestamp (consumidor converte)
+  amount: number;
+  method: SalePaymentMethod;
+  saleId: string;
+}
+
+/**
+ * Entradas de caixa de uma venda (para o fluxo de caixa). Usa o histórico de
+ * `payments` quando existe; senão, vendas legadas/quitadas sem histórico contam
+ * o recebido na data da venda. Canceladas não geram entrada.
+ */
+export function cashEntriesForSale(sale: Sale): CashEntry[] {
+  if (saleStatus(sale) === "cancelled") return [];
+  if (sale.payments && sale.payments.length) {
+    return sale.payments.map((p) => ({ at: p.receivedAt, amount: p.amount, method: p.method, saleId: sale.id }));
+  }
+  const received = saleReceivedAmount(sale);
+  if (received <= 0) return [];
+  return [{ at: sale.createdAt, amount: received, method: sale.paymentMethod, saleId: sale.id }];
 }

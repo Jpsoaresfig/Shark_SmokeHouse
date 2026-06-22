@@ -532,6 +532,9 @@ export interface SaleItem {
   price: number;
   quantity: number;
   subtotal: number;
+  /** Custo unitário do produto CONGELADO no momento da venda (uso interno —
+   *  base do cálculo de lucro). Ausente em vendas antigas. */
+  costPrice?: number;
   /** Variação vendida (quando o produto tem grade). */
   variationId?: string;
   variationName?: string;
