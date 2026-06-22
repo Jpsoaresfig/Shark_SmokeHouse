@@ -307,7 +307,9 @@ export default function AdminSales() {
       received += saleReceivedAmount(sale);
       pending += saleOutstanding(sale);
     }
-    return { sold, received, pending, countPaid, countPending, countCancelled };
+    const countValid = countPaid + countPending;
+    const ticket = countValid > 0 ? sold / countValid : 0;
+    return { sold, received, pending, countPaid, countPending, countCancelled, ticket };
   }, [sales]);
 
   /* ── Item management ──
@@ -1338,6 +1340,7 @@ export default function AdminSales() {
                     <div className="min-w-0">
                       <p className="text-xl font-black text-[var(--color-text-primary)] truncate">{formatCurrency(historyStats.sold)}</p>
                       <p className="text-xs text-[var(--color-text-muted)]">Total vendido</p>
+                      <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">Ticket médio {formatCurrency(historyStats.ticket)}</p>
                     </div>
                   </CardContent>
                 </Card>
