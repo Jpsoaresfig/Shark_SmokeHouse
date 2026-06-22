@@ -37,8 +37,12 @@ export default function AdminInventory() {
   const [form, setForm] = useState(EMPTY_FORM);
   /* Quais produtos com grade estão expandidos na lista de estoque. */
   const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
-  /* Busca dentro da lista "Todos os Produtos" (nome, SKU ou variação). */
+  /* Busca dentro da lista de estoque (nome, SKU ou variação). */
   const [stockSearch, setStockSearch] = useState("");
+  /* Visão da lista de estoque: todos os produtos × só os críticos. */
+  const [stockView, setStockView] = useState<"all" | "critical">("all");
+  /* Filtro das movimentações recentes por tipo (todas/entrada/saída/ajuste/perda). */
+  const [moveFilter, setMoveFilter] = useState<"all" | MovementType>("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +134,20 @@ export default function AdminInventory() {
   }, [products, stockSearch]);
 
   const lowStock = products.filter(p => p.active && p.stock <= p.minStock);
+  /* Críticos filtrados pela mesma busca (nome ou SKU). */
+  const filteredLowStock = useMemo(() => {
+    const q = stockSearch.trim().toLowerCase();
+    if (!q) return lowStock;
+    return lowStock.filter(p =>
+      p.name.toLowerCase().includes(q) || (p.sku?.toLowerCase().includes(q) ?? false),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products, stockSearch]);
+  /* Movimentações filtradas pelo tipo selecionado. */
+  const filteredMovements = useMemo(
+    () => (moveFilter === "all" ? movements : movements.filter(m => m.type === moveFilter)),
+    [movements, moveFilter],
+  );
   const selected = products.find(p => p.id === form.productId);
   const selectedHasVars = (selected?.variations?.length ?? 0) > 0;
   const selectedVariation = selected?.variations?.find(v => v.id === form.variationId);
@@ -204,71 +222,100 @@ export default function AdminInventory() {
           <div className="grid lg:grid-cols-3 gap-6">
             {/* Left column */}
             <div className="lg:col-span-2 space-y-6">
-              {/* Low stock alert */}
-              {lowStock.length > 0 && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                  <Card className="border-amber-500/20">
-                    <CardHeader className="flex-row items-center gap-2 pb-0">
-                      <AlertTriangle className="w-4 h-4 text-amber-400" />
-                      <CardTitle className="text-base">Estoque Crítico</CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-4">
-                      {lowStock.map((p, i) => {
-                        const pct = Math.min(Math.round((p.stock / p.minStock) * 100), 100);
-                        return (
-                          <div key={p.id}>
-                            <div className="flex items-center justify-between py-2">
-                              <div>
-                                <p className="text-sm font-medium text-[var(--color-text-secondary)]">{p.name}</p>
-                                <p className="text-xs text-[var(--color-text-muted)]">SKU: {p.sku || "—"}</p>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-sm font-bold text-amber-400">{p.stock} un.</span>
-                                <p className="text-xs text-[var(--color-text-muted)]">mín: {p.minStock}</p>
-                              </div>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-[var(--color-bg-overlay)] mb-1">
-                              <div
-                                className="h-full rounded-full bg-amber-400/70 transition-all"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            {i < lowStock.length - 1 && <Separator className="mt-2" />}
-                          </div>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              )}
-
-              {/* All products stock */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              {/* Lista de estoque com seletor de visão (Todos × Críticos) */}
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 <Card>
-                  <CardHeader className="pb-0 flex-row items-center justify-between gap-3">
-                    <CardTitle className="text-base shrink-0">Todos os Produtos</CardTitle>
-                    {/* Busca rápida na lista de estoque */}
-                    <div className="relative w-full max-w-[220px]">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
-                      <input
-                        value={stockSearch}
-                        onChange={e => setStockSearch(e.target.value)}
-                        placeholder="Buscar produto..."
-                        className="w-full h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-8 pr-8 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
-                      />
-                      {stockSearch && (
+                  <CardHeader className="pb-0 gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      {/* Seletor: Todos os Produtos × Estoque Crítico */}
+                      <div className="flex gap-1.5">
                         <button
-                          onClick={() => setStockSearch("")}
-                          className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                          aria-label="Limpar busca"
+                          type="button"
+                          onClick={() => setStockView("all")}
+                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
+                            stockView === "all"
+                              ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                          }`}
                         >
-                          <X className="w-3.5 h-3.5" />
+                          <Package className="w-4 h-4" /> Todos os Produtos
+                          <span className="text-xs opacity-70">{products.length}</span>
                         </button>
-                      )}
+                        <button
+                          type="button"
+                          onClick={() => setStockView("critical")}
+                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-all ${
+                            stockView === "critical"
+                              ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
+                              : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-amber-500/40"
+                          }`}
+                        >
+                          <AlertTriangle className="w-4 h-4" /> Estoque Crítico
+                          <span className={`text-xs font-bold ${lowStock.length > 0 ? "text-amber-400" : "opacity-70"}`}>{lowStock.length}</span>
+                        </button>
+                      </div>
+                      {/* Busca rápida na lista de estoque */}
+                      <div className="relative w-full sm:max-w-[220px]">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)] pointer-events-none" />
+                        <input
+                          value={stockSearch}
+                          onChange={e => setStockSearch(e.target.value)}
+                          placeholder="Buscar produto..."
+                          className="w-full h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] pl-8 pr-8 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
+                        />
+                        {stockSearch && (
+                          <button
+                            onClick={() => setStockSearch("")}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                            aria-label="Limpar busca"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="pt-4">
-                    {products.length === 0 ? (
+                    {/* ── Visão: Estoque Crítico ── */}
+                    {stockView === "critical" ? (
+                      lowStock.length === 0 ? (
+                        <div className="flex flex-col items-center py-8 gap-2">
+                          <Package className="w-8 h-8 text-emerald-400" />
+                          <p className="text-sm text-[var(--color-text-muted)]">Nenhum produto em estoque crítico. 🎉</p>
+                        </div>
+                      ) : filteredLowStock.length === 0 ? (
+                        <div className="flex flex-col items-center py-8 gap-2">
+                          <Search className="w-8 h-8 text-[var(--color-text-muted)]" />
+                          <p className="text-sm text-[var(--color-text-muted)]">Nenhum crítico encontrado para “{stockSearch}”.</p>
+                        </div>
+                      ) : (
+                        filteredLowStock.map((p, i) => {
+                          const pct = Math.min(Math.round((p.stock / Math.max(1, p.minStock)) * 100), 100);
+                          return (
+                            <div key={p.id}>
+                              <div className="flex items-center justify-between py-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-[var(--color-text-secondary)] truncate">{p.name}</p>
+                                  <p className="text-xs text-[var(--color-text-muted)]">SKU: {p.sku || "—"}</p>
+                                </div>
+                                <div className="text-right shrink-0 ml-3">
+                                  <span className={`text-sm font-bold ${p.stock <= 0 ? "text-red-400" : "text-amber-400"}`}>{p.stock} un.</span>
+                                  <p className="text-xs text-[var(--color-text-muted)]">mín: {p.minStock}</p>
+                                </div>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-[var(--color-bg-overlay)] mb-1">
+                                <div
+                                  className={`h-full rounded-full transition-all ${p.stock <= 0 ? "bg-red-400/70" : "bg-amber-400/70"}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              {i < filteredLowStock.length - 1 && <Separator className="mt-2" />}
+                            </div>
+                          );
+                        })
+                      )
+                    ) : /* ── Visão: Todos os Produtos ── */
+                    products.length === 0 ? (
                       <div className="flex flex-col items-center py-8 gap-2">
                         <Package className="w-8 h-8 text-[var(--color-text-muted)]" />
                         <p className="text-sm text-[var(--color-text-muted)]">Nenhum produto cadastrado.</p>
@@ -344,14 +391,51 @@ export default function AdminInventory() {
               {/* Recent movements */}
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
                 <Card>
-                  <CardHeader className="pb-0">
+                  <CardHeader className="pb-0 gap-3">
                     <CardTitle className="text-base">Movimentações Recentes</CardTitle>
+                    {/* Seletor por tipo de movimento */}
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setMoveFilter("all")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                          moveFilter === "all"
+                            ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                        }`}
+                      >
+                        Todas <span className="opacity-70">{movements.length}</span>
+                      </button>
+                      {(Object.keys(MOVEMENT_CONFIG) as MovementType[]).map(t => {
+                        const cfg = MOVEMENT_CONFIG[t];
+                        const Icon = cfg.icon;
+                        const count = movements.filter(m => m.type === t).length;
+                        const active = moveFilter === t;
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setMoveFilter(t)}
+                            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                              active
+                                ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
+                                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-neon-blue)]/40"
+                            }`}
+                          >
+                            <Icon className={`w-3.5 h-3.5 ${active ? "" : cfg.color}`} />
+                            {cfg.label} <span className="opacity-70">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </CardHeader>
                   <CardContent className="pt-4">
                     {movements.length === 0 ? (
                       <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação ainda.</p>
+                    ) : filteredMovements.length === 0 ? (
+                      <p className="text-sm text-[var(--color-text-muted)] text-center py-6">Nenhuma movimentação do tipo “{MOVEMENT_CONFIG[moveFilter as MovementType].label}”.</p>
                     ) : (
-                      movements.slice(0, 20).map((m, i) => {
+                      filteredMovements.slice(0, 20).map((m, i) => {
                         const cfg = MOVEMENT_CONFIG[m.type];
                         const Icon = cfg.icon;
                         const isPositive = m.type === "in" || m.type === "adjustment";
@@ -380,7 +464,7 @@ export default function AdminInventory() {
                                 </span>
                               </div>
                             </div>
-                            {i < Math.min(movements.length, 20) - 1 && <Separator />}
+                            {i < Math.min(filteredMovements.length, 20) - 1 && <Separator />}
                           </div>
                         );
                       })
