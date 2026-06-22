@@ -16,6 +16,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
+import { MiniCalculator } from "@/components/admin/MiniCalculator";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
@@ -1731,6 +1732,9 @@ export default function AdminSales() {
           </div>
         )}
       </div>
+
+      {/* Mini calculadora flutuante — só na aba Histórico (mimo para o balcão) */}
+      {tab === "history" && <MiniCalculator />}
 
       {/* Confirmação do reset — exige digitar ZERAR */}
       <Dialog open={resetOpen} onOpenChange={(v) => { if (!resetting) { setResetOpen(v); if (!v) setResetConfirm(""); } }}>
