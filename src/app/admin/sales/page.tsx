@@ -1733,8 +1733,8 @@ export default function AdminSales() {
         )}
       </div>
 
-      {/* Mini calculadora flutuante — só na aba Histórico (mimo para o balcão) */}
-      {tab === "history" && <MiniCalculator />}
+      {/* Mini calculadora flutuante — nas duas abas (mimo para o balcão) */}
+      <MiniCalculator />
 
       {/* Confirmação do reset — exige digitar ZERAR */}
       <Dialog open={resetOpen} onOpenChange={(v) => { if (!resetting) { setResetOpen(v); if (!v) setResetConfirm(""); } }}>
