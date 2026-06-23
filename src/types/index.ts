@@ -641,8 +641,33 @@ export interface Commission {
 /* ── Report (problema reportado por usuário) ─────────────── */
 export type ReportStatus = "open" | "resolved";
 
+/** Tipo do problema reportado, para classificar e priorizar. */
+export type ReportCategory = "bug" | "payment" | "visual" | "suggestion" | "other";
+
+/** Contexto técnico capturado automaticamente no momento do reporte. */
+export interface ReportContext {
+  /** URL completa, com query string (ex.: "https://.../checkout?id=123"). */
+  fullUrl?: string;
+  /** Tamanho da janela visível (ex.: "1280×720"). */
+  viewport?: string;
+  /** Resolução da tela do aparelho (ex.: "1920×1080"). */
+  screen?: string;
+  /** Idioma do navegador (ex.: "pt-BR"). */
+  language?: string;
+  /** Plataforma/sistema (ex.: "Win32", "iPhone"). */
+  platform?: string;
+  /** Fuso horário do usuário (ex.: "America/Sao_Paulo"). */
+  timezone?: string;
+  /** Página de onde o usuário veio, se houver. */
+  referrer?: string;
+  /** Se o aparelho estava online ao reportar. */
+  online?: boolean;
+}
+
 export interface Report {
   id: string;
+  /** Tipo do problema. Reportes antigos podem não ter (tratar como "other"). */
+  category?: ReportCategory;
   /** Descrição do problema escrita pelo usuário. */
   message: string;
   /** Rota onde o usuário estava ao reportar (ex.: "/checkout"). */
@@ -653,6 +678,8 @@ export interface Report {
   userEmail?: string;
   /** Navegador/dispositivo, para ajudar a reproduzir o erro. */
   userAgent?: string;
+  /** Contexto técnico automático para ajudar a reproduzir o problema. */
+  context?: ReportContext;
   status: ReportStatus;
   createdAt: string;
 }

@@ -1,15 +1,19 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { motion } from "framer-motion";
-import { MessageSquareWarning, CheckCircle, RotateCcw, Trash2, User, ExternalLink, RefreshCw } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  MessageSquareWarning, CheckCircle, RotateCcw, Trash2, User, ExternalLink, RefreshCw,
+  ChevronDown, Globe, Monitor, Smartphone, Languages, Clock, Wifi, WifiOff, CornerDownRight, Copy,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { getReports, updateReportStatus, deleteReport } from "@/lib/firebase/reports";
 import { formatDateTime } from "@/lib/utils";
 import { toast } from "@/stores/toastStore";
-import type { Report, ReportStatus } from "@/types";
+import { REPORT_CATEGORIES, REPORT_CATEGORY_BY_VALUE } from "@/lib/reports-meta";
+import type { Report, ReportStatus, ReportCategory } from "@/types";
 
 const FILTERS: { value: ReportStatus | "all"; label: string }[] = [
   { value: "open",     label: "Abertos" },
@@ -21,7 +25,9 @@ export default function AdminReports() {
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ReportStatus | "all">("open");
+  const [catFilter, setCatFilter] = useState<ReportCategory | "all">("all");
   const [actionId, setActionId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,7 +43,44 @@ export default function AdminReports() {
   useEffect(() => { load(); }, [load]);
 
   const openCount = useMemo(() => reports.filter((r) => r.status === "open").length, [reports]);
-  const filtered = filter === "all" ? reports : reports.filter((r) => r.status === filter);
+  const filtered = useMemo(
+    () =>
+      reports
+        .filter((r) => filter === "all" || r.status === filter)
+        .filter((r) => catFilter === "all" || (r.category ?? "other") === catFilter),
+    [reports, filter, catFilter]
+  );
+
+  function toggleExpanded(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function copyDetails(r: Report) {
+    const lines = [
+      `Categoria: ${REPORT_CATEGORY_BY_VALUE[r.category ?? "other"].label}`,
+      `Mensagem: ${r.message}`,
+      `Página: ${r.context?.fullUrl ?? r.page}`,
+      `Usuário: ${r.userName ? `${r.userName}${r.userEmail ? ` (${r.userEmail})` : ""}` : "Visitante"}`,
+      `Quando: ${formatDateTime(r.createdAt)}`,
+      r.context?.viewport && `Janela: ${r.context.viewport}`,
+      r.context?.screen && `Tela: ${r.context.screen}`,
+      r.context?.platform && `Plataforma: ${r.context.platform}`,
+      r.context?.language && `Idioma: ${r.context.language}`,
+      r.context?.timezone && `Fuso: ${r.context.timezone}`,
+      r.context?.referrer && `Veio de: ${r.context.referrer}`,
+      r.userAgent && `User-Agent: ${r.userAgent}`,
+    ].filter(Boolean);
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      toast.success("Detalhes copiados.");
+    } catch {
+      toast.error("Não foi possível copiar.");
+    }
+  }
 
   async function setStatus(id: string, status: ReportStatus) {
     setActionId(id);
@@ -83,8 +126,8 @@ export default function AdminReports() {
           }
         />
 
-        {/* Filtros */}
-        <div className="flex gap-2 mb-6">
+        {/* Filtros por status */}
+        <div className="flex gap-2 mb-3">
           {FILTERS.map((f) => (
             <button
               key={f.value}
@@ -100,6 +143,40 @@ export default function AdminReports() {
           ))}
         </div>
 
+        {/* Filtros por categoria */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          <button
+            onClick={() => setCatFilter("all")}
+            className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-all ${
+              catFilter === "all"
+                ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)] border border-[var(--color-neon-blue)]/40"
+                : "border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+            }`}
+          >
+            Todas as categorias
+          </button>
+          {REPORT_CATEGORIES.map((c) => {
+            const Icon = c.icon;
+            const active = catFilter === c.value;
+            const count = reports.filter((r) => (r.category ?? "other") === c.value).length;
+            return (
+              <button
+                key={c.value}
+                onClick={() => setCatFilter(c.value)}
+                className={`inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium transition-all ${
+                  active
+                    ? "bg-[var(--color-bg-overlay)] text-[var(--color-text-primary)] border border-[var(--color-neon-blue)]/40"
+                    : "border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {c.label}
+                <span className="opacity-60">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {loading ? (
           <p className="text-sm text-[var(--color-text-muted)]">Carregando reportes...</p>
         ) : filtered.length === 0 ? (
@@ -113,7 +190,24 @@ export default function AdminReports() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {filtered.map((r, i) => (
+            {filtered.map((r, i) => {
+              const cat = REPORT_CATEGORY_BY_VALUE[r.category ?? "other"];
+              const CatIcon = cat.icon;
+              const isOpen = expanded.has(r.id);
+              const ctx = r.context;
+              const techRows = [
+                ctx?.fullUrl  && { icon: Globe,           label: "URL completa", value: ctx.fullUrl, mono: true },
+                ctx?.viewport && { icon: Monitor,         label: "Janela",       value: ctx.viewport },
+                ctx?.screen   && { icon: Monitor,         label: "Tela",         value: ctx.screen },
+                ctx?.platform && { icon: Smartphone,      label: "Plataforma",   value: ctx.platform },
+                ctx?.language && { icon: Languages,       label: "Idioma",       value: ctx.language },
+                ctx?.timezone && { icon: Clock,           label: "Fuso horário", value: ctx.timezone },
+                ctx?.referrer && { icon: CornerDownRight, label: "Veio de",      value: ctx.referrer, mono: true },
+                r.userAgent   && { icon: Monitor,         label: "User-Agent",   value: r.userAgent, mono: true },
+              ].filter(Boolean) as { icon: typeof Globe; label: string; value: string; mono?: boolean }[];
+              const hasTech = techRows.length > 0 || ctx?.online !== undefined;
+
+              return (
               <motion.div
                 key={r.id}
                 initial={{ opacity: 0, y: 10 }}
@@ -127,8 +221,11 @@ export default function AdminReports() {
                         <Badge variant={r.status === "open" ? "warning" : "success"}>
                           {r.status === "open" ? "Aberto" : "Resolvido"}
                         </Badge>
+                        <Badge variant={cat.badge}>
+                          <CatIcon className="w-3 h-3" /> {cat.label}
+                        </Badge>
                         <a
-                          href={r.page}
+                          href={r.context?.fullUrl ?? r.page}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-xs font-mono text-[var(--color-neon-blue)] hover:underline"
@@ -146,8 +243,58 @@ export default function AdminReports() {
                         <User className="w-3 h-3" />
                         {r.userName ? `${r.userName}${r.userEmail ? ` · ${r.userEmail}` : ""}` : "Visitante (não logado)"}
                       </span>
-                      {r.userAgent && <span className="truncate max-w-[240px]" title={r.userAgent}>{r.userAgent}</span>}
+                      {ctx?.online !== undefined && (
+                        <span className="inline-flex items-center gap-1">
+                          {ctx.online ? <Wifi className="w-3 h-3 text-[var(--color-success)]" /> : <WifiOff className="w-3 h-3 text-[var(--color-error)]" />}
+                          {ctx.online ? "Online" : "Offline"}
+                        </span>
+                      )}
                     </div>
+
+                    {/* Detalhes técnicos — capturados automaticamente no envio. */}
+                    {hasTech && (
+                      <div className="mb-3">
+                        <button
+                          onClick={() => toggleExpanded(r.id)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                        >
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                          Detalhes técnicos
+                        </button>
+                        <AnimatePresence initial={false}>
+                          {isOpen && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                                {techRows.map((row) => {
+                                  const RowIcon = row.icon;
+                                  return (
+                                    <div key={row.label} className="flex items-start gap-2 min-w-0">
+                                      <RowIcon className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0 mt-0.5" />
+                                      <div className="min-w-0">
+                                        <p className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">{row.label}</p>
+                                        <p className={`text-xs text-[var(--color-text-secondary)] break-all ${row.mono ? "font-mono" : ""}`}>{row.value}</p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <button
+                                onClick={() => copyDetails(r)}
+                                className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] transition-colors"
+                              >
+                                <Copy className="w-3 h-3" /> Copiar detalhes
+                              </button>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
 
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {r.status === "open" ? (
@@ -178,7 +325,8 @@ export default function AdminReports() {
                   </CardContent>
                 </Card>
               </motion.div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
