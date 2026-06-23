@@ -19,7 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useSitePayment } from "@/stores/siteSettingsStore";
+import { useSitePayment, useSiteCart } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus } from "@/lib/firebase/orders";
 import { getProducts } from "@/lib/firebase/products";
@@ -60,7 +60,7 @@ function maskPhone(v: string) {
 }
 
 /* ── Store contact ───────────────────────────────────────── */
-const STORE_WHATSAPP = "558399020606"; // número oficial da loja (somente dígitos, com DDI)
+const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente dígitos, com DDI)
 
 /* ── Payment options ─────────────────────────────────────── */
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
@@ -365,6 +365,7 @@ export default function CheckoutPage() {
   const cartStore = useCartStore();
   const { items, subtotal, clearCart, closeCart } = cartStore;
   const { pixKey, pixName, creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
+  const { freeShippingEnabled, freeShippingThreshold } = useSiteCart();
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
@@ -549,8 +550,13 @@ export default function CheckoutPage() {
   }
 
   const isPickup = fulfillment === "pickup";
-  // Frete por bairro: na retirada é grátis; na entrega vem da área selecionada.
-  const effectiveDeliveryFee = isPickup ? 0 : (selectedArea?.fee ?? 0);
+  // Frete grátis por valor de compra: ligado pelo dono em Configurações e o
+  // subtotal de produtos atinge o limite. Vale na entrega (retirada já é grátis).
+  const qualifiesFreeShipping =
+    freeShippingEnabled && freeShippingThreshold > 0 && subtotal >= freeShippingThreshold;
+  // Frete por bairro: na retirada é grátis; na entrega vem da área selecionada,
+  // salvo quando o pedido se qualifica para frete grátis (aí zera).
+  const effectiveDeliveryFee = isPickup || qualifiesFreeShipping ? 0 : (selectedArea?.fee ?? 0);
   // Diferença de preço no cartão (Lei nº 13.455/2017): incide no crédito e no
   // débito; positiva = acréscimo, negativa = desconto. Aplica sobre subtotal+frete.
   // No crédito parcelado (2x+), a taxa vem da tabela de parcelamento; à vista (1x)
@@ -1329,11 +1335,11 @@ export default function CheckoutPage() {
                       {isPickup ? "Retirada" : "Entrega"}
                       {!isPickup && selectedArea ? ` · ${selectedArea.name}` : ""}
                     </span>
-                    <span className={isPickup ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
+                    <span className={isPickup || (selectedArea && qualifiesFreeShipping) ? "text-[var(--color-success)] font-medium" : "text-[var(--color-text-secondary)]"}>
                       {isPickup
                         ? "Grátis"
                         : selectedArea
-                        ? formatCurrency(effectiveDeliveryFee)
+                        ? (qualifiesFreeShipping ? "Grátis 🎉" : formatCurrency(effectiveDeliveryFee))
                         : "Selecione o bairro"}
                     </span>
                   </div>

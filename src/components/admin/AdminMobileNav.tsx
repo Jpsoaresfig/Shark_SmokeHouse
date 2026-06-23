@@ -25,7 +25,7 @@ const ADMIN_MORE_LINKS = [
   { href: "/admin/users",    label: "Usuários",    icon: Users          },
   { href: "/admin/coupons",  label: "Cupons",      icon: Ticket         },
   { href: "/admin/delivery", label: "Frete",       icon: Bike           },
-  { href: "/admin/sections", label: "Seções",      icon: LayoutDashboard },
+  { href: "/admin/sections", label: "Vitrine",     icon: LayoutDashboard },
   { href: "/admin/events",   label: "Eventos",     icon: PartyPopper    },
   { href: "/admin/payments", label: "Pagamentos",  icon: QrCode         },
   { href: "/admin/lounge",   label: "Lounge",      icon: CalendarDays   },

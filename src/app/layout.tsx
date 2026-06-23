@@ -6,6 +6,7 @@ import { Footer } from "@/components/layout/Footer";
 import { MobileNav } from "@/components/layout/MobileNav";
 import { CartDrawer } from "@/components/shop/CartDrawer";
 import { ReportButton } from "@/components/ReportButton";
+import { PromoPopup } from "@/components/PromoPopup";
 import { AgeGate } from "@/components/AgeGate";
 import { FirebaseAnalytics } from "@/components/FirebaseAnalytics";
 import { AuthProvider } from "@/providers/AuthProvider";
@@ -69,6 +70,7 @@ export default function RootLayout({
           <MobileNav />
           <CartDrawer />
           <ReportButton />
+          <PromoPopup />
           <Toaster />
         </AuthProvider>
       </body>

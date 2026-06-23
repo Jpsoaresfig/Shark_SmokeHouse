@@ -122,9 +122,20 @@ function CatalogContent() {
   useEffect(() => {
     getActiveProducts()
       // "Exibição destacada" primeiro (sort estável mantém a ordem por data).
-      .then((all) => setProducts(
-        [...all].sort((a, b) => Number(b.storeHighlight ?? false) - Number(a.storeHighlight ?? false)),
-      ))
+      .then((all) => {
+        const sorted = [...all].sort(
+          (a, b) => Number(b.storeHighlight ?? false) - Number(a.storeHighlight ?? false),
+        );
+        setProducts(sorted);
+        // Deep-link ?produto=<id|slug>: abre o modal do produto direto. Usado pelo
+        // popup promocional ("ir direto para o produto"). Lido de window.location
+        // para não acoplar este efeito de carga única ao searchParams.
+        const param = new URLSearchParams(window.location.search).get("produto");
+        if (param) {
+          const found = sorted.find((p) => p.id === param || p.slug === param);
+          if (found) setSelectedProduct(found);
+        }
+      })
       .finally(() => setLoading(false));
     getCategories().then(setCats).catch(() => {});
   }, []);

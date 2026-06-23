@@ -20,6 +20,18 @@ const DEFAULT_SETTINGS: SiteSettings = {
     debitFeePercent: 0,
     creditInstallmentFees: DEFAULT_INSTALLMENT_FEES,
   },
+  cart: {
+    freeShippingEnabled: true,
+    freeShippingThreshold: 150,
+  },
+  promoPopup: {
+    enabled: false,
+    title: "",
+    message: "",
+    imageUrl: "",
+    ctaLabel: "Quero aproveitar",
+    linkUrl: "/catalog",
+  },
 };
 
 export async function getSiteSettings(): Promise<SiteSettings> {
@@ -41,6 +53,20 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       debitFeePercent: data.payment?.debitFeePercent ?? 0,
       creditInstallmentFees:
         data.payment?.creditInstallmentFees ?? DEFAULT_INSTALLMENT_FEES,
+    },
+    cart: {
+      freeShippingEnabled:
+        data.cart?.freeShippingEnabled ?? DEFAULT_SETTINGS.cart.freeShippingEnabled,
+      freeShippingThreshold:
+        data.cart?.freeShippingThreshold ?? DEFAULT_SETTINGS.cart.freeShippingThreshold,
+    },
+    promoPopup: {
+      enabled: data.promoPopup?.enabled ?? DEFAULT_SETTINGS.promoPopup.enabled,
+      title: data.promoPopup?.title ?? "",
+      message: data.promoPopup?.message ?? "",
+      imageUrl: data.promoPopup?.imageUrl ?? "",
+      ctaLabel: data.promoPopup?.ctaLabel ?? DEFAULT_SETTINGS.promoPopup.ctaLabel,
+      linkUrl: data.promoPopup?.linkUrl ?? DEFAULT_SETTINGS.promoPopup.linkUrl,
     },
   };
 }

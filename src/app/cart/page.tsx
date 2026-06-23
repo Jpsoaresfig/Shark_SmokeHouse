@@ -8,14 +8,18 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useCartStore } from "@/stores/cartStore";
+import { useSiteCart } from "@/stores/siteSettingsStore";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { CartPerks } from "@/components/shop/CartPerks";
 import { formatCurrency } from "@/lib/utils";
 
 export default function CartPage() {
   const cartStore = useCartStore();
   const { items, removeItem, updateQuantity, clearCart, subtotal, total, itemCount } = cartStore;
+  const { freeShippingEnabled, freeShippingThreshold } = useSiteCart();
+  const freeShipping = freeShippingEnabled && freeShippingThreshold > 0 && subtotal >= freeShippingThreshold;
 
   /* Evita mismatch de hidratação: o carrinho vem do localStorage (persist), então
      só renderizamos o conteúdo dependente dos itens depois de montar no cliente. */
@@ -185,6 +189,8 @@ export default function CartPage() {
             <CardContent className="p-5 space-y-4">
               <h2 className="text-sm font-bold text-[var(--color-text-primary)]">Resumo do Pedido</h2>
 
+              {mounted && <CartPerks subtotal={subtotal} />}
+
               <div className="space-y-2">
                 <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
                   <span>Subtotal</span>
@@ -192,11 +198,17 @@ export default function CartPage() {
                 </div>
                 <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
                   <span>Entrega</span>
-                  <span className="text-[var(--color-text-muted)]">calculada no checkout</span>
+                  {mounted && freeShipping ? (
+                    <span className="text-[var(--color-success)] font-medium">Grátis 🎉</span>
+                  ) : (
+                    <span className="text-[var(--color-text-muted)]">calculada no checkout</span>
+                  )}
                 </div>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  O frete depende do seu bairro e aparece ao finalizar o pedido.
-                </p>
+                {!(mounted && freeShipping) && (
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    O frete depende do seu bairro e aparece ao finalizar o pedido.
+                  </p>
+                )}
                 <Separator />
                 <div className="flex justify-between font-semibold text-[var(--color-text-primary)]">
                   <span>Total</span>

@@ -5,13 +5,17 @@ import { X, ShoppingBag, Minus, Plus, Trash2, ArrowRight, Package } from "lucide
 import Image from "next/image";
 import Link from "next/link";
 import { useCartStore } from "@/stores/cartStore";
+import { useSiteCart } from "@/stores/siteSettingsStore";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { CartPerks } from "@/components/shop/CartPerks";
 import { formatCurrency } from "@/lib/utils";
 
 export function CartDrawer() {
   const cartStore = useCartStore();
   const { items, isOpen, closeCart, removeItem, updateQuantity, subtotal, total } = cartStore;
+  const { freeShippingEnabled, freeShippingThreshold } = useSiteCart();
+  const freeShipping = freeShippingEnabled && freeShippingThreshold > 0 && subtotal >= freeShippingThreshold;
 
   return (
     <AnimatePresence>
@@ -161,6 +165,7 @@ export function CartDrawer() {
             {/* Footer / Summary */}
             {items.length > 0 && (
               <div className="border-t border-[var(--color-border)] px-6 py-5 space-y-4">
+                <CartPerks subtotal={subtotal} />
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
                     <span>Subtotal</span>
@@ -168,11 +173,17 @@ export function CartDrawer() {
                   </div>
                   <div className="flex justify-between text-sm text-[var(--color-text-secondary)]">
                     <span>Entrega</span>
-                    <span className="text-[var(--color-text-muted)]">calculada no checkout</span>
+                    {freeShipping ? (
+                      <span className="text-[var(--color-success)] font-medium">Grátis 🎉</span>
+                    ) : (
+                      <span className="text-[var(--color-text-muted)]">calculada no checkout</span>
+                    )}
                   </div>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    O frete depende do seu bairro e aparece ao finalizar o pedido.
-                  </p>
+                  {!freeShipping && (
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      O frete depende do seu bairro e aparece ao finalizar o pedido.
+                    </p>
+                  )}
                   <Separator />
                   <div className="flex justify-between font-semibold text-[var(--color-text-primary)]">
                     <span>Total</span>

@@ -472,6 +472,29 @@ export interface SiteSettings {
      *  1x = à vista (direto), sem taxa de parcelamento (usa creditFeePercent). */
     creditInstallmentFees?: InstallmentFee[];
   };
+  /** Regras do carrinho/checkout configuráveis pelo admin. */
+  cart: {
+    /** Liga a barra de "frete grátis" no carrinho e zera o frete no checkout
+     *  quando o subtotal atinge o limite. O dono pode desligar quando quiser. */
+    freeShippingEnabled: boolean;
+    /** Subtotal mínimo (R$) de produtos para o frete grátis valer. */
+    freeShippingThreshold: number;
+  };
+  /** Popup promocional exibido na loja (configurável pelo admin). */
+  promoPopup: {
+    /** Liga/desliga o popup no site. */
+    enabled: boolean;
+    /** Chamada em destaque (ex.: "IMPERDÍVEL"). */
+    title: string;
+    /** Texto da promoção (ex.: "Essa seda por R$20!"). */
+    message: string;
+    /** Imagem opcional do banner do popup. */
+    imageUrl?: string;
+    /** Rótulo do botão de ação (ex.: "Quero aproveitar"). */
+    ctaLabel?: string;
+    /** Destino do botão: caminho interno (ex.: /catalog?produto=<id>) ou URL. */
+    linkUrl?: string;
+  };
   updatedAt?: string;
 }
 

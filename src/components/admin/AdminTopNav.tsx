@@ -22,7 +22,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/receivables", label: "A Receber",   icon: CircleDollarSign },
   { href: "/admin/financial", label: "Financeiro",    icon: PiggyBank },
   { href: "/admin/delivery",  label: "Frete",         icon: Bike },
-  { href: "/admin/sections",  label: "Seções",        icon: LayoutDashboard },
+  { href: "/admin/sections",  label: "Vitrine",       icon: LayoutDashboard },
   { href: "/admin/events",    label: "Eventos",       icon: PartyPopper },
   { href: "/admin/payments",  label: "Pagamentos",    icon: QrCode },
   { href: "/admin/lounge",    label: "Agenda Lounge", icon: CalendarDays },
