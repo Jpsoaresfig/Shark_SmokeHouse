@@ -5,22 +5,24 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Star, Copy, Check, Gift, TrendingUp, Users,
   Sparkles, ArrowUpRight, ArrowDownLeft, Clock,
-  LogIn, ChevronRight, Zap,
+  LogIn, ChevronRight, Zap, User, Mail, Phone, CreditCard, Save,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import {
   getLoyaltyTransactions, getLoyaltyRewards, redeemReward,
 } from "@/lib/firebase/loyalty";
-import { getUserProfile } from "@/lib/firebase/users";
+import { getUserProfile, updateUserProfile } from "@/lib/firebase/users";
+import { formatCpf } from "@/lib/cpf";
 import { formatDateTime } from "@/lib/utils";
 import { LoyaltyProgramModal } from "@/components/account/LoyaltyProgramModal";
 import { getLevel, getNextLevel, getLevelProgress, REFERRAL_BONUS_POINTS } from "@/lib/loyalty/levels";
-import type { LoyaltyTransaction, LoyaltyReward } from "@/types";
+import type { LoyaltyTransaction, LoyaltyReward, UserProfile } from "@/types";
 
 /* ── Tier helpers (níveis reais do Clube Shark — engine única) ── */
 const getTier = getLevel;
@@ -166,6 +168,120 @@ function RewardCard({
   );
 }
 
+/* ── Aba: editar perfil ──────────────────────────────────── */
+function ProfileTab({ user, onSaved }: { user: UserProfile; onSaved: (u: UserProfile) => void }) {
+  const [displayName, setDisplayName] = useState(user.displayName ?? "");
+  const [phone, setPhone] = useState(user.phone ?? "");
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!displayName.trim()) {
+      toast.error("Informe o seu nome.");
+      return;
+    }
+    setSaving(true);
+    try {
+      // CPF não é alterável pelo cliente (gate dos pontos) — só pela loja.
+      await updateUserProfile(user.uid, {
+        displayName: displayName.trim(),
+        phone: phone.trim(),
+      });
+      onSaved({
+        ...user,
+        displayName: displayName.trim(),
+        phone: phone.trim(),
+      });
+      toast.success("Perfil atualizado!");
+    } catch (e) {
+      toast.error((e as Error).message ?? "Erro ao salvar. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const birth = user.birthDate ? user.birthDate.split("-").reverse().join("/") : null;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+      <Card>
+        <CardContent className="p-6 space-y-5">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-[var(--color-neon-blue-glow)] flex items-center justify-center">
+              <User className="w-4 h-4 text-[var(--color-neon-blue)]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Dados pessoais</h3>
+              <p className="text-xs text-[var(--color-text-muted)]">Atualize seu nome, telefone e CPF.</p>
+            </div>
+          </div>
+
+          {/* E-mail (somente leitura) */}
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">E-mail</label>
+            <div className="mt-1.5 flex items-center gap-2 px-3 py-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)]/50 text-sm text-[var(--color-text-muted)]">
+              <Mail className="w-4 h-4 shrink-0" />
+              <span className="truncate">{user.email}</span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1.5">O e-mail de acesso não pode ser alterado.</p>
+          </div>
+
+          <Input
+            label="Nome completo"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            icon={<User className="w-4 h-4" />}
+            placeholder="Seu nome"
+          />
+
+          <Input
+            label="Telefone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            icon={<Phone className="w-4 h-4" />}
+            placeholder="(83) 90000-0000"
+            inputMode="tel"
+          />
+
+          {/* CPF — somente leitura: alterações apenas mediante solicitação à loja */}
+          <div>
+            <label className="text-sm font-medium text-[var(--color-text-secondary)]">CPF</label>
+            <div className="mt-1.5 flex items-center gap-2 px-3 py-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)]/50 text-sm text-[var(--color-text-muted)]">
+              <CreditCard className="w-4 h-4 shrink-0" />
+              <span className="truncate">{user.cpf ? formatCpf(user.cpf) : "Não informado"}</span>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+              Para cadastrar ou alterar o CPF, fale com a loja. (Necessário para acumular pontos do Clube Shark.)
+            </p>
+          </div>
+
+          {birth && (
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)]">Data de nascimento</label>
+              <p className="mt-1.5 text-sm text-[var(--color-text-secondary)]">
+                {birth} <span className="text-[var(--color-text-muted)]">(não editável)</span>
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-1">
+            <Button onClick={save} disabled={saving} className="min-w-36">
+              {saving ? (
+                <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Salvando...</>
+              ) : (
+                <><Save className="w-4 h-4" /> Salvar alterações</>
+              )}
+            </Button>
+          </div>
+
+          <p className="text-xs text-[var(--color-text-muted)] border-t border-[var(--color-border)] pt-4">
+            Seus endereços de entrega são gerenciados ao finalizar um pedido, no checkout.
+          </p>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 /* ── Main page ───────────────────────────────────────────── */
 export default function AccountPage() {
   const { user: storeUser, setUser, firebaseReady } = useAuthStore();
@@ -175,6 +291,7 @@ export default function AccountPage() {
   const [loadingTx, setLoadingTx] = useState(true);
   const [loadingRewards, setLoadingRewards] = useState(true);
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"clube" | "perfil">("clube");
 
   // Depende só do `uid` (não do objeto storeUser inteiro): senão setUser → muda
   // storeUser → recria load → re-roda o efeito → loop infinito de carregamento
@@ -285,6 +402,30 @@ export default function AccountPage() {
           <LoyaltyProgramModal />
         </motion.div>
 
+        {/* Abas: Clube Fidelidade / Meu Perfil */}
+        <div className="flex gap-2 mb-6">
+          {([
+            { v: "clube" as const, label: "Clube Fidelidade" },
+            { v: "perfil" as const, label: "Meu Perfil" },
+          ]).map((t) => (
+            <button
+              key={t.v}
+              onClick={() => setTab(t.v)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                tab === t.v
+                  ? "bg-[var(--color-neon-blue)] text-white"
+                  : "border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "perfil" && <ProfileTab user={storeUser} onSaved={setUser} />}
+
+        {tab === "clube" && (
+        <>
         {/* Points + tier card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -511,6 +652,8 @@ export default function AccountPage() {
             </>
           )}
         </motion.div>
+        </>
+        )}
 
         {redeemingId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">

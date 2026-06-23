@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import {
-  getAllUsers, createUserWithRole, updateUserRole, updateUserCommission, deleteUserProfile,
+  getAllUsers, createUserWithRole, updateUserProfile, updateUserRole, updateUserCommission, deleteUserProfile,
 } from "@/lib/firebase/users";
 import { adjustLoyaltyPoints } from "@/lib/firebase/loyalty";
 import { getLevel } from "@/lib/loyalty/levels";
@@ -204,36 +204,66 @@ function CreateUserModal({ onClose, onCreated }: {
   );
 }
 
-/* ── Edit role modal ─────────────────────────────────────── */
-function EditRoleModal({ user, onClose, onUpdated }: {
+/* ── Edit user modal (admin altera TODOS os dados) ───────── */
+function EditUserModal({ user, onClose, onUpdated }: {
   user: UserProfile;
   onClose: () => void;
-  onUpdated: (uid: string, role: UserRole, commissionRate?: number) => void;
+  onUpdated: (uid: string, patch: Partial<UserProfile>) => void;
 }) {
+  const [name, setName] = useState(user.displayName ?? "");
+  const [phone, setPhone] = useState(user.phone ?? "");
+  const [cpf, setCpf] = useState(user.cpf ? formatCpf(user.cpf) : "");
   const [role, setRole] = useState<UserRole>(user.role);
   const [commission, setCommission] = useState(
     user.commissionRate != null ? String(user.commissionRate) : ""
   );
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSave = async () => {
+    setError("");
+    if (!name.trim()) { setError("Informe o nome do usuário."); return; }
+    const cpfDigits = onlyDigits(cpf);
+    if (cpfDigits && !isValidCpf(cpfDigits)) {
+      setError("CPF inválido. Confira os números ou deixe em branco.");
+      return;
+    }
     // Comissão desejada: só vale para vendedor; vazio/null remove.
     const desiredRate =
       role === "seller" && commission.trim() !== "" ? Number(commission) : null;
     const roleChanged = role !== user.role;
     const rateChanged = (desiredRate ?? null) !== (user.commissionRate ?? null);
+    const profileChanged =
+      name.trim() !== (user.displayName ?? "") ||
+      phone.trim() !== (user.phone ?? "") ||
+      cpfDigits !== (user.cpf ?? "");
 
-    if (!roleChanged && !rateChanged) { onClose(); return; }
+    if (!roleChanged && !rateChanged && !profileChanged) { onClose(); return; }
     setLoading(true);
     try {
-      if (roleChanged) await updateUserRole(user.uid, role);
+      const patch: Partial<UserProfile> = {};
+      if (profileChanged) {
+        await updateUserProfile(user.uid, {
+          displayName: name.trim(),
+          phone: phone.trim(),
+          cpf: cpfDigits,
+        });
+        patch.displayName = name.trim();
+        patch.phone = phone.trim();
+        patch.cpf = cpfDigits || undefined;
+      }
+      if (roleChanged) {
+        await updateUserRole(user.uid, role);
+        patch.role = role;
+      }
       if (rateChanged || (roleChanged && role !== "seller")) {
         await updateUserCommission(user.uid, desiredRate);
+        patch.commissionRate = desiredRate ?? undefined;
       }
-      toast.success("Perfil do usuário atualizado!");
-      onUpdated(user.uid, role, desiredRate ?? undefined);
-    } catch {
-      toast.error("Erro ao atualizar perfil. Tente novamente.");
+      toast.success("Usuário atualizado!");
+      onUpdated(user.uid, patch);
+    } catch (e) {
+      setError((e as Error).message ?? "Erro ao atualizar. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -248,25 +278,59 @@ function EditRoleModal({ user, onClose, onUpdated }: {
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
         transition={{ type: "spring", damping: 20 }}
-        className="w-full max-w-sm rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)] p-6"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)] p-6"
       >
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-bold text-[var(--color-text-primary)]">Alterar Perfil</h2>
+          <h2 className="text-base font-bold text-[var(--color-text-primary)]">Editar Usuário</h2>
           <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
 
+        {/* E-mail (identidade de acesso, não editável) */}
         <div className="flex items-center gap-3 p-3 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] mb-5">
           <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] flex items-center justify-center text-sm font-bold text-white shrink-0">
-            {user.displayName?.[0]?.toUpperCase()}
+            {(name || user.displayName)?.[0]?.toUpperCase() ?? "?"}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{user.displayName}</p>
-            <p className="text-xs text-[var(--color-text-muted)] truncate">{user.email}</p>
+            <p className="text-xs text-[var(--color-text-muted)]">E-mail (não editável)</p>
+            <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{user.email}</p>
           </div>
         </div>
 
+        {/* Dados pessoais */}
+        <div className="space-y-4 mb-5">
+          <Input
+            label="Nome completo"
+            icon={<User className="w-4 h-4" />}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Input
+              label="Telefone"
+              type="tel"
+              icon={<Phone className="w-4 h-4" />}
+              placeholder="(83) 99999-9999"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+            <Input
+              label="CPF"
+              inputMode="numeric"
+              maxLength={14}
+              icon={<User className="w-4 h-4" />}
+              placeholder="000.000.000-00"
+              value={cpf}
+              onChange={(e) => setCpf(formatCpf(e.target.value))}
+            />
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Perfil de acesso */}
+        <p className="text-sm font-medium text-[var(--color-text-secondary)] mt-5 mb-2">Perfil de acesso</p>
         <div className="space-y-2 mb-5">
           {creatableRoles.map((r) => {
             const Icon = r.icon;
@@ -307,8 +371,15 @@ function EditRoleModal({ user, onClose, onUpdated }: {
           </div>
         )}
 
+        {error && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-[var(--color-error)]/30 bg-red-500/10 px-3 py-2.5 mb-5">
+            <AlertCircle className="w-4 h-4 text-[var(--color-error)] shrink-0" />
+            <p className="text-sm text-[var(--color-error)]">{error}</p>
+          </div>
+        )}
+
         <div className="flex gap-3">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>Cancelar</Button>
+          <Button variant="secondary" className="flex-1" onClick={onClose} disabled={loading}>Cancelar</Button>
           <Button variant="premium" className="flex-1" onClick={handleSave} disabled={loading}>
             {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : "Salvar"}
           </Button>
@@ -542,8 +613,8 @@ export default function AdminUsersPage() {
     setShowCreate(false);
   };
 
-  const handleRoleUpdated = (uid: string, newRole: UserRole, commissionRate?: number) => {
-    setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, role: newRole, commissionRate } : u));
+  const handleUserUpdated = (uid: string, patch: Partial<UserProfile>) => {
+    setUsers((prev) => prev.map((u) => u.uid === uid ? { ...u, ...patch } : u));
     setEditingUser(null);
   };
 
@@ -757,7 +828,7 @@ export default function AdminUsersPage() {
 
       <AnimatePresence>
         {showCreate && <CreateUserModal onClose={() => setShowCreate(false)} onCreated={handleCreated} />}
-        {editingUser && <EditRoleModal user={editingUser} onClose={() => setEditingUser(null)} onUpdated={handleRoleUpdated} />}
+        {editingUser && <EditUserModal user={editingUser} onClose={() => setEditingUser(null)} onUpdated={handleUserUpdated} />}
         {adjustingUser && (
           <AdjustPointsModal
             user={adjustingUser}

@@ -2,12 +2,15 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Megaphone, Plus, Trash2, Eye, EyeOff, Pencil, X, Save, RefreshCw } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Megaphone, Plus, Trash2, Eye, EyeOff, Pencil, Save, RefreshCw } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import {
   getAllAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
@@ -22,6 +25,7 @@ export default function AdminAnnouncements() {
   const [list, setList] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
 
@@ -51,10 +55,20 @@ export default function AdminAnnouncements() {
     setForm(EMPTY);
   }
 
+  function openCreate() {
+    resetForm();
+    setFormOpen(true);
+  }
+
   function startEdit(a: Announcement) {
     setEditingId(a.id);
     setForm({ title: a.title, body: a.body, link: a.link ?? "", active: a.active });
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+    setFormOpen(true);
+  }
+
+  function closeForm() {
+    setFormOpen(false);
+    resetForm();
   }
 
   async function handleSave() {
@@ -81,6 +95,7 @@ export default function AdminAnnouncements() {
         });
         toast.success("Promoção publicada! Os clientes verão no sininho.");
       }
+      setFormOpen(false);
       resetForm();
       await reload();
     } catch {
@@ -103,7 +118,7 @@ export default function AdminAnnouncements() {
     try {
       await deleteAnnouncement(id);
       setList((prev) => prev.filter((x) => x.id !== id));
-      if (editingId === id) resetForm();
+      if (editingId === id) closeForm();
       toast.success("Aviso excluído.");
     } catch {
       toast.error("Erro ao excluir.");
@@ -117,81 +132,13 @@ export default function AdminAnnouncements() {
       <div className="max-w-3xl mx-auto">
         <AdminPageHeader
           title="Avisos & Promoções"
-          subtitle="Publique promoções que aparecem no sininho de notificações dos clientes."
-          action={<Badge variant="default">{activeCount} ativo{activeCount !== 1 ? "s" : ""}</Badge>}
+          subtitle={`Publique promoções que aparecem no sininho dos clientes · ${activeCount} ativo${activeCount !== 1 ? "s" : ""}`}
+          action={
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="w-4 h-4" /> Nova promoção
+            </Button>
+          }
         />
-
-        {/* Form criar/editar */}
-        <Card className="mb-6">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Megaphone className="w-4 h-4 text-[var(--color-neon-blue)]" />
-              {editingId ? "Editar aviso" : "Nova promoção"}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-2 space-y-4">
-            <div>
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">Título</label>
-              <Input
-                value={form.title}
-                maxLength={60}
-                placeholder="Ex.: Seda em promoção!"
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                className="mt-1.5"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">Mensagem</label>
-              <textarea
-                value={form.body}
-                maxLength={200}
-                rows={2}
-                placeholder="Ex.: Só esta semana: essa seda por apenas R$20. Aproveite!"
-                onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
-                className="mt-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">Link ao tocar (opcional)</label>
-              <Input
-                value={form.link}
-                placeholder="Ex.: /catalog?cat=sedas ou /catalog?produto=<id>"
-                onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))}
-                className="mt-1.5"
-              />
-              <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
-                Para onde o cliente vai ao tocar na notificação. Deixe vazio para apenas avisar.
-              </p>
-            </div>
-            <div className="flex items-center justify-between gap-4 pt-1">
-              <div className="flex items-center gap-2.5">
-                <Switch
-                  checked={form.active}
-                  onCheckedChange={(v) => setForm((f) => ({ ...f, active: v }))}
-                />
-                <span className="text-sm text-[var(--color-text-secondary)]">
-                  {form.active ? "Visível para os clientes" : "Oculto (rascunho)"}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {editingId && (
-                  <Button variant="ghost" size="sm" onClick={resetForm} disabled={saving}>
-                    <X className="w-4 h-4" /> Cancelar
-                  </Button>
-                )}
-                <Button onClick={handleSave} disabled={saving} className="min-w-28">
-                  {saving ? (
-                    <><RefreshCw className="w-4 h-4 animate-spin" /> Salvando...</>
-                  ) : editingId ? (
-                    <><Save className="w-4 h-4" /> Salvar</>
-                  ) : (
-                    <><Plus className="w-4 h-4" /> Publicar</>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Lista */}
         {loading ? (
@@ -200,7 +147,10 @@ export default function AdminAnnouncements() {
           <Card>
             <CardContent className="p-10 text-center">
               <Megaphone className="w-10 h-10 text-[var(--color-text-muted)] mx-auto mb-3" />
-              <p className="text-sm text-[var(--color-text-secondary)]">Nenhuma promoção publicada ainda.</p>
+              <p className="text-sm text-[var(--color-text-secondary)] mb-4">Nenhuma promoção publicada ainda.</p>
+              <Button size="sm" onClick={openCreate}>
+                <Plus className="w-4 h-4" /> Criar a primeira
+              </Button>
             </CardContent>
           </Card>
         ) : (
@@ -252,6 +202,80 @@ export default function AdminAnnouncements() {
             ))}
           </div>
         )}
+
+        {/* Modal criar/editar — abre centralizado, sempre visível */}
+        <Dialog open={formOpen} onOpenChange={(o) => (o ? setFormOpen(true) : closeForm())}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Megaphone className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                {editingId ? "Editar promoção" : "Nova promoção"}
+              </DialogTitle>
+              <DialogDescription>Aparece no sininho de notificações dos clientes.</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">Título</label>
+                <Input
+                  value={form.title}
+                  maxLength={60}
+                  autoFocus
+                  placeholder="Ex.: Seda em promoção!"
+                  onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">Mensagem</label>
+                <textarea
+                  value={form.body}
+                  maxLength={200}
+                  rows={2}
+                  placeholder="Ex.: Só esta semana: essa seda por apenas R$20. Aproveite!"
+                  onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
+                  className="mt-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">Link ao tocar (opcional)</label>
+                <Input
+                  value={form.link}
+                  placeholder="Ex.: /catalog?cat=sedas ou /catalog?produto=<id>"
+                  onChange={(e) => setForm((f) => ({ ...f, link: e.target.value }))}
+                  className="mt-1.5"
+                />
+                <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                  Para onde o cliente vai ao tocar na notificação. Deixe vazio para apenas avisar.
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <Switch
+                  checked={form.active}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, active: v }))}
+                />
+                <span className="text-sm text-[var(--color-text-secondary)]">
+                  {form.active ? "Visível para os clientes" : "Oculto (rascunho)"}
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="secondary" onClick={closeForm} disabled={saving}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSave} disabled={saving} className="min-w-28">
+                {saving ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Salvando...</>
+                ) : editingId ? (
+                  <><Save className="w-4 h-4" /> Salvar</>
+                ) : (
+                  <><Plus className="w-4 h-4" /> Publicar</>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
