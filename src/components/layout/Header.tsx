@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
 import { MyOrdersButton } from "@/components/shop/MyOrdersButton";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { useCartStore } from "@/stores/cartStore";
 import { useSiteSections } from "@/stores/siteSettingsStore";
 import { getCategories } from "@/lib/firebase/categories";
@@ -149,6 +150,9 @@ export function Header() {
 
             {/* Right actions */}
             <div className="flex items-center gap-1">
+              {/* Centro de notificações (sininho com abas) — só para logados */}
+              {user && <NotificationCenter />}
+
               {/* Pedidos em andamento (tempo real) — ao lado do carrinho */}
               <MyOrdersButton />
 

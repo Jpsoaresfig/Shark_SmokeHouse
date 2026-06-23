@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { adjustVariationStock } from "@/lib/firebase/products";
+import { createOrderStatusNotification } from "@/lib/firebase/notifications";
 import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
 
 const COL = "orders";
@@ -257,15 +258,26 @@ export async function updateOrderStatus(
     updatedAt: serverTimestamp(),
   });
 
+  // Lê o pedido (uma vez) para o estorno de estoque e a notificação do cliente.
+  const snap = await getDoc(ref);
+  const order = snap.data() as Order | undefined;
+
   // Ao cancelar, estorna o estoque se ele já havia sido baixado por este pedido.
-  if (status === "cancelled") {
-    const snap = await getDoc(ref);
-    const order = snap.data() as Order | undefined;
-    if (order?.stockApplied) {
-      await applyOrderStock({ id, items: order.items }, "in");
-      await updateDoc(ref, { stockApplied: false, updatedAt: serverTimestamp() });
+  if (status === "cancelled" && order?.stockApplied) {
+    await applyOrderStock({ id, items: order.items }, "in");
+    await updateDoc(ref, { stockApplied: false, updatedAt: serverTimestamp() });
+  }
+
+  // Notifica o cliente sobre a mudança de status (centro de notificações).
+  // Falha aqui não pode derrubar a atualização do pedido.
+  if (order?.customerId) {
+    try {
+      await createOrderStatusNotification(order.customerId, id, status);
+    } catch (e) {
+      console.error("[notif] order status", e);
     }
   }
+
   invalidate("orders");
 }
 

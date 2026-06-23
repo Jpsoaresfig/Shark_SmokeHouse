@@ -248,5 +248,25 @@ service cloud.firestore {
                     && request.resource.data.page is string;
       allow read, update, delete: if isAdmin();
     }
+
+    // ── Notificações in-app (por usuário) ─────────────────────
+    // O dono lê as suas e pode marcá-las como lida (apenas o campo `read`).
+    // A equipe (admin/vendedor/motoboy) cria notificações — ex.: atualização
+    // de status de pedido para o cliente. Ninguém forja para si mesmo.
+    match /notifications/{notifId} {
+      allow read:   if isAdmin() || isOwner(resource.data.userId);
+      allow create: if isAdmin() || isSeller() || isMotoboy();
+      allow update: if isAdmin()
+                    || (isOwner(resource.data.userId)
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']));
+      allow delete: if isAdmin() || isOwner(resource.data.userId);
+    }
+
+    // ── Avisos / Promoções (globais, geridos pelo admin) ──────
+    // Qualquer um lê (a leitura por usuário é marcada localmente no cliente).
+    match /announcements/{id} {
+      allow read:  if true;
+      allow write: if isAdmin() || isSeller();
+    }
   }
 }

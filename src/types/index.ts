@@ -661,6 +661,39 @@ export interface Commission {
   createdAt: string;
 }
 
+/* ── Notificações in-app ──────────────────────────────────── */
+export type NotificationCategory = "order" | "promo";
+
+/** Notificação pessoal de um usuário (ex.: atualização de status de pedido). */
+export interface AppNotification {
+  id: string;
+  /** Destinatário. */
+  userId: string;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  /** Destino ao tocar (ex.: "/orders"). */
+  link?: string;
+  read: boolean;
+  /** Pedido relacionado, quando aplicável. */
+  orderId?: string;
+  createdAt: string;
+}
+
+/**
+ * Aviso/promoção global, criado pelo admin e visível a todos os clientes. A
+ * leitura é marcada localmente por usuário (sem gravar um doc por usuário).
+ */
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  /** Destino ao tocar (ex.: "/catalog?produto=<id>"). */
+  link?: string;
+  active: boolean;
+  createdAt: string;
+}
+
 /* ── Report (problema reportado por usuário) ─────────────── */
 export type ReportStatus = "open" | "resolved";
 
