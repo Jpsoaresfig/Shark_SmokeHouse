@@ -237,6 +237,10 @@ export default function AccountPage() {
   const nextTier = getNextTier(points);
   const progress = getTierProgress(points);
 
+  // Produtos que o cliente JÁ consegue resgatar agora (pontos suficientes + em
+  // estoque). A lista completa aparece logo abaixo para ele não ter que caçar.
+  const redeemableRewards = rewards.filter((r) => points >= r.pointsCost && r.stock > 0);
+
   const handleRedeem = async (reward: LoyaltyReward) => {
     setRedeemingId(reward.id);
     try {
@@ -461,16 +465,50 @@ export default function AccountPage() {
               </Link>
             </div>
           ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {rewards.map((reward) => (
-                <RewardCard
-                  key={reward.id}
-                  reward={reward}
-                  currentPoints={points}
-                  onRedeem={handleRedeem}
-                />
-              ))}
-            </div>
+            <>
+              {/* 1) O que você JÁ pode resgatar com seus pontos */}
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Você pode resgatar agora</h3>
+                {redeemableRewards.length > 0 && (
+                  <Badge variant="default" className="text-xs">{redeemableRewards.length}</Badge>
+                )}
+              </div>
+
+              {redeemableRewards.length > 0 ? (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {redeemableRewards.map((reward) => (
+                    <RewardCard key={reward.id} reward={reward} currentPoints={points} onRedeem={handleRedeem} />
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-6 flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-overlay)] flex items-center justify-center shrink-0">
+                    <Star className="w-6 h-6 text-[var(--color-text-muted)]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                      Você não tem pontos para resgatar nenhum produto ainda.
+                    </p>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                      Continue acumulando pontos a cada compra — veja abaixo tudo o que dá pra resgatar e quanto falta.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* 2) Catálogo completo de resgates, para não ter que caçar */}
+              <div className="flex items-center gap-2 mb-3 mt-8">
+                <Gift className="w-4 h-4 text-[var(--color-text-secondary)]" />
+                <h3 className="text-sm font-bold text-[var(--color-text-primary)]">Todos os produtos para resgate</h3>
+                <Badge variant="secondary" className="text-xs">{rewards.length}</Badge>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {rewards.map((reward) => (
+                  <RewardCard key={reward.id} reward={reward} currentPoints={points} onRedeem={handleRedeem} />
+                ))}
+              </div>
+            </>
           )}
         </motion.div>
 
