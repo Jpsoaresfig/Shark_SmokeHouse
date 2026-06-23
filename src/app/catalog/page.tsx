@@ -212,7 +212,10 @@ function CatalogContent() {
 
         {/* Category pills */}
         <div className="-mx-3 sm:mx-0 mb-5 sm:mb-8">
-          <div className="flex gap-2 overflow-x-auto px-3 sm:px-0 pb-1 scrollbar-none">
+          {/* Mobile: faixa única rolável por toque. Desktop (sem barra visível e
+              sem rolagem horizontal no mouse comum): quebra em linhas para que
+              todas as categorias fiquem acessíveis sem precisar rolar. */}
+          <div className="flex gap-2 overflow-x-auto px-3 sm:px-0 pb-1 scrollbar-none md:flex-wrap md:overflow-x-visible">
             {categories.map((cat) => (
               <button
                 key={cat.value}

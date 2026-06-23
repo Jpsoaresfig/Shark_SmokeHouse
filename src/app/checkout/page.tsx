@@ -715,14 +715,18 @@ export default function CheckoutPage() {
         ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
       });
 
-      /* save phone if changed */
-      if (phone.trim() && phone.trim() !== user.phone) {
-        await updateUserProfile(user.uid, { phone: phone.trim() });
-      }
-      /* salva o CPF no perfil se foi informado/alterado — habilita os pontos */
+      /* Atualizações de perfil são secundárias: o pedido já foi criado, então uma
+         falha aqui NÃO pode abortar o fluxo (senão o carrinho não zera e o cliente
+         vê erro mesmo com o pedido registrado). Por isso não usamos await/throw. */
       const cpfDigits = cpf.replace(/\D/g, "");
-      if (cpfDigits && cpfDigits !== user.cpf) {
-        await updateUserProfile(user.uid, { cpf: cpfDigits });
+      const profilePatch = {
+        ...(phone.trim() && phone.trim() !== user.phone ? { phone: phone.trim() } : {}),
+        ...(cpfDigits && cpfDigits !== user.cpf ? { cpf: cpfDigits } : {}),
+      };
+      if (Object.keys(profilePatch).length) {
+        updateUserProfile(user.uid, profilePatch).catch((err) =>
+          console.error("[checkout] falha ao salvar perfil (não bloqueante):", err),
+        );
       }
 
       /* registra o uso do cupom (auditoria + limite por CPF — Task 3.3) */

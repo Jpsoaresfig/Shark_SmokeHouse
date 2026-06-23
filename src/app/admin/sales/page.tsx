@@ -202,7 +202,9 @@ export default function AdminSales() {
     const q = customerQuery.trim().toLowerCase();
     if (!q) return [];
     return users
-      .filter(u => u.role === "customer")
+      // Cliente vinculado pode ser um cliente comum OU um motoboy (vendas no nome
+      // do entregador) — ambos podem receber pontos/dívida vinculados à conta.
+      .filter(u => u.role === "customer" || u.role === "motoboy")
       .filter(u =>
         u.displayName?.toLowerCase().includes(q) ||
         u.email?.toLowerCase().includes(q) ||
@@ -966,7 +968,7 @@ export default function AdminSales() {
                     {!customer && (
                       <div className="relative">
                         <Input
-                          placeholder="Buscar cliente por nome, telefone ou e-mail..."
+                          placeholder="Buscar cliente ou motoboy por nome, telefone ou e-mail..."
                           icon={<Search className="w-4 h-4" />}
                           value={customerQuery}
                           onChange={e => setCustomerQuery(e.target.value)}
@@ -982,7 +984,10 @@ export default function AdminSales() {
                                   onClick={() => { setCustomer(c); setCustomerQuery(""); }}
                                   className="w-full text-left px-3 py-2 hover:bg-[var(--color-bg-hover)] transition-colors"
                                 >
-                                  <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{c.displayName}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{c.displayName}</p>
+                                    {c.role === "motoboy" && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">Motoboy</Badge>}
+                                  </div>
                                   <p className="text-xs text-[var(--color-text-muted)] truncate">{c.phone || c.email}</p>
                                 </button>
                               ))
