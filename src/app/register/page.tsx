@@ -51,10 +51,17 @@ function RegisterForm() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
+  // Aceite obrigatório: maioridade (18+) + Termos + Privacidade. Trava os dois
+  // fluxos de cadastro (e-mail e Google) — exigência legal da tabacaria.
+  const [accepted, setAccepted] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (!accepted) {
+      setError("Para criar a conta, confirme que tem 18 anos ou mais e aceite os Termos e a Política de Privacidade.");
+      return;
+    }
     // CPF é opcional, mas se preenchido precisa ser válido antes de prosseguir.
     if (form.cpf.trim() && !isValidCpf(form.cpf)) {
       setError("CPF inválido. Confira os números ou deixe o campo em branco.");
@@ -72,6 +79,10 @@ function RegisterForm() {
 
   const handleGoogle = async () => {
     setError("");
+    if (!accepted) {
+      setError("Para continuar, confirme que tem 18 anos ou mais e aceite os Termos e a Política de Privacidade.");
+      return;
+    }
     setGoogleLoading(true);
     try {
       await loginGoogle();
@@ -244,19 +255,30 @@ function RegisterForm() {
           )}
         </AnimatePresence>
 
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Ao criar uma conta, você confirma ter 18+ anos e concorda com os{" "}
-          <Link href="/terms" className="text-[var(--color-neon-blue)] hover:underline">Termos</Link>{" "}
-          e{" "}
-          <Link href="/privacy" className="text-[var(--color-neon-blue)] hover:underline">Privacidade</Link>.
-        </p>
+        <label className="flex items-start gap-2.5 cursor-pointer select-none">
+          {/* Links são "interactive content": clicá-los abre os documentos sem
+              marcar/desmarcar o checkbox (comportamento padrão do <label>). */}
+          <input
+            type="checkbox"
+            checked={accepted}
+            onChange={(e) => setAccepted(e.target.checked)}
+            required
+            className="mt-0.5 w-4 h-4 shrink-0 cursor-pointer accent-[var(--color-neon-blue)]"
+          />
+          <span className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+            Declaro ter <strong className="text-[var(--color-text-primary)]">18 anos ou mais</strong> e que li e concordo com os{" "}
+            <Link href="/terms" target="_blank" rel="noopener noreferrer" className="text-[var(--color-neon-blue)] hover:underline">Termos de Uso</Link>{" "}
+            e a{" "}
+            <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[var(--color-neon-blue)] hover:underline">Política de Privacidade</Link>.
+          </span>
+        </label>
 
         <Button
           type="submit"
           variant="premium"
           size="lg"
           className="w-full"
-          disabled={loading || googleLoading}
+          disabled={loading || googleLoading || !accepted}
         >
           {loading
             ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

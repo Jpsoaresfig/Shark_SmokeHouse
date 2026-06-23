@@ -71,11 +71,11 @@ export function Footer() {
                 className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] transition-colors"
               >
                 <MapPin className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>Avenida Alfredo Ferreira da Rocha, 742 — Mangabeira I, João Pessoa, PB</span>
+                <span>Rua Comerciante Alfredo Ferreira da Rocha, 742 — Mangabeira, João Pessoa, PB</span>
               </a>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>(83) 9902-0606</span>
+                <span>(83) 99902-0606</span>
               </div>
               <div className="flex items-start gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
@@ -99,7 +99,7 @@ export function Footer() {
                 <span className="text-xs font-bold">IG</span>
               </a>
               <a
-                href="https://wa.me/558399020606"
+                href="https://wa.me/5583999020606"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-9 h-9 rounded-lg border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-success)] hover:border-[var(--color-success)] hover:bg-emerald-500/10 transition-all"

@@ -150,7 +150,7 @@ export default function AboutPage() {
           >
             <Button variant="premium" size="lg" asChild>
               <a
-                href="https://wa.me/558399020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -340,8 +340,8 @@ export default function AboutPage() {
                       rel="noopener noreferrer"
                       className="block text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed hover:text-[var(--color-neon-blue)] transition-colors"
                     >
-                      Avenida Alfredo Ferreira da Rocha, 742<br />
-                      Mangabeira I — João Pessoa, PB<br />
+                      Rua Comerciante Alfredo Ferreira da Rocha, 742<br />
+                      Mangabeira — João Pessoa, PB<br />
                       CEP: 58055-540
                     </a>
                   </div>
@@ -368,7 +368,7 @@ export default function AboutPage() {
 
               <Button variant="premium" size="lg" className="w-full" asChild>
                 <a
-                  href="https://wa.me/558399020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                  href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -439,7 +439,7 @@ export default function AboutPage() {
                 Seguir no Instagram
               </a>
               <a
-                href="https://wa.me/558399020606?text=Ol%C3%A1%2C+quero+saber+mais+sobre+a+Shark+Smokehouse!"
+                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+quero+saber+mais+sobre+a+Shark+Smokehouse!"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-success)]/30 bg-emerald-500/10 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 hover:border-[var(--color-success)] transition-all"
