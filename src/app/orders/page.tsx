@@ -1,16 +1,16 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, ChevronDown, ChevronUp, ShoppingBag,
   Clock, CheckCircle, Truck, XCircle, AlertTriangle,
-  MapPin, Calendar, CreditCard, ArrowRight, RefreshCw, Star, Loader2,
+  MapPin, Calendar, CreditCard, ArrowRight, Star, Loader2, Radio,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useAuthStore } from "@/stores/authStore";
-import { getOrdersByCustomer } from "@/lib/firebase/orders";
+import { subscribeOrdersByCustomer } from "@/lib/firebase/orders";
 import { createReview, getReviewsByCustomer } from "@/lib/firebase/reviews";
 import { resolveOrderPayment } from "@/lib/payments";
 import { MercadoPagoPix } from "@/components/checkout/MercadoPagoPix";
@@ -304,6 +304,16 @@ function OrderCard({ order, index, reviewedRating, onReviewed, onPaid }: {
                 </p>
               </div>
 
+              {/* Entregador a caminho — reforça o rastreio quando sai para entrega */}
+              {order.status === "out_for_delivery" && order.motoboyName && (
+                <div className="flex items-center gap-3 p-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20">
+                  <Truck className="w-4 h-4 text-orange-400 shrink-0" />
+                  <p className="text-sm text-orange-300">
+                    <span className="font-semibold">{order.motoboyName}</span> está levando seu pedido até você. 🛵
+                  </p>
+                </div>
+              )}
+
               {/* Items */}
               <div>
                 <h4 className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide mb-3">
@@ -507,24 +517,23 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterValue>("all");
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const [ords, revs] = await Promise.all([
-        getOrdersByCustomer(user.uid),
-        // Não bloqueia a lista se as regras de reviews ainda não foram publicadas.
-        getReviewsByCustomer(user.uid).catch(() => []),
-      ]);
-      setOrders(ords);
-      setReviewed(Object.fromEntries(revs.map((r) => [r.orderId, r.rating])));
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  // Wait for Firebase Auth to be confirmed before querying Firestore
-  useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
+  // Pedidos em TEMPO REAL: o status muda sozinho na tela quando a loja/motoboy
+  // atualiza o pedido (recebido → preparando → saiu para entrega → entregue),
+  // sem o cliente precisar recarregar a página. As avaliações vêm numa carga
+  // avulsa (não precisam de tempo real) e não bloqueiam a lista se as regras
+  // de reviews ainda não foram publicadas.
+  useEffect(() => {
+    if (!firebaseReady || !user) return;
+    const unsub = subscribeOrdersByCustomer(
+      user.uid,
+      (ords) => { setOrders(ords); setLoading(false); },
+      () => setLoading(false),
+    );
+    getReviewsByCustomer(user.uid)
+      .catch(() => [])
+      .then((revs) => setReviewed(Object.fromEntries(revs.map((r) => [r.orderId, r.rating]))));
+    return () => unsub();
+  }, [firebaseReady, user]);
 
   const filtered = filterOrders(orders, filter);
 
@@ -567,14 +576,13 @@ export default function OrdersPage() {
               </p>
             )}
           </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all disabled:opacity-40"
-            title="Atualizar"
+          <div
+            className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-success)] px-2.5 h-9 rounded-lg border border-[var(--color-success)]/25 bg-[var(--color-success)]/10"
+            title="Seus pedidos atualizam sozinhos, em tempo real"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+            <Radio className="w-3.5 h-3.5 animate-pulse" />
+            <span className="hidden sm:inline">Ao vivo</span>
+          </div>
         </div>
 
         {/* Filter tabs */}
@@ -669,7 +677,6 @@ export default function OrdersPage() {
                 index={i}
                 reviewedRating={reviewed[order.id]}
                 onReviewed={(id, rating) => setReviewed((prev) => ({ ...prev, [id]: rating }))}
-                onPaid={load}
               />
             ))}
           </div>
