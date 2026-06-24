@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp, Wallet, CircleDollarSign, Percent, Package2,
-  PiggyBank, RefreshCw, BarChart3, Receipt,
+  PiggyBank, RefreshCw, BarChart3, Receipt, PieChart, Check,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
+import { DonutChart, type DonutSlice } from "@/components/admin/DonutChart";
 import { formatCurrency } from "@/lib/utils";
 import { getSales, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
 import { getProducts } from "@/lib/firebase/products";
@@ -48,6 +49,38 @@ function defaultRange(): { start: string; end: string } {
 }
 const DEFAULT_RANGE = defaultRange();
 
+/* ── Métricas selecionáveis do gráfico de rosca ──────────────────────────────
+ * O admin escolhe quais aparecem como fatias. `get` extrai o valor a partir dos
+ * KPIs já calculados e da quebra por forma de pagamento. */
+interface KpiValues {
+  sold: number; received: number; pending: number; discounts: number;
+  cost: number; profitProj: number; profitReal: number;
+}
+interface DonutMetricDef {
+  key: string;
+  label: string;
+  color: string;
+  get: (k: KpiValues, byMethod: Map<SalePaymentMethod, number>) => number;
+}
+
+const DONUT_METRICS: DonutMetricDef[] = [
+  { key: "sold",       label: "Faturamento bruto", color: "#34d399", get: (k) => k.sold },
+  { key: "received",   label: "Recebido (caixa)",  color: "var(--color-neon-blue)", get: (k) => k.received },
+  { key: "pending",    label: "A receber",         color: "#fbbf24", get: (k) => k.pending },
+  { key: "discounts",  label: "Descontos",         color: "#c084fc", get: (k) => k.discounts },
+  { key: "cost",       label: "Custo das vendas",  color: "#fb923c", get: (k) => k.cost },
+  { key: "profitProj", label: "Lucro projetado",   color: "#22d3ee", get: (k) => k.profitProj },
+  { key: "profitReal", label: "Lucro realizado",   color: "#818cf8", get: (k) => k.profitReal },
+  { key: "m_cash",     label: "Dinheiro",          color: "#4ade80", get: (_k, m) => m.get("cash") ?? 0 },
+  { key: "m_credit",   label: "Crédito",           color: "#60a5fa", get: (_k, m) => m.get("credit") ?? 0 },
+  { key: "m_debit",    label: "Débito",            color: "#f472b6", get: (_k, m) => m.get("debit") ?? 0 },
+  { key: "m_pix",      label: "Pix",               color: "#2dd4bf", get: (_k, m) => m.get("pix") ?? 0 },
+  { key: "m_card",     label: "Cartão",            color: "#a78bfa", get: (_k, m) => m.get("card") ?? 0 },
+];
+
+const DONUT_DEFAULT_KEYS = ["m_cash", "m_credit", "m_debit", "m_pix"];
+const DONUT_STORAGE_KEY = "shark:financial:donut-metrics";
+
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
@@ -57,6 +90,18 @@ export default function AdminFinancial() {
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(DEFAULT_RANGE.start);
   const [endDate, setEndDate] = useState(DEFAULT_RANGE.end);
+  // Lazy init: lê a seleção salva uma única vez (mesmo padrão do NotificationCenter).
+  const [donutKeys, setDonutKeys] = useState<string[]>(() => {
+    if (typeof window === "undefined") return DONUT_DEFAULT_KEYS;
+    try {
+      const raw = localStorage.getItem(DONUT_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === "string")) {
+        return parsed.filter((k: string) => DONUT_METRICS.some((m) => m.key === k));
+      }
+    } catch { /* ignora storage inválido */ }
+    return DONUT_DEFAULT_KEYS;
+  });
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
@@ -75,6 +120,11 @@ export default function AdminFinancial() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  /* Persiste a seleção de métricas do donut sempre que muda. */
+  useEffect(() => {
+    try { localStorage.setItem(DONUT_STORAGE_KEY, JSON.stringify(donutKeys)); } catch { /* */ }
+  }, [donutKeys]);
 
   const rangeStart = useMemo(() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; }, [startDate]);
   const rangeEnd = useMemo(() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; }, [endDate]);
@@ -134,6 +184,16 @@ export default function AdminFinancial() {
       .map(({ sortKey, ...rest }) => { void sortKey; return rest; });
     return { cashTotal: total, cashByMethod: byMethod, cashChart: chart };
   }, [sales, rangeStart, rangeEnd]);
+
+  /* Fatias do donut conforme métricas escolhidas (mantém a ordem do registry). */
+  const donutSlices = useMemo<DonutSlice[]>(() => {
+    return DONUT_METRICS
+      .filter((m) => donutKeys.includes(m.key))
+      .map((m) => ({ key: m.key, label: m.label, color: m.color, value: m.get(kpis, cashByMethod) }));
+  }, [donutKeys, kpis, cashByMethod]);
+
+  const toggleDonutKey = (key: string) =>
+    setDonutKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
   const setPreset = (preset: "thisMonth" | "lastMonth" | "last30") => {
     const now = new Date();
@@ -252,6 +312,46 @@ export default function AdminFinancial() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Gráfico de rosca configurável */}
+        <Card className="mb-6">
+          <CardHeader className="pb-0">
+            <CardTitle className="text-base flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-[var(--color-neon-blue)]" />
+              Composição — gráfico de rosca
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {/* Seletor de métricas */}
+            <div className="flex flex-wrap gap-2 mb-5">
+              {DONUT_METRICS.map((m) => {
+                const active = donutKeys.includes(m.key);
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => toggleDonutKey(m.key)}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                      active
+                        ? "border-transparent text-[var(--color-bg-base)]"
+                        : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]"
+                    }`}
+                    style={active ? { background: m.color } : undefined}
+                  >
+                    {active
+                      ? <Check className="w-3 h-3" />
+                      : <span className="w-2.5 h-2.5 rounded-full" style={{ background: m.color }} />}
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {loading
+              ? <div className="skeleton h-56 rounded-xl" />
+              : <DonutChart data={donutSlices} centerLabel="Total selecionado" />}
+          </CardContent>
+        </Card>
 
         {/* Fluxo de caixa */}
         <Card className="mb-6">
