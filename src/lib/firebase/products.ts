@@ -47,12 +47,13 @@ export async function getProducts(force = false): Promise<Product[]> {
 }
 
 export async function getActiveProducts(force = false): Promise<Product[]> {
-  return (await getProducts(force)).filter(p => p.active === true);
+  // `internal` = produto de uso interno (controle do admin): nunca vai pra loja.
+  return (await getProducts(force)).filter(p => p.active === true && p.internal !== true);
 }
 
 export async function getFeaturedProducts(maxCount = 4): Promise<Product[]> {
   return (await getProducts())
-    .filter(p => p.active === true && p.featured === true)
+    .filter(p => p.active === true && p.internal !== true && p.featured === true)
     .slice(0, maxCount);
 }
 

@@ -27,7 +27,7 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
   price: 0, compareAtPrice: undefined, category: "",
   tags: [], images: [], stock: 0, minStock: 5,
-  sku: "", featured: false, storeHighlight: false, active: true, doublePoints: false, loyaltyPoints: undefined,
+  sku: "", featured: false, storeHighlight: false, active: true, internal: false, doublePoints: false, loyaltyPoints: undefined,
   redeemDisabled: false, loyaltyPointsOverride: undefined,
   pointsEarned: undefined, colors: [], variations: [],
   brand: "", size: "", costPrice: undefined, taxPercent: undefined,
@@ -254,6 +254,7 @@ export default function AdminProducts() {
       images: p.images, stock: p.stock, minStock: p.minStock,
       sku: p.sku ?? "", featured: p.featured ?? false,
       storeHighlight: p.storeHighlight ?? false, active: p.active,
+      internal: p.internal ?? false,
       doublePoints: p.doublePoints ?? false,
       loyaltyPoints: p.loyaltyPoints,
       redeemDisabled: p.redeemDisabled ?? false,
@@ -446,6 +447,7 @@ export default function AdminProducts() {
                             <Badge variant="secondary">{categoryLabel(p.category)}</Badge>
                             {p.featured && <Badge variant="premium">Em Destaque</Badge>}
                             {p.storeHighlight && <Badge variant="default">Vitrine</Badge>}
+                            {p.internal && <Badge variant="warning">Interno</Badge>}
                             {p.doublePoints && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
                                 <Star className="w-3 h-3" /> Pontos 2×
@@ -957,6 +959,15 @@ export default function AdminProducts() {
                   className="w-4 h-4 accent-[var(--color-warning)]"
                 />
                 <span className="text-sm text-[var(--color-text-secondary)]">Pontos em dobro</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer" title="Uso interno: não aparece na loja (catálogo/home), mas fica no estoque e disponível no PDV">
+                <input
+                  type="checkbox"
+                  checked={!!form.internal}
+                  onChange={e => set("internal", e.target.checked)}
+                  className="w-4 h-4 accent-amber-500"
+                />
+                <span className="text-sm text-[var(--color-text-secondary)]">Produto interno (não aparece na loja)</span>
               </label>
             </div>
           </div>

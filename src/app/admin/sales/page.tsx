@@ -7,7 +7,7 @@ import {
   History, Download, Receipt, TrendingUp, Package,
   ChevronDown, ChevronUp, User, X, Truck, CheckCircle, Percent,
   Store, Globe, Ticket, Star, AlertTriangle,
-  CircleDollarSign, Ban, CalendarClock, Wallet, Clock,
+  CircleDollarSign, Ban, CalendarClock, Wallet, Clock, UserPlus,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,7 +24,7 @@ import { getSales, createSale, exportSalesCSV, markSaleDelivered, registerSalePa
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { saleStatus, saleReceivedAmount, saleOutstanding, saleIsRevenue, saleCommission as saleCommissionOf } from "@/lib/sales/helpers";
 import { resetSalesData } from "@/lib/firebase/maintenance";
-import { getAllUsers } from "@/lib/firebase/users";
+import { getAllUsers, createWalkInCustomer } from "@/lib/firebase/users";
 import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
 import { getCategories } from "@/lib/firebase/categories";
 import { addLoyaltyPoints } from "@/lib/firebase/loyalty";
@@ -110,6 +110,13 @@ export default function AdminSales() {
   const [customerQuery, setCustomerQuery] = useState("");
   const [sellerId, setSellerId] = useState("");
   const [deliveryLater, setDeliveryLater] = useState(false);
+  /* Cadastro rápido de cliente (balcão) — direto na venda, sem ir para Usuários. */
+  const [newCustOpen, setNewCustOpen] = useState(false);
+  const [newCustName, setNewCustName] = useState("");
+  const [newCustPhone, setNewCustPhone] = useState("");
+  const [newCustEmail, setNewCustEmail] = useState("");
+  const [newCustCpf, setNewCustCpf] = useState("");
+  const [newCustSaving, setNewCustSaving] = useState(false);
 
   /* ── Usuários (clientes p/ vínculo, vendedores p/ atribuição) ── */
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -430,6 +437,45 @@ export default function AdminSales() {
     setDiscount(0);
     setCouponInput("");
     setCouponError("");
+  }
+
+  /* ── Cadastro rápido de cliente (balcão) ──
+     Cria o cliente direto na venda (nome + telefone; e-mail/CPF opcionais),
+     já o vincula à venda e o adiciona à lista local para futuras buscas. */
+  function openNewCustomer() {
+    // Prefill: se a busca não parece um telefone, usa-a como nome.
+    const q = customerQuery.trim();
+    const looksLikePhone = /\d/.test(q) && q.replace(/\D/g, "").length >= 8;
+    setNewCustName(looksLikePhone ? "" : q);
+    setNewCustPhone(looksLikePhone ? q : "");
+    setNewCustEmail("");
+    setNewCustCpf("");
+    setNewCustOpen(true);
+  }
+
+  async function handleCreateCustomer() {
+    if (!newCustName.trim() || !newCustPhone.trim()) {
+      toast.error("Informe nome e telefone do cliente.");
+      return;
+    }
+    setNewCustSaving(true);
+    try {
+      const created = await createWalkInCustomer({
+        displayName: newCustName,
+        phone: newCustPhone,
+        email: newCustEmail.trim() || undefined,
+        cpf: newCustCpf.trim() || undefined,
+      });
+      setUsers(prev => [created, ...prev]);
+      setCustomer(created);
+      setCustomerQuery("");
+      setNewCustOpen(false);
+      toast.success(`Cliente ${created.displayName} cadastrado e vinculado.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível cadastrar o cliente.");
+    } finally {
+      setNewCustSaving(false);
+    }
   }
 
   /* ── Save sale ── */
@@ -966,34 +1012,43 @@ export default function AdminSales() {
                     )}
 
                     {!customer && (
-                      <div className="relative">
-                        <Input
-                          placeholder="Buscar cliente ou motoboy por nome, telefone ou e-mail..."
-                          icon={<Search className="w-4 h-4" />}
-                          value={customerQuery}
-                          onChange={e => setCustomerQuery(e.target.value)}
-                        />
-                        {customerQuery.trim() && (
-                          <div className="absolute z-20 mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden">
-                            {customerMatches.length === 0 ? (
-                              <p className="px-3 py-2.5 text-xs text-[var(--color-text-muted)]">Nenhum cliente encontrado.</p>
-                            ) : (
-                              customerMatches.map(c => (
-                                <button
-                                  key={c.uid}
-                                  onClick={() => { setCustomer(c); setCustomerQuery(""); }}
-                                  className="w-full text-left px-3 py-2 hover:bg-[var(--color-bg-hover)] transition-colors"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{c.displayName}</p>
-                                    {c.role === "motoboy" && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">Motoboy</Badge>}
-                                  </div>
-                                  <p className="text-xs text-[var(--color-text-muted)] truncate">{c.phone || c.email}</p>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        )}
+                      <div className="space-y-2">
+                        <div className="relative">
+                          <Input
+                            placeholder="Buscar cliente ou motoboy por nome, telefone ou e-mail..."
+                            icon={<Search className="w-4 h-4" />}
+                            value={customerQuery}
+                            onChange={e => setCustomerQuery(e.target.value)}
+                          />
+                          {customerQuery.trim() && (
+                            <div className="absolute z-20 mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-lg overflow-hidden">
+                              {customerMatches.length === 0 ? (
+                                <p className="px-3 py-2.5 text-xs text-[var(--color-text-muted)]">Nenhum cliente encontrado.</p>
+                              ) : (
+                                customerMatches.map(c => (
+                                  <button
+                                    key={c.uid}
+                                    onClick={() => { setCustomer(c); setCustomerQuery(""); }}
+                                    className="w-full text-left px-3 py-2 hover:bg-[var(--color-bg-hover)] transition-colors"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{c.displayName}</p>
+                                      {c.role === "motoboy" && <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">Motoboy</Badge>}
+                                    </div>
+                                    <p className="text-xs text-[var(--color-text-muted)] truncate">{c.phone || c.email}</p>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={openNewCustomer}
+                          className="w-full flex items-center justify-center gap-2 rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/50 hover:text-[var(--color-neon-blue)] transition-all"
+                        >
+                          <UserPlus className="w-4 h-4" /> Cadastrar novo cliente
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1882,6 +1937,78 @@ export default function AdminSales() {
               {cancelSaving
                 ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 : "Cancelar venda"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cadastro rápido de cliente (balcão) — direto na venda */}
+      <Dialog open={newCustOpen} onOpenChange={(v) => { if (!newCustSaving) setNewCustOpen(v); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[var(--color-neon-blue)]">
+              <UserPlus className="w-5 h-5" /> Novo cliente
+            </DialogTitle>
+            <DialogDescription>
+              Cadastro rápido de balcão. Nome e telefone são obrigatórios; e-mail e CPF são opcionais.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Nome *</label>
+              <input
+                value={newCustName}
+                onChange={(e) => setNewCustName(e.target.value)}
+                placeholder="Nome do cliente"
+                className={inputCls}
+                autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreateCustomer(); } }}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Telefone / WhatsApp *</label>
+              <input
+                value={newCustPhone}
+                onChange={(e) => setNewCustPhone(e.target.value)}
+                inputMode="tel"
+                placeholder="(83) 99999-0000"
+                className={inputCls}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleCreateCustomer(); } }}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">E-mail (opcional)</label>
+              <input
+                value={newCustEmail}
+                onChange={(e) => setNewCustEmail(e.target.value)}
+                inputMode="email"
+                placeholder="cliente@email.com"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">CPF (opcional)</label>
+              <input
+                value={newCustCpf}
+                onChange={(e) => setNewCustCpf(e.target.value)}
+                inputMode="numeric"
+                placeholder="Só números — necessário para pontuar no Clube Shark"
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setNewCustOpen(false)} disabled={newCustSaving}>
+              Cancelar
+            </Button>
+            <Button
+              variant="premium"
+              onClick={handleCreateCustomer}
+              disabled={newCustSaving || !newCustName.trim() || !newCustPhone.trim()}
+            >
+              {newCustSaving
+                ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : <><UserPlus className="w-4 h-4" /> Cadastrar e vincular</>}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -27,7 +27,11 @@ service cloud.firestore {
       // Dono e admin sempre; vendedor também lê (PDV: busca de cliente p/ vincular
       // à venda presencial e atribuição de venda a um vendedor).
       allow read: if isOwner(uid) || isAdmin() || isSeller();
-      allow create: if isOwner(uid);
+      // O próprio dono cria seu perfil; além disso, admin/vendedor podem cadastrar
+      // um CLIENTE de balcão (walk-in) direto do PDV — restrito a role 'customer'
+      // para não permitir a criação de contas de equipe/admin por aqui.
+      allow create: if isOwner(uid)
+                    || ((isAdmin() || isSeller()) && request.resource.data.role == 'customer');
       // Owner: atualiza o próprio perfil (menos o campo role). Inclui o débito
       // dos próprios pontos no resgate.
       // Admin: tudo.

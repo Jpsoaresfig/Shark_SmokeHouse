@@ -90,6 +90,10 @@ export interface Product {
    *  não a seção "Produtos em Destaque". */
   storeHighlight?: boolean;
   active: boolean;
+  /** Produto de USO INTERNO (controle do admin): nunca aparece na loja (catálogo,
+   *  home, "Produtos em Destaque"), mas continua no estoque e disponível no PDV.
+   *  Permite cadastrar/vender itens que o cliente comum não deve ver. */
+  internal?: boolean;
   /** Marca do produto (ex.: "Zomo", "Adalya"). Visível no admin e na importação. */
   brand?: string;
   /** Tamanho/quantidade da embalagem (ex.: "50g", "Caixa c/ 10"). */

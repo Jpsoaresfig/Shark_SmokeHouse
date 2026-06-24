@@ -58,6 +58,49 @@ export async function createUserProfile(
   return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }
 
+/**
+ * Cria um cliente de balcão (walk-in) direto do PDV: apenas um registro em
+ * `users` (sem conta de acesso / Firebase Auth) para vincular à venda, aparecer
+ * na busca de clientes e no controle de "A Receber". Nome e telefone são
+ * obrigatórios; e-mail e CPF são opcionais. Como não há login, não geramos
+ * código de indicação nem bônus de boas-vindas.
+ */
+export async function createWalkInCustomer(data: {
+  displayName: string;
+  phone: string;
+  email?: string;
+  cpf?: string;
+}): Promise<UserProfile> {
+  const displayName = data.displayName.trim();
+  const phone = (data.phone ?? "").trim();
+  if (!displayName) throw new Error("Informe o nome do cliente.");
+  if (!phone) throw new Error("Informe o telefone do cliente.");
+  // CPF opcional, mas se vier deve ser válido (gate do Clube Shark).
+  const cpf = data.cpf ? onlyDigits(data.cpf) : "";
+  if (cpf && !isValidCpf(cpf)) throw new Error("CPF inválido.");
+  // doc() sem id gera um id automático; usamos o próprio id como uid do perfil.
+  const ref = doc(collection(db, COLLECTION));
+  const profile = {
+    uid: ref.id,
+    email: (data.email ?? "").trim(),
+    displayName,
+    phone,
+    role: "customer" as UserRole,
+    loyaltyPoints: 0,
+    addresses: [],
+    ...(cpf ? { cpf } : {}),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(ref, profile);
+  invalidate("users");
+  return {
+    ...profile,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  } as UserProfile;
+}
+
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const snap = await getDoc(doc(db, COLLECTION, uid));
   if (!snap.exists()) return null;
