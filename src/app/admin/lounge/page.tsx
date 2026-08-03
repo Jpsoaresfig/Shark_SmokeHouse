@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   ChevronLeft, ChevronRight, Users, Clock, Phone, Mail,
   CheckCircle, XCircle, AlertCircle, CalendarDays, RefreshCw,
-  Trash2, MessageCircle, Plus, Pencil,
+  Trash2, MessageCircle, Plus, Pencil, X, Save,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,15 +21,11 @@ import {
   getLoungeBookings, updateLoungeBookingStatus, deleteLoungeBooking,
   createLoungeBooking, updateLoungeBooking, getTakenSlots, SLOT_TAKEN,
 } from "@/lib/firebase/lounge";
+import { getSiteSettings, updateSiteSettings, DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
 import { todayISO } from "@/lib/booking";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { LoungeBooking, BookingStatus } from "@/types";
-
-const TIME_SLOTS = [
-  "14:00", "15:00", "16:00", "17:00", "18:00",
-  "19:00", "20:00", "21:00", "22:00", "23:00",
-];
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MONTHS = [
@@ -93,6 +89,13 @@ export default function AdminLoungePage() {
   const [savingForm, setSavingForm] = useState(false);
   const [formTaken, setFormTaken] = useState<string[]>([]);
 
+  /* ── Horários disponíveis para reserva (editáveis pelo admin) ── */
+  const [slots, setSlots] = useState<string[]>(DEFAULT_LOUNGE_TIME_SLOTS);
+  const [slotsLoading, setSlotsLoading] = useState(true);
+  const [slotsDirty, setSlotsDirty] = useState(false);
+  const [savingSlots, setSavingSlots] = useState(false);
+  const [newTime, setNewTime] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -105,6 +108,48 @@ export default function AdminLoungePage() {
   }, []);
 
   useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
+
+  /* Carrega os horários configurados (fallback para os padrões se ainda não houver). */
+  useEffect(() => {
+    if (!firebaseReady) return;
+    let active = true;
+    getSiteSettings()
+      .then((s) => {
+        if (!active) return;
+        setSlots(s.lounge?.timeSlots?.length ? s.lounge.timeSlots : DEFAULT_LOUNGE_TIME_SLOTS);
+      })
+      .catch(() => { if (active) toast.error("Não foi possível carregar os horários."); })
+      .finally(() => { if (active) setSlotsLoading(false); });
+    return () => { active = false; };
+  }, [firebaseReady]);
+
+  function addSlot() {
+    const t = newTime.trim();
+    if (!t) return;
+    if (slots.includes(t)) { toast.error("Esse horário já está na lista."); return; }
+    setSlots((prev) => [...prev, t].sort());
+    setNewTime("");
+    setSlotsDirty(true);
+  }
+
+  function removeSlot(t: string) {
+    setSlots((prev) => prev.filter((s) => s !== t));
+    setSlotsDirty(true);
+  }
+
+  async function saveSlots() {
+    if (slots.length === 0) { toast.error("Adicione pelo menos um horário disponível."); return; }
+    setSavingSlots(true);
+    try {
+      await updateSiteSettings({ lounge: { timeSlots: slots } });
+      setSlotsDirty(false);
+      toast.success("Horários do lounge atualizados!");
+    } catch {
+      toast.error("Erro ao salvar horários. Tente novamente.");
+    } finally {
+      setSavingSlots(false);
+    }
+  }
 
   const bookingsByDate = useMemo(() => {
     const map: Record<string, LoungeBooking[]> = {};
@@ -286,6 +331,98 @@ export default function AdminLoungePage() {
             </div>
           }
         />
+
+        {/* Horários disponíveis — editáveis pelo admin */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="mb-6"
+        >
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                Horários disponíveis para reserva
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2 space-y-4">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Estes são os horários liberados no site (página do Lounge) e no formulário de{" "}
+                <strong>Nova reserva</strong> acima. Adicione ou remova os horários que quiser liberar.
+              </p>
+
+              {slotsLoading ? (
+                <div className="flex gap-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="skeleton h-10 w-16 rounded-lg" />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {slots.map((t) => (
+                    <span
+                      key={t}
+                      className="flex items-center gap-1.5 pl-3 pr-1.5 h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-sm font-medium text-[var(--color-text-primary)]"
+                    >
+                      {t}
+                      <button
+                        type="button"
+                        onClick={() => removeSlot(t)}
+                        className="w-5 h-5 rounded-md flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                        aria-label={`Remover horário ${t}`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                  {slots.length === 0 && (
+                    <p className="text-sm text-[var(--color-text-muted)]">
+                      Nenhum horário — adicione abaixo para liberar reservas.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                    Adicionar horário
+                  </label>
+                  <input
+                    type="time"
+                    value={newTime}
+                    onChange={(e) => setNewTime(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSlot(); } }}
+                    className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 h-10 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={addSlot}
+                  disabled={!newTime.trim()}
+                  className="h-10"
+                >
+                  <Plus className="w-4 h-4" /> Adicionar
+                </Button>
+                <Button
+                  type="button"
+                  variant="premium"
+                  size="sm"
+                  onClick={saveSlots}
+                  disabled={!slotsDirty || savingSlots || slotsLoading}
+                  className="h-10"
+                >
+                  {savingSlots
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <><Save className="w-4 h-4" /> Salvar horários</>}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
         <div className="grid lg:grid-cols-5 gap-6 items-start">
 
@@ -667,7 +804,7 @@ export default function AdminLoungePage() {
             <div>
               <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">Horário *</label>
               <div className="grid grid-cols-5 gap-2">
-                {TIME_SLOTS.map((t) => {
+                {slots.map((t) => {
                   const taken = formTaken.includes(t);
                   const active = form.time === t;
                   return (

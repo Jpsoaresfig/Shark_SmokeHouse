@@ -19,8 +19,9 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useSitePayment, useSiteCart } from "@/stores/siteSettingsStore";
+import { useSitePayment, useSiteCart, useBusinessHours } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
+import { isOpenNow, formatTodayStatus } from "@/lib/businessHours";
 import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus } from "@/lib/firebase/orders";
 import { getProducts } from "@/lib/firebase/products";
 import { getCategories } from "@/lib/firebase/categories";
@@ -366,6 +367,8 @@ export default function CheckoutPage() {
   const { items, subtotal, clearCart, closeCart } = cartStore;
   const { pixKey, pixName, creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
   const { freeShippingEnabled, freeShippingThreshold } = useSiteCart();
+  const { businessHours } = useBusinessHours();
+  const hoursStatus = isOpenNow(businessHours);
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
@@ -580,7 +583,10 @@ export default function CheckoutPage() {
     `Olá! Gostaria de fazer um pedido para entrega${neighborhood ? ` no bairro ${neighborhood}` : ""}, que não aparece na lista do site. Pode me ajudar com o frete?`,
   )}`;
 
+  const storeClosed = !!businessHours?.enabled && !hoursStatus.open;
+
   const canSubmit =
+    !storeClosed &&
     (phone.trim() || user.phone) &&
     (isPickup ||
       // Entrega exige endereço completo E um bairro atendido (área selecionada).
@@ -638,6 +644,11 @@ export default function CheckoutPage() {
 
   async function handlePlaceOrder() {
     if (!canSubmit || !user) return;
+    // Horário de funcionamento: fora do expediente a compra não pode ser finalizada.
+    if (businessHours?.enabled && !hoursStatus.open) {
+      toast.error(businessHours.closedMessage?.trim() || `Estamos fechados agora. ${formatTodayStatus(businessHours)}.`);
+      return;
+    }
     // CPF é opcional, mas se preenchido precisa ser válido (gate do Clube Shark).
     if (cpf.trim() && !isValidCpf(cpf)) {
       toast.error("CPF inválido. Confira os números ou deixe o campo em branco.");
@@ -781,6 +792,23 @@ export default function CheckoutPage() {
   return (
     <div className="min-h-screen pt-20 pb-28 md:pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
+
+        {/* Loja fechada — não permite finalizar a compra */}
+        {storeClosed && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-[var(--color-warning)]/25 bg-[var(--color-warning)]/10 px-4 py-3">
+            <AlertCircle className="w-5 h-5 text-[var(--color-warning)] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-warning)]">
+                Estamos fechados no momento
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                {businessHours.closedMessage?.trim()
+                  ? businessHours.closedMessage.trim()
+                  : `Nosso horário de hoje: ${formatTodayStatus(businessHours)}. Você não consegue finalizar a compra agora, mas pode voltar no próximo expediente.`}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Back */}
         <div className="flex items-center gap-3 mb-6 pt-4">
@@ -1247,7 +1275,9 @@ export default function CheckoutPage() {
               </Button>
               {!canSubmit && (
                 <p className="text-xs text-[var(--color-text-muted)] text-center mt-2">
-                  {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
+                  {storeClosed
+                    ? (businessHours.closedMessage?.trim() || "Estamos fechados no momento.")
+                    : isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                 </p>
               )}
             </div>
@@ -1403,7 +1433,9 @@ export default function CheckoutPage() {
                   </Button>
                   {!canSubmit && (
                     <p className="text-xs text-[var(--color-text-muted)] text-center">
-                      {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
+                      {storeClosed
+                        ? (businessHours.closedMessage?.trim() || "Estamos fechados no momento.")
+                        : isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                     </p>
                   )}
                 </div>

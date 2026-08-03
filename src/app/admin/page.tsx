@@ -21,11 +21,13 @@ import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales } from "@/lib/firebase/sales";
-import { saleStatus, saleReceivedAmount, saleOutstanding } from "@/lib/sales/helpers";
+import { saleStatus, saleReceivedAmount, saleOutstanding, internalProductIdsOf, filterNormalSales } from "@/lib/sales/helpers";
 import { resolveOrderPayment } from "@/lib/payments";
 import { toast } from "@/stores/toastStore";
+import { useBusinessHours } from "@/stores/siteSettingsStore";
 import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
 import { AdminTopNav } from "@/components/admin/AdminTopNav";
+import { isOpenNow, formatTodayStatus, configuredDayCount, DEFAULT_BUSINESS_HOURS } from "@/lib/businessHours";
 import type { Order, Product, Sale } from "@/types";
 
 const MONTH_NAMES_SHORT = [
@@ -74,6 +76,8 @@ export default function AdminDashboard() {
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [chartRange, setChartRange] = useState<"daily" | "monthly">("daily");
+  const { businessHours } = useBusinessHours();
+  const hours = businessHours ?? DEFAULT_BUSINESS_HOURS;
   const [dashStats, setDashStats] = useState({
     monthRevenue: 0,        // recebido no mês (caixa: pedidos pagos + recebido das vendas PDV)
     prevMonthRevenue: 0,
@@ -95,12 +99,14 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
         // Dashboard only needs recent data — limit to avoid fetching entire collections
-        const [orders, sales, users, products] = await Promise.all([
+        const [orders, allSales, users, products] = await Promise.all([
           getOrders(200, force),       // last 200 orders covers months of stats
           getSales(undefined, undefined, force), // all PDV sales for revenue calculation
           getAllUsers(500, force),     // last 500 users enough for customer count
           getProducts(force),          // all products needed for low-stock calculation
         ]);
+        // Vendas com produto interno ficam só na área interna (vendas separadas).
+        const sales = filterNormalSales(allSales, internalProductIdsOf(products));
 
 
         const now = new Date();
@@ -437,6 +443,50 @@ export default function AdminDashboard() {
             );
           })}
         </div>
+
+        {/* Aviso de horário de funcionamento — destaca quando não configurado/fechado */}
+        {configuredDayCount(hours) === 0 || (hours.enabled && !isOpenNow(hours).open) ? (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="mb-8"
+          >
+            <Card
+              onClick={() => router.push("/admin/sections")}
+              className={`cursor-pointer transition-all hover:shadow-[var(--shadow-neon-sm)] active:scale-[0.99] ${
+                configuredDayCount(hours) === 0
+                  ? "border-[var(--color-warning)]/40"
+                  : "border-[var(--color-error)]/40"
+              }`}
+            >
+              <CardContent className="p-5 flex items-center gap-4">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                    configuredDayCount(hours) === 0
+                      ? "bg-[var(--color-warning)]/10 border-[var(--color-warning)]/30 text-[var(--color-warning)]"
+                      : "bg-[var(--color-error)]/10 border-[var(--color-error)]/30 text-[var(--color-error)]"
+                  }`}
+                >
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-[var(--color-text-primary)]">
+                    Que horário estamos abertos hoje?
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    {configuredDayCount(hours) === 0
+                      ? "O horário de funcionamento ainda não foi definido. Configure na página Vitrine para exibir no site e bloquear compras fora do expediente."
+                      : `${formatTodayStatus(hours)} — compras estão bloqueadas agora. Clique para ajustar o horário.`}
+                  </p>
+                </div>
+                <Badge variant={configuredDayCount(hours) === 0 ? "warning" : "destructive"} className="shrink-0">
+                  Configurar
+                </Badge>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ) : null}
 
         {/* Faixa financeira do PDV (mês) — vendido (competência) × recebido (caixa) */}
         {!loading && (

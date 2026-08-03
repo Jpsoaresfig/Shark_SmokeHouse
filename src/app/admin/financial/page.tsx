@@ -17,6 +17,7 @@ import { getProducts } from "@/lib/firebase/products";
 import {
   saleStatus, saleIsRevenue, saleReceivedAmount, saleOutstanding,
   saleDiscountTotal, saleCost, saleGrossProfit, saleRealizedProfit, cashEntriesForSale,
+  internalProductIdsOf, filterNormalSales,
 } from "@/lib/sales/helpers";
 import { toast } from "@/stores/toastStore";
 import type { Sale, SalePaymentMethod } from "@/types";
@@ -110,7 +111,8 @@ export default function AdminFinancial() {
         getSales(undefined, undefined, force), // todas: KPIs por data da venda, caixa por data do recebimento
         getProducts(force),
       ]);
-      setSales(allSales);
+      // Vendas com produto interno ficam só na área interna (vendas separadas).
+      setSales(filterNormalSales(allSales, internalProductIdsOf(products)));
       setCostMap(new Map(products.map((p) => [p.id, p.costPrice ?? 0])));
     } catch {
       toast.error("Não foi possível carregar os dados financeiros.");

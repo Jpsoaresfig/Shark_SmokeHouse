@@ -442,6 +442,23 @@ export interface StockMovement {
 }
 
 /* ── Site Settings ───────────────────────────────────────── */
+/** Horário de funcionamento de um dia (formato "HH:MM"). */
+export interface BusinessDayHours {
+  open: string;
+  close: string;
+}
+
+/** Configuração de horário de funcionamento da loja (editável pelo admin).
+ *  Quando ligado, o site exibe o horário e o checkout bloqueia compras fora dele. */
+export interface BusinessHours {
+  /** Liga o limitador de horário (bloqueia compras fora do horário). */
+  enabled: boolean;
+  /** Horários por dia da semana — 7 posições (0 = domingo, 6 = sábado). null = fechado. */
+  days: (BusinessDayHours | null)[];
+  /** Mensagem opcional exibida no site/checkout quando a loja está fechada. */
+  closedMessage: string;
+}
+
 /** Taxa de parcelamento no cartão de crédito (maquininha) para um nº de parcelas. */
 export interface InstallmentFee {
   /** Número de parcelas (>= 2). 1x é à vista (direto), sem taxa de parcelamento. */
@@ -456,6 +473,12 @@ export interface SiteSettings {
     featuredProducts: boolean;
     lounge: boolean;
     events: boolean;
+  };
+  /** Configuração do lounge (editável pelo admin na Agenda do Lounge). */
+  lounge?: {
+    /** Horários (HH:MM) liberados para reserva — aparecem no site e no admin.
+     *  O admin decide quais horários ficam disponíveis, sem lista fixa. */
+    timeSlots?: string[];
   };
   /** Dados de pagamento configuráveis pelo admin. */
   payment: {
@@ -499,6 +522,8 @@ export interface SiteSettings {
     /** Destino do botão: caminho interno (ex.: /catalog?produto=<id>) ou URL. */
     linkUrl?: string;
   };
+  /** Horário de funcionamento da loja (limitador de compras fora do horário). */
+  businessHours?: BusinessHours;
   updatedAt?: string;
 }
 

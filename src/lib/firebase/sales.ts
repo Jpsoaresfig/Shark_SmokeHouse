@@ -426,3 +426,80 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+/** Linha do ranking de produtos (mais/menos vendidos). */
+export interface ProductSalesRow {
+  productName: string;
+  variationName?: string;
+  sku?: string;
+  category?: string;
+  quantity: number;
+  revenue: number;
+}
+
+/**
+ * Agrega o ranking de produtos vendidos a partir das vendas. Exclui vendas
+ * canceladas. Agrupado por produto + variação. Ordenado por quantidade desc
+ * (mais vendidos no topo, menos vendidos no fim).
+ */
+export function aggregateProductSales(sales: Sale[]): ProductSalesRow[] {
+  const map = new Map<string, ProductSalesRow>();
+  for (const sale of sales) {
+    if (saleStatus(sale) === "cancelled") continue;
+    for (const item of sale.items) {
+      const key = `${item.productId}:${item.variationId ?? ""}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+        existing.revenue += item.subtotal;
+      } else {
+        map.set(key, {
+          productName: item.productName,
+          ...(item.variationName ? { variationName: item.variationName } : {}),
+          ...(item.sku ? { sku: item.sku } : {}),
+          ...(item.category ? { category: item.category } : {}),
+          quantity: item.quantity,
+          revenue: item.subtotal,
+        });
+      }
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    b.quantity - a.quantity || b.revenue - a.revenue,
+  );
+}
+
+/** Exporta o ranking de produtos (mais/menos vendidos) em CSV. */
+export function exportProductSalesCSV(
+  rows: ProductSalesRow[],
+  filename?: string,
+): void {
+  const headers = [
+    "Posição", "Produto", "Variação", "SKU", "Categoria",
+    "Qtd Vendida", "Receita Total",
+  ];
+  const csvRows: string[][] = [headers];
+  const money = (n: number) => n.toFixed(2).replace(".", ",");
+  rows.forEach((row, i) => {
+    csvRows.push([
+      String(i + 1),
+      row.productName,
+      row.variationName ?? "",
+      row.sku ?? "",
+      row.category ?? "",
+      String(row.quantity),
+      money(row.revenue),
+    ]);
+  });
+
+  const csv = csvRows
+    .map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(";"))
+    .join("\n");
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename ?? `produtos_mais_vendidos_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}

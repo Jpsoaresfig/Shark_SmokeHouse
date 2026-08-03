@@ -18,8 +18,9 @@ import {
   getReceivables, registerSalePayment, markSalePaid, cancelSale,
   SALE_PAYMENT_LABELS as PAYMENT_LABELS,
 } from "@/lib/firebase/sales";
+import { getProducts } from "@/lib/firebase/products";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleReceivedAmount, saleOutstanding, saleStatus } from "@/lib/sales/helpers";
+import { saleReceivedAmount, saleOutstanding, saleStatus, internalProductIdsOf, filterNormalSales } from "@/lib/sales/helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Sale, SalePaymentMethod } from "@/types";
@@ -77,7 +78,13 @@ export default function AdminReceivables() {
   const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      setItems(await getReceivables(force));
+      const [all, products] = await Promise.all([
+        getReceivables(force),
+        getProducts(force),
+      ]);
+      const internalIds = internalProductIdsOf(products);
+      // Vendas com produto interno ficam só na área interna (vendas separadas).
+      setItems(filterNormalSales(all, internalIds));
     } catch {
       toast.error("Não foi possível carregar as contas a receber.");
     } finally {

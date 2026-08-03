@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { AdminTopNav } from "@/components/admin/AdminTopNav";
 import { getSales, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
+import { getProducts } from "@/lib/firebase/products";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleStatus, saleOutstanding, saleCommission as saleCommissionOf } from "@/lib/sales/helpers";
+import { saleStatus, saleOutstanding, saleCommission as saleCommissionOf, internalProductIdsOf, filterNormalSales } from "@/lib/sales/helpers";
 import { formatCurrency, toDate } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
@@ -31,8 +32,10 @@ export default function SellerDashboard() {
     if (!user?.uid) return;
     setLoading(true);
     try {
-      const all = await getSales();
-      setSales(all.filter((s) => s.sellerId === user.uid));
+      const [all, products] = await Promise.all([getSales(), getProducts()]);
+      // Vendas com produto interno ficam só na área interna (vendas separadas).
+      const normal = filterNormalSales(all, internalProductIdsOf(products));
+      setSales(normal.filter((s) => s.sellerId === user.uid));
     } catch {
       toast.error("Não foi possível carregar suas vendas.");
     } finally {

@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import {
   Package, Plus, Pencil, Trash2, Search, Boxes, Wallet, TrendingUp,
   ArrowDown, ArrowUp, RefreshCw, Wrench, CircleDollarSign, CheckCircle,
-  User, Ban, Lock, EyeOff,
+  User, Ban, Lock, EyeOff, ShoppingCart,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +23,8 @@ import {
   getReceivables, registerSalePayment, markSalePaid, cancelSale,
 } from "@/lib/firebase/sales";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleOutstanding, saleStatus } from "@/lib/sales/helpers";
+import { saleOutstanding, saleStatus, internalProductIdsOf, saleHasInternalItem } from "@/lib/sales/helpers";
+import SalePdv from "@/components/admin/SalePdv";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Product, StockMovement, MovementType, Category, Sale, SalePaymentMethod } from "@/types";
@@ -64,7 +65,7 @@ const EMPTY_PRODUCT = {
   stock: "0", minStock: "5", active: true,
 };
 
-type Tab = "products" | "stock" | "receivables";
+type Tab = "products" | "stock" | "sales" | "receivables";
 
 export default function AdminInternalArea() {
   const router = useRouter();
@@ -113,6 +114,13 @@ export default function AdminInternalArea() {
     () => products.filter(p => p.internal === true),
     [products],
   );
+
+  /* Só as contas a receber de vendas que contêm produto interno — as vendas de
+     produtos normais ficam na área normal (não se misturam com as ocultas). */
+  const internalReceivables = useMemo(() => {
+    const internalIds = internalProductIdsOf(internalProducts);
+    return receivables.filter(s => saleHasInternalItem(s, internalIds));
+  }, [receivables, internalProducts]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -324,9 +332,9 @@ export default function AdminInternalArea() {
 
   const recTotals = useMemo(() => {
     let outstanding = 0;
-    for (const s of receivables) outstanding += saleOutstanding(s);
-    return { outstanding, count: receivables.length };
-  }, [receivables]);
+    for (const s of internalReceivables) outstanding += saleOutstanding(s);
+    return { outstanding, count: internalReceivables.length };
+  }, [internalReceivables]);
 
   /* Guarda de acesso — não renderiza nada para não-admin (evita flash). */
   if (user && !isAdmin) return null;
@@ -334,6 +342,7 @@ export default function AdminInternalArea() {
   const TABS: { key: Tab; label: string; icon: React.ElementType }[] = [
     { key: "products", label: "Produtos", icon: Package },
     { key: "stock", label: "Estoque", icon: Boxes },
+    { key: "sales", label: "Venda", icon: ShoppingCart },
     { key: "receivables", label: "A Receber", icon: CircleDollarSign },
   ];
 
@@ -342,7 +351,7 @@ export default function AdminInternalArea() {
       <div className="max-w-7xl mx-auto">
         <AdminPageHeader
           title="Produtos Ocultos"
-          subtitle="Área interna — visível somente para o admin. Cadastro, estoque e recebíveis."
+          subtitle="Área interna — visível somente para o admin. Cadastro, estoque, vendas e recebíveis."
         />
 
         {/* Selo de área restrita */}
@@ -599,6 +608,21 @@ export default function AdminInternalArea() {
               </div>
             )}
 
+            {/* ── VENDA (PDV de produtos ocultos) ── */}
+            {tab === "sales" && (
+              <SalePdv
+                title="Vendas de Produtos Ocultos"
+                subtitle="PDV interno — registre vendas dos produtos ocultos"
+                embedded
+                showHeader={false}
+                catalogFilter={(products) => products.filter(p => p.internal === true)}
+                historyFilter={(sales, products) =>
+                  sales.filter(s => saleHasInternalItem(s, internalProductIdsOf(products)))
+                }
+                onDataChanged={() => { load(); loadReceivables(true); }}
+              />
+            )}
+
             {/* ── A RECEBER ── */}
             {tab === "receivables" && (
               <div className="space-y-6">
@@ -631,16 +655,16 @@ export default function AdminInternalArea() {
                   <div className="flex justify-center py-16">
                     <div className="w-7 h-7 rounded-full border-2 border-[var(--color-neon-blue)] border-t-transparent animate-spin" />
                   </div>
-                ) : receivables.length === 0 ? (
+                ) : internalReceivables.length === 0 ? (
                   <Card>
                     <CardContent className="flex flex-col items-center py-14 gap-2">
                       <CheckCircle className="w-8 h-8 text-emerald-400" />
-                      <p className="text-sm text-[var(--color-text-muted)]">Nenhuma conta a receber. Tudo em dia! 🎉</p>
+                      <p className="text-sm text-[var(--color-text-muted)]">Nenhuma conta a receber de produto interno. Tudo em dia! 🎉</p>
                     </CardContent>
                   </Card>
                 ) : (
                   <div className="space-y-2">
-                    {receivables.map(sale => (
+                    {internalReceivables.map(sale => (
                       <Card key={sale.id}>
                         <CardContent className="p-4 flex items-center gap-4 flex-wrap">
                           <div className="flex-1 min-w-0">

@@ -8,13 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { createLoungeBooking, getTakenSlots, SLOT_TAKEN } from "@/lib/firebase/lounge";
-import { useSiteSettingsStore, useSiteSections } from "@/stores/siteSettingsStore";
+import { DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
+import { useSiteSettingsStore, useSiteSections, useSiteLounge } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
-
-const timeSlots = [
-  "14:00", "15:00", "16:00", "17:00", "18:00",
-  "19:00", "20:00", "21:00", "22:00", "23:00",
-];
 
 const features = [
   { icon: "🎵", title: "Música ao Vivo", desc: "Sex & Sáb das 20h às 01h" },
@@ -26,6 +22,11 @@ const features = [
 export default function LoungePage() {
   const sections = useSiteSections();
   const settingsLoaded = useSiteSettingsStore((s) => s.loaded);
+  // Horários liberados para reserva — o admin decide na Agenda do Lounge.
+  const loungeSettings = useSiteLounge();
+  const timeSlots = loungeSettings?.timeSlots?.length
+    ? loungeSettings.timeSlots
+    : DEFAULT_LOUNGE_TIME_SLOTS;
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");

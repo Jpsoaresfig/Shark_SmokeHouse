@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Save, RefreshCw, Truck, Megaphone } from "lucide-react";
+import { Eye, EyeOff, Save, RefreshCw, Truck, Megaphone, Clock } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { getSiteSettings, updateSiteSettings } from "@/lib/firebase/settings";
 import { getActiveProducts } from "@/lib/firebase/products";
 import { toast } from "@/stores/toastStore";
-import type { SiteSettings, Product } from "@/types";
+import { DAY_LABELS_FULL, DAY_LABELS, isOpenNow, formatTodayStatus } from "@/lib/businessHours";
+import type { SiteSettings, Product, BusinessHours } from "@/types";
 
 const SECTION_META: {
   key: keyof SiteSettings["sections"];
@@ -61,6 +62,11 @@ export default function AdminSections() {
     ctaLabel: "Quero aproveitar",
     linkUrl: "/catalog",
   });
+  const [hours, setHours] = useState<BusinessHours>({
+    enabled: false,
+    days: [null, null, null, null, null, null, null],
+    closedMessage: "",
+  });
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,6 +79,7 @@ export default function AdminSections() {
       setSections(s.sections);
       setCart(s.cart);
       setPromo(s.promoPopup);
+      if (s.businessHours) setHours(s.businessHours);
     } catch {
       toast.error("Não foi possível carregar as configurações.");
     } finally {
@@ -105,6 +112,11 @@ export default function AdminSections() {
           ctaLabel: promo.ctaLabel?.trim() || "Quero aproveitar",
           linkUrl: promo.linkUrl?.trim() || "/catalog",
         },
+        businessHours: {
+          enabled: hours.enabled,
+          days: hours.days.map((d) => (d ? { ...d } : null)),
+          closedMessage: hours.closedMessage.trim(),
+        },
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -132,6 +144,33 @@ export default function AdminSections() {
   function toggle(key: keyof SiteSettings["sections"]) {
     setSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }
+
+  /** Liga/desliga um dia da semana (setado = aberto, desligado = fechado). */
+  function toggleDay(day: number) {
+    setHours((prev) => {
+      const days = [...prev.days];
+      if (days[day]) {
+        days[day] = null;
+      } else {
+        days[day] = { open: "09:00", close: "22:00" };
+      }
+      return { ...prev, days };
+    });
+  }
+
+  /** Atualiza o horário de abertura/fechamento de um dia. */
+  function setDayTime(day: number, field: "open" | "close", value: string) {
+    setHours((prev) => {
+      const days = [...prev.days];
+      const cur = days[day] ?? { open: "09:00", close: "22:00" };
+      days[day] = { ...cur, [field]: value };
+      return { ...prev, days };
+    });
+  }
+
+  const configuredDays = hours.days.filter(Boolean).length;
+  const nowStatus = isOpenNow(hours);
+  const todaySummary = formatTodayStatus(hours);
 
   const activeCount = Object.values(sections).filter(Boolean).length;
 
@@ -284,6 +323,128 @@ export default function AdminSections() {
                 <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
                   Pedidos com subtotal de produtos a partir deste valor ganham frete grátis na entrega.
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Horário de Funcionamento */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.18 }}
+          className="mt-6"
+        >
+          <Card className={hours.enabled ? "" : "border-[var(--color-border)]"}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                Horário de Funcionamento
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2 space-y-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                    Limitar compras ao horário de funcionamento
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    Quando ligado, o horário aparece na página inicial e compras fora dele são bloqueadas no checkout — o cliente vê o motivo e não consegue finalizar.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span
+                    className={`text-xs font-medium ${
+                      hours.enabled ? "text-[var(--color-neon-blue)]" : "text-[var(--color-text-muted)]"
+                    }`}
+                  >
+                    {hours.enabled ? "Ligado" : "Desligado"}
+                  </span>
+                  <Switch
+                    checked={hours.enabled}
+                    onCheckedChange={(v) => setHours((prev) => ({ ...prev, enabled: v }))}
+                  />
+                </div>
+              </div>
+
+              {/* Status de hoje + aviso de não configurado */}
+              <div
+                className={`flex flex-wrap items-center gap-2 rounded-xl px-3 py-2.5 border text-xs ${
+                  hours.enabled && !nowStatus.open
+                    ? "border-[var(--color-error)]/30 bg-[var(--color-error)]/10 text-[var(--color-error)]"
+                    : hours.enabled
+                      ? "border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-[var(--color-success)]"
+                      : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-muted)]"
+                }`}
+              >
+                <span className="font-semibold">Hoje ({DAY_LABELS_FULL[new Date().getDay()]}):</span>
+                <span>{todaySummary}</span>
+                {hours.enabled && (
+                  <span className="ml-auto font-medium">
+                    {nowStatus.open ? "Aberto agora" : "Fechado agora — compras bloqueadas"}
+                  </span>
+                )}
+              </div>
+
+              {configuredDays === 0 && (
+                <div className="rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2.5 text-xs text-[var(--color-warning)]">
+                  Que horário estamos abertos hoje? Defina os dias abaixo para o horário valer no site.
+                </div>
+              )}
+
+              {/* Dias da semana */}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {DAY_LABELS.map((label, day) => {
+                  const dayHours = hours.days[day];
+                  return (
+                    <div
+                      key={day}
+                      className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                        dayHours
+                          ? "border-[var(--color-neon-blue)]/30 bg-[var(--color-bg-overlay)]"
+                          : "border-[var(--color-border)] bg-transparent opacity-60"
+                      }`}
+                    >
+                      <Switch checked={!!dayHours} onCheckedChange={() => toggleDay(day)} className="shrink-0" />
+                      <span className={`text-xs font-semibold w-16 shrink-0 ${dayHours ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-muted)]"}`}>
+                        {label}
+                      </span>
+                      {dayHours ? (
+                        <div className="flex items-center gap-1.5 ml-auto">
+                          <Input
+                            type="time"
+                            value={dayHours.open}
+                            onChange={(e) => setDayTime(day, "open", e.target.value)}
+                            className="h-8 w-[110px] text-xs px-2"
+                          />
+                          <span className="text-xs text-[var(--color-text-muted)]">às</span>
+                          <Input
+                            type="time"
+                            value={dayHours.close}
+                            onChange={(e) => setDayTime(day, "close", e.target.value)}
+                            className="h-8 w-[110px] text-xs px-2"
+                          />
+                        </div>
+                      ) : (
+                        <span className="ml-auto text-xs text-[var(--color-text-muted)]">Fechado</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)] block mb-1.5">
+                  Mensagem exibida quando a loja está fechada (opcional)
+                </label>
+                <textarea
+                  value={hours.closedMessage}
+                  maxLength={140}
+                  rows={2}
+                  placeholder="Ex.: Estamos fechados no momento. Volte entre 10h e 22h!"
+                  onChange={(e) => setHours((prev) => ({ ...prev, closedMessage: e.target.value }))}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
+                />
               </div>
             </CardContent>
           </Card>

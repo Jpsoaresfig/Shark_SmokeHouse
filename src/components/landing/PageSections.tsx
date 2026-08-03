@@ -5,6 +5,7 @@ import { StoreProducts } from "@/components/landing/StoreProducts";
 import { FeaturedProducts } from "@/components/landing/FeaturedProducts";
 import { LoungeSection } from "@/components/landing/LoungeSection";
 import { EventsSection } from "@/components/landing/EventsSection";
+import { BusinessHoursBanner } from "@/components/landing/BusinessHoursBanner";
 import { useSiteSections } from "@/stores/siteSettingsStore";
 
 export function PageSections() {
@@ -12,6 +13,7 @@ export function PageSections() {
 
   return (
     <>
+      <BusinessHoursBanner />
       {sections.hero && <HeroSection />}
       {/* Destaque primeiro (vitrine comercial), depois o catálogo completo. */}
       {sections.featuredProducts && <FeaturedProducts />}

@@ -151,11 +151,22 @@ export async function updateUserProfile(
 
 export async function getAllUsers(limitCount?: number, force = false): Promise<UserProfile[]> {
   return cached(`users:${limitCount ?? "all"}`, async () => {
-    const q = limitCount
-      ? query(collection(db, COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
-      : query(collection(db, COLLECTION), orderBy("createdAt", "desc"));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => d.data() as UserProfile);
+    try {
+      // Preferência: mais recentes primeiro (para o admin listar na ordem certa).
+      const q = limitCount
+        ? query(collection(db, COLLECTION), orderBy("createdAt", "desc"), limit(limitCount))
+        : query(collection(db, COLLECTION), orderBy("createdAt", "desc"));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => d.data() as UserProfile);
+    } catch (err) {
+      // Se a ordenação falhar (ex.: algum perfil antigo sem `createdAt`), o
+      // Firestore derruba a query inteira e a busca de clientes ficaria vazia.
+      // Cai para a leitura sem orderBy para o PDV/Usuários seguirem funcionando.
+      console.warn("[getAllUsers] orderBy falhou, lendo sem ordenação:", err);
+      const snap = await getDocs(collection(db, COLLECTION));
+      const docs = snap.docs.map(d => d.data() as UserProfile);
+      return limitCount ? docs.slice(0, limitCount) : docs;
+    }
   }, force);
 }
 

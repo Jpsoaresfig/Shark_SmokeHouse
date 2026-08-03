@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { getSiteSettings } from "@/lib/firebase/settings";
 import { DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
+import { DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
 import type { SiteSettings } from "@/types";
 
 const DEFAULT: SiteSettings["sections"] = {
@@ -11,6 +12,10 @@ const DEFAULT: SiteSettings["sections"] = {
   featuredProducts: true,
   lounge: true,
   events: true,
+};
+
+const DEFAULT_LOUNGE: SiteSettings["lounge"] = {
+  timeSlots: DEFAULT_LOUNGE_TIME_SLOTS,
 };
 
 const DEFAULT_PAYMENT: SiteSettings["payment"] = {
@@ -36,11 +41,19 @@ const DEFAULT_PROMO: SiteSettings["promoPopup"] = {
   linkUrl: "/catalog",
 };
 
+const DEFAULT_BUSINESS_HOURS: SiteSettings["businessHours"] = {
+  enabled: false,
+  days: [null, null, null, null, null, null, null],
+  closedMessage: "",
+};
+
 interface SiteSettingsStore {
   sections: SiteSettings["sections"];
+  lounge: SiteSettings["lounge"];
   payment: SiteSettings["payment"];
   cart: SiteSettings["cart"];
   promoPopup: SiteSettings["promoPopup"];
+  businessHours: SiteSettings["businessHours"];
   loaded: boolean;
   load: () => Promise<void>;
 }
@@ -49,16 +62,18 @@ let inFlight: Promise<void> | null = null;
 
 export const useSiteSettingsStore = create<SiteSettingsStore>((set) => ({
   sections: DEFAULT,
+  lounge: DEFAULT_LOUNGE,
   payment: DEFAULT_PAYMENT,
   cart: DEFAULT_CART,
   promoPopup: DEFAULT_PROMO,
+  businessHours: DEFAULT_BUSINESS_HOURS,
   loaded: false,
   load: async () => {
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
         const s = await getSiteSettings();
-        set({ sections: s.sections, payment: s.payment, cart: s.cart, promoPopup: s.promoPopup, loaded: true });
+        set({ sections: s.sections, lounge: s.lounge, payment: s.payment, cart: s.cart, promoPopup: s.promoPopup, businessHours: s.businessHours, loaded: true });
       } catch {
         set({ loaded: true });
       }
@@ -75,6 +90,17 @@ export function useSiteSections() {
     load();
   }, [load]);
   return sections;
+}
+
+/** Loads the site settings once and exposes the live `lounge` config
+ *  (horários disponíveis para reserva — editáveis na Agenda do Lounge). */
+export function useSiteLounge() {
+  const lounge = useSiteSettingsStore((s) => s.lounge);
+  const load = useSiteSettingsStore((s) => s.load);
+  useEffect(() => {
+    load();
+  }, [load]);
+  return lounge;
 }
 
 /** Loads the site settings once and exposes the live `payment` config. */
@@ -106,4 +132,15 @@ export function usePromoPopup() {
     load();
   }, [load]);
   return { promoPopup, loaded };
+}
+
+/** Loads the site settings once and exposes the live `businessHours` config. */
+export function useBusinessHours() {
+  const businessHours = useSiteSettingsStore((s) => s.businessHours);
+  const loaded = useSiteSettingsStore((s) => s.loaded);
+  const load = useSiteSettingsStore((s) => s.load);
+  useEffect(() => {
+    load();
+  }, [load]);
+  return { businessHours, loaded };
 }

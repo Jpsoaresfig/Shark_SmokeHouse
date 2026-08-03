@@ -12,6 +12,7 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
 import { getStockMovements, addStockMovement } from "@/lib/firebase/inventory";
 import { getAllUsers } from "@/lib/firebase/users";
+import { internalProductIdsOf } from "@/lib/sales/helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Product, StockMovement, MovementType } from "@/types";
@@ -48,8 +49,10 @@ export default function AdminInventory() {
     setLoading(true);
     try {
       const [prods, movs] = await Promise.all([getProducts(), getStockMovements()]);
-      setProducts(prods);
-      setMovements(movs);
+      const internalIds = internalProductIdsOf(prods);
+      // Produtos internos/ocultos têm área própria (estoque + movimentações).
+      setProducts(prods.filter(p => p.internal !== true));
+      setMovements(movs.filter(m => !internalIds.has(m.productId)));
       // Resolve os nomes de quem movimentou (best-effort; sem permissão é ignorado).
       try {
         const users = await getAllUsers();

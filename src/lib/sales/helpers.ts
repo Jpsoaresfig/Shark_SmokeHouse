@@ -118,6 +118,28 @@ export interface CashEntry {
 }
 
 /**
+ * A venda contém pelo menos um produto interno/oculto? Vendas com item interno
+ * são contabilizadas SOMENTE na área interna (/admin/internal) e nunca nas
+ * áreas normais (recebíveis, financeiro, vendas, dashboard) — vendas separadas.
+ */
+export function saleHasInternalItem(sale: Sale, internalProductIds: Set<string>): boolean {
+  return (sale.items ?? []).some(item => internalProductIds.has(item.productId));
+}
+
+/** Filtra uma lista de vendas deixando apenas as que NÃO têm produto interno. */
+export function filterNormalSales(sales: Sale[], internalProductIds: Set<string>): Sale[] {
+  if (internalProductIds.size === 0) return sales;
+  return sales.filter(s => !saleHasInternalItem(s, internalProductIds));
+}
+
+/** Extrai o Set de IDs dos produtos internos/ocultos de uma lista de produtos. */
+export function internalProductIdsOf(
+  products: { id: string; internal?: boolean }[],
+): Set<string> {
+  return new Set(products.filter(p => p.internal === true).map(p => p.id));
+}
+
+/**
  * Entradas de caixa de uma venda (para o fluxo de caixa). Usa o histórico de
  * `payments` quando existe; senão, vendas legadas/quitadas sem histórico contam
  * o recebido na data da venda. Canceladas não geram entrada.

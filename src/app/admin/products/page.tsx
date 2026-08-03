@@ -364,7 +364,10 @@ export default function AdminProducts() {
     }
   }
 
-  const filtered = products.filter(p =>
+  /* Produtos normais (exclui os internos/ocultos — geridos na área interna). */
+  const normalProducts = products.filter(p => p.internal !== true);
+
+  const filtered = normalProducts.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase()) ||
     p.sku?.toLowerCase().includes(search.toLowerCase())
   );
@@ -374,7 +377,7 @@ export default function AdminProducts() {
       <div className="max-w-7xl mx-auto">
         <AdminPageHeader
           title="Produtos"
-          subtitle={`${products.length} cadastrado${products.length !== 1 ? "s" : ""}`}
+          subtitle={`${normalProducts.length} cadastrado${normalProducts.length !== 1 ? "s" : ""}`}
           action={
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="secondary" onClick={openCategories}>
@@ -447,7 +450,6 @@ export default function AdminProducts() {
                             <Badge variant="secondary">{categoryLabel(p.category)}</Badge>
                             {p.featured && <Badge variant="premium">Em Destaque</Badge>}
                             {p.storeHighlight && <Badge variant="default">Vitrine</Badge>}
-                            {p.internal && <Badge variant="warning">Interno</Badge>}
                             {p.doublePoints && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-[var(--color-warning)]/10 text-[var(--color-warning)] border border-[var(--color-warning)]/30">
                                 <Star className="w-3 h-3" /> Pontos 2×
@@ -987,7 +989,7 @@ export default function AdminProducts() {
       <ImportSpreadsheetDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        products={products}
+        products={normalProducts}
         categories={categories}
         onDone={async () => { await load(); await loadCategories(); }}
       />
