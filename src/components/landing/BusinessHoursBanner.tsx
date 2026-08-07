@@ -32,7 +32,7 @@ export function BusinessHoursBanner() {
             ? `${formatTodayStatus(businessHours)} — estamos abertos!`
             : (businessHours.closedMessage?.trim()
                 ? businessHours.closedMessage.trim()
-                : `Estamos fechados agora. ${formatTodayStatus(businessHours)}.`)}
+                : `A loja está fechada no momento. ${formatTodayStatus(businessHours)}. Quando ela abrir, seu pedido é liberado automaticamente.`)}
         </span>
         {!open && (
           <Link href="/catalog" className="underline underline-offset-2 hover:opacity-80">

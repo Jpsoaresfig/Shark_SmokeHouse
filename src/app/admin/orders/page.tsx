@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus, assignOrderMotoboy } from "@/lib/firebase/orders";
+import { useBusinessHours } from "@/stores/siteSettingsStore";
+import { isOpenNow } from "@/lib/businessHours";
 import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { awardPurchasePointsForOrder } from "@/lib/firebase/loyalty";
 import { getAllUsers } from "@/lib/firebase/users";
@@ -27,6 +29,7 @@ import { toast } from "@/stores/toastStore";
 import type { Order, OrderStatus, PaymentStatus, UserProfile } from "@/types";
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; badge: "secondary" | "warning" | "default" | "purple" | "orange" | "success" | "destructive"; icon: React.ElementType }> = {
+  reserved:         { label: "Reservado",          badge: "warning",     icon: Clock },
   received:         { label: "Recebido",         badge: "secondary",    icon: Clock },
   analyzing:        { label: "Em Análise",        badge: "warning",     icon: Clock },
   approved:         { label: "Aprovado",          badge: "default",     icon: CheckCircle },
@@ -38,6 +41,7 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; badge: "secondary" | "
 
 const ALL_STATUSES = Object.keys(STATUS_CONFIG) as OrderStatus[];
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
+  reserved: "received",
   received: "analyzing",
   analyzing: "approved",
   approved: "preparing",
@@ -59,6 +63,8 @@ function waNotifyLink(phone: string, name: string, kind: "out_for_delivery" | "d
 
 export default function AdminOrders() {
   const { user } = useAuthStore();
+  const { businessHours } = useBusinessHours();
+  const storeOpen = isOpenNow(businessHours).open;
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
@@ -75,6 +81,7 @@ export default function AdminOrders() {
   const [motoboys, setMotoboys] = useState<UserProfile[]>([]);
   const [assigningMotoboy, setAssigningMotoboy] = useState(false);
   const [awardingPoints, setAwardingPoints] = useState(false);
+  const [processingQueue, setProcessingQueue] = useState(false);
   useEffect(() => {
     getAllUsers()
       .then(users => setMotoboys(users.filter(u => u.role === "motoboy")))
@@ -114,6 +121,25 @@ export default function AdminOrders() {
       toast.error("Erro ao creditar os pontos.");
     } finally {
       setAwardingPoints(false);
+    }
+  }
+
+  /** Libera manualmente a fila de pedidos reservados (feitos fora do horário).
+      O cron faz isso sozinho quando a loja abre; aqui é o botão à prova de
+      falhas para o admin processar na hora, sem esperar a próxima execução. */
+  async function handleProcessQueue() {
+    const pending = orders.filter(o => o.status === "reserved");
+    if (pending.length === 0) return;
+    setProcessingQueue(true);
+    try {
+      for (const o of pending) {
+        await updateOrderStatus(o.id, "received", "Loja abriu — pedido saiu da fila de espera.");
+      }
+      toast.success(`${pending.length} pedido${pending.length !== 1 ? "s" : ""} liberado${pending.length !== 1 ? "s" : ""} da fila de espera!`);
+    } catch {
+      toast.error("Erro ao processar a fila. Tente novamente.");
+    } finally {
+      setProcessingQueue(false);
     }
   }
 
@@ -253,6 +279,34 @@ export default function AdminOrders() {
             {soundOn ? "Som ligado" : "Som desligado"}
           </button>
         </div>
+
+        {/* Fila de pedidos reservados (feitos fora do horário de funcionamento) */}
+        {counts.reserved > 0 && (
+          <div className={`mb-4 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-xs ${
+            storeOpen
+              ? "border-[var(--color-success)]/30 bg-[var(--color-success)]/10 text-[var(--color-success)]"
+              : "border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 text-[var(--color-warning)]"
+          }`}>
+            <Clock className="w-4 h-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">
+                {counts.reserved} pedido{counts.reserved !== 1 ? "s" : ""} reservado{counts.reserved !== 1 ? "s" : ""} na fila de espera
+              </p>
+              <p className={storeOpen ? "text-[var(--color-success)]/80" : "text-[var(--color-warning)]/80"}>
+                {storeOpen
+                  ? "A loja está aberta — libere os pedidos para entrarem no processamento."
+                  : "A loja está fechada. Os pedidos são liberados automaticamente quando a loja abrir."}
+              </p>
+            </div>
+            {storeOpen && (
+              <Button variant="premium" size="sm" onClick={handleProcessQueue} disabled={processingQueue}>
+                {processingQueue
+                  ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  : `Liberar ${counts.reserved} pedido${counts.reserved !== 1 ? "s" : ""} agora`}
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Busca por código do pedido, nome ou telefone */}
         <div className="relative mb-4">
@@ -401,6 +455,12 @@ export default function AdminOrders() {
 
           {selected && (
             <div className="space-y-5">
+              {selected.status === "reserved" && (
+                <div className="flex items-center gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5 text-sm text-[var(--color-warning)]">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  Pedido feito fora do horário de funcionamento — reservado na fila de espera. Libere quando a loja abrir para continuar o processamento.
+                </div>
+              )}
               {selected.awaitingConfirmation && (
                 <div className="flex items-center gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5 text-sm text-[var(--color-warning)]">
                   <Clock className="w-4 h-4 shrink-0" />

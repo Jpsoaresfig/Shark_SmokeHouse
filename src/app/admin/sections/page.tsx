@@ -349,7 +349,7 @@ export default function AdminSections() {
                     Limitar compras ao horário de funcionamento
                   </p>
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                    Quando ligado, o horário aparece na página inicial e compras fora dele são bloqueadas no checkout — o cliente vê o motivo e não consegue finalizar.
+                    Quando ligado, o horário aparece na página inicial e pedidos fora dele são reservados (entram na fila de espera) — o cliente vê o motivo e o processamento começa assim que a loja abrir.
                   </p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
@@ -381,7 +381,7 @@ export default function AdminSections() {
                 <span>{todaySummary}</span>
                 {hours.enabled && (
                   <span className="ml-auto font-medium">
-                    {nowStatus.open ? "Aberto agora" : "Fechado agora — compras bloqueadas"}
+                    {nowStatus.open ? "Aberto agora" : "Fechado agora — pedidos entram na fila de espera"}
                   </span>
                 )}
               </div>

@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/loyalty-maintenance",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/orders-queue",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

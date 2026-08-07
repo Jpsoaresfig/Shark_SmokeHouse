@@ -10,7 +10,7 @@ import {
   ArrowLeft, Phone, Truck, ShoppingBag, Receipt,
   Loader2, QrCode, Banknote, Plus, Star,
   Copy, Check, User, LogIn, MessageCircle, Wallet, CreditCard, AlertCircle, Ticket,
-  Home, Bookmark,
+  Home, Bookmark, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,7 +116,7 @@ function buildProofLink(orderId: string, total: number) {
 }
 
 /* ── Success screen ──────────────────────────────────────── */
-function SuccessScreen({ orderId, payment, waLink, total, installments }: { orderId: string; payment: PaymentMethod; waLink: string; total: number; installments: number }) {
+function SuccessScreen({ orderId, payment, waLink, total, installments, reserved }: { orderId: string; payment: PaymentMethod; waLink: string; total: number; installments: number; reserved?: boolean }) {
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
@@ -162,13 +162,39 @@ function SuccessScreen({ orderId, payment, waLink, total, installments }: { orde
           <CheckCircle className="w-10 h-10 text-[var(--color-success)]" />
         </motion.div>
 
-        <h1 className="text-2xl font-black text-[var(--color-text-primary)] mb-2">Pedido confirmado!</h1>
+        <h1 className="text-2xl font-black text-[var(--color-text-primary)] mb-2">
+          {reserved ? "Pedido reservado!" : "Pedido confirmado!"}
+        </h1>
         <p className="text-sm text-[var(--color-text-muted)] mb-2">
-          Seu pedido foi recebido e está sendo processado.
+          {reserved
+            ? "A loja está fechada no momento. Quando ela abrir, seu pedido será liberado automaticamente e entraremos em contato."
+            : "Seu pedido foi recebido e está sendo processado."}
         </p>
         <p className="text-xs font-mono text-[var(--color-neon-blue)] mb-8">
           #{orderId.slice(-8).toUpperCase()}
         </p>
+
+        {reserved && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.25 }}
+            className="flex items-start gap-3 rounded-2xl border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-5 mb-6 text-left"
+          >
+            <Clock className="w-5 h-5 text-[var(--color-warning)] shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-bold text-[var(--color-warning)]">
+                A loja está fechada no momento
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)] mt-1">
+                Seu pedido foi <strong className="text-[var(--color-text-primary)]">reservado automaticamente</strong>.
+                Quando a loja abrir, ele é liberado sozinho e continuamos o processo
+                normalmente (preparação, entrega ou retirada). Acompanhe o status em{" "}
+                <strong className="text-[var(--color-text-primary)]">Meus Pedidos</strong>.
+              </p>
+            </div>
+          </motion.div>
+        )}
 
         {payment === "mercadopago" && (
           <motion.div
@@ -427,6 +453,8 @@ export default function CheckoutPage() {
   const [waLink, setWaLink] = useState("");
   /* total congelado no momento do pedido (o carrinho é limpo antes da tela de sucesso) */
   const [paidTotal, setPaidTotal] = useState(0);
+  /* pedido feito fora do horário de funcionamento — reservado na fila de espera */
+  const [reservedOrder, setReservedOrder] = useState(false);
 
   const savedAddresses = user?.addresses ?? [];
   // Estimativa de pontos pela engine do Clube Shark: taxa do nível atual sobre o
@@ -549,7 +577,7 @@ export default function CheckoutPage() {
   }
 
   if (orderId) {
-    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} installments={payment === "credit" ? creditInstallments : 1} />;
+    return <SuccessScreen orderId={orderId} payment={payment} waLink={waLink} total={paidTotal} installments={payment === "credit" ? creditInstallments : 1} reserved={reservedOrder} />;
   }
 
   const isPickup = fulfillment === "pickup";
@@ -586,7 +614,6 @@ export default function CheckoutPage() {
   const storeClosed = !!businessHours?.enabled && !hoursStatus.open;
 
   const canSubmit =
-    !storeClosed &&
     (phone.trim() || user.phone) &&
     (isPickup ||
       // Entrega exige endereço completo E um bairro atendido (área selecionada).
@@ -644,11 +671,11 @@ export default function CheckoutPage() {
 
   async function handlePlaceOrder() {
     if (!canSubmit || !user) return;
-    // Horário de funcionamento: fora do expediente a compra não pode ser finalizada.
-    if (businessHours?.enabled && !hoursStatus.open) {
-      toast.error(businessHours.closedMessage?.trim() || `Estamos fechados agora. ${formatTodayStatus(businessHours)}.`);
-      return;
-    }
+    // Fora do horário de funcionamento o pedido NÃO é bloqueado: ele é criado
+    // como "reservado" e entra na fila de espera — o processamento (preparação,
+    // entrega, etc.) continua assim que a loja abrir (automático por cron ou
+    // liberado pelo admin). O cliente vê o aviso na tela de sucesso.
+    const isReserved = !!businessHours?.enabled && !hoursStatus.open;
     // CPF é opcional, mas se preenchido precisa ser válido (gate do Clube Shark).
     if (cpf.trim() && !isValidCpf(cpf)) {
       toast.error("CPF inválido. Confira os números ou deixe o campo em branco.");
@@ -715,19 +742,24 @@ export default function CheckoutPage() {
         cardFee: cardFeeAmount,
         discount: discount > 0 ? discount : undefined,
         total: effectiveTotal,
-        status: "received",
+        status: isReserved ? "reserved" : "received",
         payment: paymentInfo,
         paymentMethod: payment,            // espelho legado
         paymentStatus: paymentInfo.status, // espelho legado
         deliveryAddress: address,
         notes: [
           isPickup ? "Retirada na loja" : "",
+          isReserved ? "Pedido feito fora do horário — reservado na fila de espera até a loja abrir." : "",
           payment === "on_delivery" && changeFor.trim()
             ? `Troco para R$ ${changeFor.replace(/^R\$\s*/i, "").trim()}`
             : "",
           notes.trim(),
         ].filter(Boolean).join(" — ") || undefined,
-        statusHistory: [{ status: "received", timestamp: new Date().toISOString() }],
+        statusHistory: [{
+          status: isReserved ? "reserved" : "received",
+          timestamp: new Date().toISOString(),
+          note: isReserved ? "Pedido reservado fora do horário — aguardando a loja abrir" : "",
+        }],
         pointsEarned: pointsToEarn,
         ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
       });
@@ -777,6 +809,7 @@ export default function CheckoutPage() {
         address: addressLine,
       }));
       setPaidTotal(effectiveTotal);
+      setReservedOrder(isReserved);
 
       closeCart();
       clearCart();
@@ -793,18 +826,20 @@ export default function CheckoutPage() {
     <div className="min-h-screen pt-20 pb-28 md:pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
 
-        {/* Loja fechada — não permite finalizar a compra */}
+        {/* Loja fechada — aviso informativo (o pedido entra na fila de espera) */}
         {storeClosed && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-[var(--color-warning)]/25 bg-[var(--color-warning)]/10 px-4 py-3">
             <AlertCircle className="w-5 h-5 text-[var(--color-warning)] shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-[var(--color-warning)]">
-                Estamos fechados no momento
+                A loja está fechada no momento
               </p>
               <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
                 {businessHours.closedMessage?.trim()
                   ? businessHours.closedMessage.trim()
-                  : `Nosso horário de hoje: ${formatTodayStatus(businessHours)}. Você não consegue finalizar a compra agora, mas pode voltar no próximo expediente.`}
+                  : `Nosso horário de hoje: ${formatTodayStatus(businessHours)}.`}{" "}
+                Seu pedido será <strong className="text-[var(--color-text-primary)]">reservado automaticamente</strong> —
+                quando a loja abrir, ele é liberado sozinho e continuamos o processo.
               </p>
             </div>
           </div>
@@ -1275,9 +1310,7 @@ export default function CheckoutPage() {
               </Button>
               {!canSubmit && (
                 <p className="text-xs text-[var(--color-text-muted)] text-center mt-2">
-                  {storeClosed
-                    ? (businessHours.closedMessage?.trim() || "Estamos fechados no momento.")
-                    : isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
+                  {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                 </p>
               )}
             </div>
@@ -1433,9 +1466,7 @@ export default function CheckoutPage() {
                   </Button>
                   {!canSubmit && (
                     <p className="text-xs text-[var(--color-text-muted)] text-center">
-                      {storeClosed
-                        ? (businessHours.closedMessage?.trim() || "Estamos fechados no momento.")
-                        : isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
+                      {isPickup ? "Informe seu WhatsApp para continuar" : "Preencha o endereço completo para continuar"}
                     </p>
                   )}
                 </div>

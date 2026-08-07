@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
-import type { Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent } from "@/types";
+import { isOpenNow, zonedClock, STORE_TIMEZONE } from "@/lib/businessHours";
+import type { Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent, BusinessHours } from "@/types";
 
 /**
  * Operações de pedido executadas no SERVIDOR via Firebase Admin SDK.
@@ -75,8 +76,11 @@ export async function applyPaymentStatusAdmin(
   return true;
 }
 
-/* Ordem do funil de entrega — usada para nunca retroceder o status. */
+/* Ordem do funil de entrega — usada para nunca retroceder o status.
+   "reserved" fica abaixo de tudo: pedidos reservados fora do horário podem
+   avançar para qualquer status assim que a loja abrir ou o pagamento cair. */
 const STATUS_RANK: Record<OrderStatus, number> = {
+  reserved: -1,
   received: 0,
   analyzing: 1,
   approved: 2,
@@ -121,4 +125,62 @@ export async function advanceOrderStatusAdmin(
     updatedAt: FieldValue.serverTimestamp(),
   });
   return true;
+}
+
+/**
+ * Processa a fila de pedidos RESERVADOS (feitos fora do horário de funcionamento):
+ * quando a loja está ABERTA agora, move cada pedido `reserved` para `received`,
+ * entrando na fila normal de processamento. Roda no servidor (cron) e pode ser
+ * chamada pelo admin. Idempotente — só mexe em pedidos ainda `reserved`.
+ * Retorna quantos foram liberados e quantos continuam aguardando a abertura.
+ */
+export async function processReservedQueue(
+  now: Date = new Date(),
+): Promise<{ processed: number; waiting: number }> {
+  const db = getAdminDb();
+
+  // Lê o horário de funcionamento (settings/site) e decide se está aberto agora
+  // no fuso da loja (o servidor roda em UTC — `new Date()` não reflete a loja).
+  const settings = await db.collection("settings").doc("site").get().catch(() => null);
+  const raw = settings?.data()?.businessHours as
+    | { enabled?: boolean; days?: Array<{ open?: string; close?: string } | null> }
+    | undefined;
+  const businessHours: BusinessHours | undefined = raw
+    ? {
+        enabled: raw.enabled ?? false,
+        days: (Array.isArray(raw.days) ? raw.days : []).slice(0, 7).map((d) => {
+          if (!d || !/^\d{2}:\d{2}$/.test(d.open ?? "") || !/^\d{2}:\d{2}$/.test(d.close ?? "")) {
+            return null;
+          }
+          return { open: d.open!, close: d.close! };
+        }),
+        closedMessage: "",
+      }
+    : undefined;
+
+  if (!isOpenNow(businessHours, zonedClock(STORE_TIMEZONE, now)).open) {
+    // Ainda fechado — a fila continua aguardando. Conta para informar o admin.
+    const waitingSnap = await db.collection(COL).where("status", "==", "reserved").get();
+    return { processed: 0, waiting: waitingSnap.size };
+  }
+
+  const snap = await db.collection(COL).where("status", "==", "reserved").get();
+  if (snap.empty) return { processed: 0, waiting: 0 };
+
+  const note = "Loja abriu — pedido saiu da fila de espera e entrou no processamento.";
+  const event: StatusEvent = { status: "received", timestamp: now.toISOString(), note };
+  // Firestore limita o batch em 500 operações — divide em lotes menores.
+  const CHUNK = 400;
+  for (let i = 0; i < snap.docs.length; i += CHUNK) {
+    const batch = db.batch();
+    for (const d of snap.docs.slice(i, i + CHUNK)) {
+      batch.update(d.ref, {
+        status: "received",
+        statusHistory: FieldValue.arrayUnion(event),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+  return { processed: snap.size, waiting: 0 };
 }

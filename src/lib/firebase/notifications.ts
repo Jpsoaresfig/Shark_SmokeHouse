@@ -61,6 +61,7 @@ export async function markNotificationsRead(ids: string[]): Promise<void> {
 
 /** Texto da notificação para cada status de pedido. */
 const ORDER_STATUS_NOTIF: Partial<Record<OrderStatus, { title: string; body: string }>> = {
+  reserved:         { title: "Pedido reservado ⏳", body: "Pedido feito fora do horário — reservado na fila de espera até a loja abrir." },
   received:         { title: "Pedido recebido",      body: "Recebemos seu pedido e já estamos cuidando dele." },
   analyzing:        { title: "Pedido em análise",    body: "Seu pedido está sendo analisado." },
   approved:         { title: "Pedido aprovado",      body: "Seu pedido foi aprovado e vai para a preparação." },

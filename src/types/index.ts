@@ -169,6 +169,7 @@ export interface CartItem {
 
 /* ── Order ───────────────────────────────────────────────── */
 export type OrderStatus =
+  | "reserved"
   | "received"
   | "analyzing"
   | "approved"

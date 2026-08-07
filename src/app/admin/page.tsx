@@ -58,6 +58,7 @@ function timeAgo(date: Date): string {
 }
 
 const statusConfig = {
+  reserved: { label: "Reservado", variant: "warning" as const, icon: Clock },
   received: { label: "Recebido", variant: "secondary" as const, icon: Clock },
   analyzing: { label: "Em Análise", variant: "warning" as const, icon: Clock },
   approved: { label: "Aprovado", variant: "default" as const, icon: CheckCircle },
@@ -476,8 +477,8 @@ export default function AdminDashboard() {
                   </p>
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                     {configuredDayCount(hours) === 0
-                      ? "O horário de funcionamento ainda não foi definido. Configure na página Vitrine para exibir no site e bloquear compras fora do expediente."
-                      : `${formatTodayStatus(hours)} — compras estão bloqueadas agora. Clique para ajustar o horário.`}
+                      ? "O horário de funcionamento ainda não foi definido. Configure na página Vitrine para exibir no site e limitar compras fora do expediente."
+                      : `${formatTodayStatus(hours)} — pedidos agora entram na fila de espera até a loja abrir. Clique para ajustar o horário.`}
                   </p>
                 </div>
                 <Badge variant={configuredDayCount(hours) === 0 ? "warning" : "destructive"} className="shrink-0">

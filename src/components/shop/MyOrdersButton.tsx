@@ -13,6 +13,7 @@ const isActive = (s: OrderStatus) => s !== "delivered" && s !== "cancelled";
 
 /** Mensagem curta de toast quando o status de um pedido do cliente muda. */
 const STATUS_MSG: Record<OrderStatus, string> = {
+  reserved:         "Pedido reservado — entra na fila quando a loja abrir",
   received:         "Pedido recebido ✅",
   analyzing:        "Seu pedido está em análise",
   approved:         "Pedido aprovado! 🎉",

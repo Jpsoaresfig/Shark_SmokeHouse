@@ -22,6 +22,36 @@ export const DAY_LABELS_FULL = [
 
 const ALL_DAYS_EMPTY: (BusinessDayHours | null)[] = [null, null, null, null, null, null, null];
 
+/** Fuso horário da loja (João Pessoa/PB — sem horário de verão desde 2019).
+ *  Usado no servidor (cron), onde o relógio roda em UTC. */
+export const STORE_TIMEZONE = "America/Fortaleza";
+
+/** Relógio "local" de um fuso: expõe só o que `isOpenNow` precisa
+ *  (getDay/getHours/getMinutes), já convertido para o fuso informado. */
+export interface ZonedClock {
+  getDay(): number;
+  getHours(): number;
+  getMinutes(): number;
+}
+
+/** Converte uma data do servidor (UTC) para o relógio do fuso informado. */
+export function zonedClock(timeZone: string, now: Date = new Date()): ZonedClock {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const value = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(value("weekday"));
+  return {
+    getDay: () => (weekdayIndex < 0 ? now.getUTCDay() : weekdayIndex),
+    getHours: () => Number(value("hour")) % 24,
+    getMinutes: () => Number(value("minute")),
+  };
+}
+
 /** Conta quantos dias da semana têm horário configurado. */
 export function configuredDayCount(hours: BusinessHours | undefined): number {
   if (!hours?.days) return 0;
@@ -47,14 +77,15 @@ export function dayHoursOf(
  */
 export function isOpenNow(
   hours: BusinessHours | undefined,
-  now: Date = new Date(),
+  now: Date | ZonedClock = new Date(),
 ): { open: boolean; dayHours: BusinessDayHours | null } {
   if (!hours?.enabled) return { open: true, dayHours: dayHoursOf(hours, now.getDay()) };
   const dayHours = dayHoursOf(hours, now.getDay());
   if (!dayHours) return { open: false, dayHours: null };
   const current = now.getHours() * 60 + now.getMinutes();
   const start = parseTime(dayHours.open);
-  const end = parseTime(dayHours.close);
+  let end = parseTime(dayHours.close);
+  if (end === 0) end = 24 * 60;
   const open = start !== null && end !== null && current >= start && current < end;
   return { open, dayHours };
 }
@@ -87,7 +118,7 @@ export function formatDayRange(dayHours: BusinessDayHours | null | undefined): s
 /** Resumo do horário de hoje (ex.: "Aberto: 10h às 22h" | "Fechado hoje"). */
 export function formatTodayStatus(
   hours: BusinessHours | undefined,
-  now: Date = new Date(),
+  now: Date | ZonedClock = new Date(),
 ): string {
   const dayHours = dayHoursOf(hours, now.getDay());
   if (!dayHours) return "Fechado hoje";

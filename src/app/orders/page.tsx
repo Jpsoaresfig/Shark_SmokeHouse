@@ -30,6 +30,7 @@ const statusConfig: Record<OrderStatus, {
   description: string;
   step: number;
 }> = {
+  reserved:         { label: "Reservado",          badge: "warning",      icon: Clock,         description: "Pedido reservado na fila de espera — será processado assim que a loja abrir.", step: 0 },
   received:         { label: "Recebido",          badge: "secondary",    icon: Clock,         description: "Pedido recebido, aguardando análise.",         step: 1 },
   analyzing:        { label: "Em Análise",         badge: "warning",      icon: Clock,         description: "Estamos verificando seu pedido.",              step: 2 },
   approved:         { label: "Aprovado",           badge: "default",      icon: CheckCircle,   description: "Pedido aprovado e sendo preparado.",            step: 3 },

@@ -21,6 +21,7 @@ import { toast } from "@/stores/toastStore";
 import type { Order, OrderStatus } from "@/types";
 
 const STATUS_LABEL: Partial<Record<OrderStatus, { label: string; badge: "secondary" | "warning" | "default" | "purple" | "orange" | "success" | "destructive" }>> = {
+  reserved:         { label: "Reservado",        badge: "warning" },
   received:         { label: "Recebido",        badge: "secondary" },
   analyzing:        { label: "Em Análise",       badge: "warning" },
   approved:         { label: "Aprovado",         badge: "default" },
@@ -148,11 +149,13 @@ export default function MotoboyPage() {
     );
   }
 
-  const active = orders.filter(o => o.status !== "delivered" && o.status !== "cancelled");
+  // Pedidos reservados não entram no circuito de entrega: ainda estão na fila
+  // de espera (feitos fora do horário) e só saem quando a loja abre.
+  const active = orders.filter(o => o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved");
   const done = orders.filter(o => o.status === "delivered" || o.status === "cancelled");
   // Pool: só entregas de verdade (não retirada) e que ainda estão ativas.
   const pool = available.filter(
-    o => !isPickup(o) && o.status !== "delivered" && o.status !== "cancelled",
+    o => !isPickup(o) && o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved",
   );
 
   /** Renderiza o card de um pedido; `footer` traz as ações específicas da aba. */
