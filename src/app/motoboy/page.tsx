@@ -18,6 +18,7 @@ import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS } from "@/lib/payments/labels";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
+import { LocationShare } from "@/components/motoboy/LocationShare";
 import type { Order, OrderStatus } from "@/types";
 
 const STATUS_LABEL: Partial<Record<OrderStatus, { label: string; badge: "secondary" | "warning" | "default" | "purple" | "orange" | "success" | "destructive" }>> = {
@@ -107,6 +108,7 @@ export default function MotoboyPage() {
         order.id,
         status,
         status === "delivered" ? "Entrega confirmada pelo motoboy" : "Motoboy saiu para entrega",
+        user!.uid, // registra quem mudou o status (auditoria da timeline)
       );
       toast.success(status === "delivered" ? "Entrega confirmada! 🛵" : "Boa rota! Pedido em rota de entrega.");
     } catch {
@@ -429,16 +431,23 @@ export default function MotoboyPage() {
                                   : <><Truck className="w-4 h-4" /> Saí para entrega</>}
                               </Button>
                             ) : (
-                              <Button
-                                variant="premium"
-                                className="flex-1"
-                                onClick={() => setStatus(order, "delivered")}
-                                disabled={busy}
-                              >
-                                {busy
-                                  ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                  : <><CheckCircle className="w-4 h-4" /> Entregue</>}
-                              </Button>
+                              <>
+                                <Button
+                                  variant="premium"
+                                  className="flex-1"
+                                  onClick={() => setStatus(order, "delivered")}
+                                  disabled={busy}
+                                >
+                                  {busy
+                                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    : <><CheckCircle className="w-4 h-4" /> Entregue</>}
+                                </Button>
+                                <LocationShare
+                                  orderId={order.id}
+                                  phone={user.phone}
+                                  enabled={order.status === "out_for_delivery"}
+                                />
+                              </>
                             )}
                           </div>
                         ) : null

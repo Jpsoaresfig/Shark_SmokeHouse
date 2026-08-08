@@ -120,6 +120,7 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
+  const { user } = useAuthStore();
 
   const copy = async () => {
     await navigator.clipboard.writeText(pixKey);
@@ -135,7 +136,7 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
         await confirmWhatsappOrder(orderId);
         setConfirmState("confirmed");
       } else {
-        await updateOrderStatus(orderId, "cancelled", "Cliente não concluiu a compra pelo WhatsApp");
+        await updateOrderStatus(orderId, "cancelled", "Cliente não concluiu a compra pelo WhatsApp", user?.uid);
         await updatePaymentStatus(orderId, "cancelled", { note: "Compra não concluída pelo cliente (WhatsApp)" });
         setConfirmState("cancelled");
       }
@@ -371,7 +372,7 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
 
         <div className="flex flex-col gap-3">
           <Button variant="premium" asChild>
-            <Link href="/orders">
+            <Link href={`/orders/track/${orderId}`}>
               <Receipt className="w-4 h-4" />
               Acompanhar Pedido
             </Link>

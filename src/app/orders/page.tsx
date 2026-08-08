@@ -305,6 +305,17 @@ function OrderCard({ order, index, reviewedRating, onReviewed, onPaid }: {
                 </p>
               </div>
 
+              {/* Rastrear em tempo real — leva à tela de acompanhamento */}
+              {isActive && (
+                <Link
+                  href={`/orders/track/${order.id}`}
+                  className="flex items-center justify-center gap-2 w-full rounded-xl bg-[var(--color-neon-blue)] text-[var(--color-bg-base)] text-sm font-bold h-11 hover:bg-[var(--color-neon-cyan)] shadow-[var(--shadow-neon-sm)] transition-all hover:-translate-y-0.5"
+                >
+                  <Truck className="w-4 h-4" />
+                  Rastrear pedido
+                </Link>
+              )}
+
               {/* Entregador a caminho — reforça o rastreio quando sai para entrega */}
               {order.status === "out_for_delivery" && order.motoboyName && (
                 <div className="flex items-center gap-3 p-3.5 rounded-xl bg-orange-500/10 border border-orange-500/20">

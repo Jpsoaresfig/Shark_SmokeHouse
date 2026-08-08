@@ -133,7 +133,7 @@ export default function AdminOrders() {
     setProcessingQueue(true);
     try {
       for (const o of pending) {
-        await updateOrderStatus(o.id, "received", "Loja abriu — pedido saiu da fila de espera.");
+        await updateOrderStatus(o.id, "received", "Loja abriu — pedido saiu da fila de espera.", user?.uid);
       }
       toast.success(`${pending.length} pedido${pending.length !== 1 ? "s" : ""} liberado${pending.length !== 1 ? "s" : ""} da fila de espera!`);
     } catch {
@@ -203,7 +203,7 @@ export default function AdminOrders() {
     if (!selected) return;
     setUpdating(true);
     try {
-      await updateOrderStatus(selected.id, newStatus, note || undefined);
+      await updateOrderStatus(selected.id, newStatus, note || undefined, user?.uid);
 
       // Credita os pontos da compra na entrega (guardado contra crédito duplo).
       // A engine recalcula pela taxa do nível atual e exige CPF (Task 3.7).

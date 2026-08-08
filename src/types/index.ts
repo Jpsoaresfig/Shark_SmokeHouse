@@ -269,6 +269,13 @@ export interface Order {
   deliveryAddress: Address;
   motoboyId?: string;
   motoboyName?: string;
+  /** Telefone do entregador (preenchido ao compartilhar localização/rota). Usado
+   *  para o cliente chamar o motoboy no WhatsApp durante a entrega. */
+  motoboyPhone?: string;
+  /** Última localização GPS reportada pelo entregador deste pedido (em rota).
+   *  Ausente quando o sistema não captura GPS — a UI só mostra mapa/distância
+   *  quando este campo existir de verdade (nunca simula localização). */
+  motoboyLocation?: DeliveryLocation;
   notes?: string;
   statusHistory: StatusEvent[];
   /** Total loyalty points this order grants the customer once delivered. */
@@ -291,6 +298,17 @@ export interface StatusEvent {
   status: OrderStatus;
   timestamp: string;
   note?: string;
+  /** uid de quem mudou o status (admin, vendedor ou motoboy). Ausente em
+   *  eventos de sistema/gateway (cron, webhook) e em pedidos antigos. */
+  updatedBy?: string;
+}
+
+/** Localização GPS de um entregador, reportada em tempo real durante a rota. */
+export interface DeliveryLocation {
+  lat: number;
+  lng: number;
+  /** ISO — quando o entregador reportou esta posição pela última vez. */
+  updatedAt: string;
 }
 
 /* ── Lounge Booking ──────────────────────────────────────── */

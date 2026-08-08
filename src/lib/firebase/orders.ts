@@ -7,7 +7,7 @@ import { toDate } from "@/lib/utils";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { adjustVariationStock } from "@/lib/firebase/products";
 import { createOrderStatusNotification } from "@/lib/firebase/notifications";
-import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus } from "@/types";
+import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent } from "@/types";
 
 const COL = "orders";
 
@@ -170,6 +170,58 @@ export async function assignOrderMotoboy(
 }
 
 /**
+ * Escuta em tempo real um pedido individual. Usado na tela de rastreamento.
+ * Retorna a função para cancelar a escuta. O Firestore garante a permissão de
+ * leitura apenas ao dono do pedido (regra `orders`), então a tela só recebe
+ * dados a que o cliente realmente tem acesso.
+ */
+export function subscribeOrder(
+  id: string,
+  onChange: (order: Order | null) => void,
+  onError?: (error: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, COL, id),
+    (snap) => onChange(snap.exists() ? ({ id: snap.id, ...snap.data() } as Order) : null),
+    (err) => onError?.(err),
+  );
+}
+
+/**
+ * Reporta a localização GPS do entregador para um pedido em rota. Guarda o
+ * último ponto em `order.motoboyLocation` (lat/lng + quando foi capturado) e
+ * atualiza `updatedAt` para a linha do tempo/UI reagirem. O cliente só exibe o
+ * mapa quando esse campo existe e está fresco — nunca há localização simulada.
+ */
+export async function updateOrderMotoboyLocation(
+  id: string,
+  location: { lat: number; lng: number },
+): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    motoboyLocation: {
+      lat: location.lat,
+      lng: location.lng,
+      updatedAt: new Date().toISOString(),
+    },
+    updatedAt: serverTimestamp(),
+  });
+  invalidate("orders");
+}
+
+/**
+ * Preenche o telefone de contato do entregador no pedido (uma vez). Permite ao
+ * cliente chamar o motoboy no WhatsApp durante a entrega. Ausente em pedidos
+ * antigos e em entregas sem compartilhamento de rota.
+ */
+export async function setOrderMotoboyPhone(id: string, phone: string): Promise<void> {
+  await updateDoc(doc(db, COL, id), {
+    motoboyPhone: phone,
+    updatedAt: serverTimestamp(),
+  });
+  invalidate("orders");
+}
+
+/**
  * Pool de entregas disponíveis: pedidos sem motoboy atribuído (`motoboyId == null`).
  * Os pedidos novos nascem com `motoboyId: null` (ver createOrder), então a query
  * por igualdade casa com as regras do Firestore (que liberam a leitura do pool
@@ -246,15 +298,18 @@ export async function updateOrderStatus(
   id: string,
   status: OrderStatus,
   note?: string,
+  by?: string,
 ): Promise<void> {
   const ref = doc(db, COL, id);
+  const event: StatusEvent = {
+    status,
+    timestamp: new Date().toISOString(),
+    ...(note ? { note } : {}),
+    ...(by ? { updatedBy: by } : {}),
+  };
   await updateDoc(ref, {
     status,
-    statusHistory: arrayUnion({
-      status,
-      timestamp: new Date().toISOString(),
-      note: note ?? "",
-    }),
+    statusHistory: arrayUnion(event),
     updatedAt: serverTimestamp(),
   });
 

@@ -48,7 +48,7 @@ export async function setOrderProviderRef(orderId: string, providerRef: string):
 export async function applyPaymentStatusAdmin(
   orderId: string,
   status: PaymentStatus,
-  opts: { note?: string } = {},
+  opts: { note?: string; by?: string } = {},
 ): Promise<boolean> {
   const ref = getAdminDb().collection(COL).doc(orderId);
   const snap = await ref.get();
@@ -64,6 +64,7 @@ export async function applyPaymentStatusAdmin(
     status,
     timestamp: now,
     ...(opts.note ? { note: opts.note } : {}),
+    ...(opts.by ? { by: opts.by } : {}),
   };
 
   await ref.update({
@@ -104,7 +105,7 @@ const STATUS_RANK: Record<OrderStatus, number> = {
 export async function advanceOrderStatusAdmin(
   orderId: string,
   toStatus: OrderStatus,
-  opts: { note?: string } = {},
+  opts: { note?: string; by?: string } = {},
 ): Promise<boolean> {
   const ref = getAdminDb().collection(COL).doc(orderId);
   const snap = await ref.get();
@@ -118,6 +119,7 @@ export async function advanceOrderStatusAdmin(
     status: toStatus,
     timestamp: new Date().toISOString(),
     ...(opts.note ? { note: opts.note } : {}),
+    ...(opts.by ? { updatedBy: opts.by } : {}),
   };
   await ref.update({
     status: toStatus,
@@ -168,7 +170,12 @@ export async function processReservedQueue(
   if (snap.empty) return { processed: 0, waiting: 0 };
 
   const note = "Loja abriu — pedido saiu da fila de espera e entrou no processamento.";
-  const event: StatusEvent = { status: "received", timestamp: now.toISOString(), note };
+  const event: StatusEvent = {
+    status: "received",
+    timestamp: now.toISOString(),
+    note,
+    updatedBy: "system",
+  };
   // Firestore limita o batch em 500 operações — divide em lotes menores.
   const CHUNK = 400;
   for (let i = 0; i < snap.docs.length; i += CHUNK) {

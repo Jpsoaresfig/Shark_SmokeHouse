@@ -44,6 +44,7 @@ export async function syncMercadoPagoPayment(paymentId: string): Promise<SyncRes
 
   const applied = await applyPaymentStatusAdmin(orderId, target, {
     note: `Mercado Pago: pagamento ${paymentId} (${payment.status})`,
+    by: "mercadopago-webhook",
   });
 
   if (applied && target === "paid") {
@@ -52,6 +53,7 @@ export async function syncMercadoPagoPayment(paymentId: string): Promise<SyncRes
     try {
       await advanceOrderStatusAdmin(orderId, "preparing", {
         note: "Pagamento confirmado no Mercado Pago — pedido liberado para preparo.",
+        by: "mercadopago-webhook",
       });
     } catch (err) {
       console.error("[mercadopago] falha ao avançar status do pedido", { orderId, err });

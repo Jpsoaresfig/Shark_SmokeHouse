@@ -88,7 +88,8 @@ export async function createOrderStatusNotification(
     category: "order",
     title: meta.title,
     body: `Pedido #${shortId}: ${meta.body}`,
-    link: "/orders",
+    // Leva direto ao rastreamento em tempo real do pedido.
+    link: `/orders/track/${orderId}`,
     orderId,
   });
 }
