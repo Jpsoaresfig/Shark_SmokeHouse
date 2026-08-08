@@ -5,22 +5,32 @@ import { motion } from "framer-motion";
 import {
   TrendingUp, Wallet, CircleDollarSign, Percent, Package2,
   PiggyBank, RefreshCw, BarChart3, Receipt, PieChart, Check,
+  LayoutDashboard, ShoppingBag, CalendarClock, type LucideIcon,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { RevenueChart, type ChartPoint } from "@/components/admin/RevenueChart";
 import { DonutChart, type DonutSlice } from "@/components/admin/DonutChart";
+import {
+  BiFiltersBar, BiComparison, BiEvolution, BiProductRanking,
+  BiCategoryPayment, BiTimeAnalysis, BiSellersNeighborhoods, BiGrowth, BiStock,
+} from "@/components/admin/BiAnalytics";
 import { formatCurrency } from "@/lib/utils";
 import { getSales, SALE_PAYMENT_LABELS as PAYMENT_LABELS } from "@/lib/firebase/sales";
 import { getProducts } from "@/lib/firebase/products";
+import { getOrders } from "@/lib/firebase/orders";
+import { getCategories } from "@/lib/firebase/categories";
+import { getAllUsers } from "@/lib/firebase/users";
 import {
   saleStatus, saleIsRevenue, saleReceivedAmount, saleOutstanding,
   saleDiscountTotal, saleCost, saleGrossProfit, saleRealizedProfit, cashEntriesForSale,
   internalProductIdsOf, filterNormalSales,
 } from "@/lib/sales/helpers";
 import { toast } from "@/stores/toastStore";
-import type { Sale, SalePaymentMethod } from "@/types";
+import { DEFAULT_BI_FILTERS, type BiFilters, type BiSource } from "@/lib/bi/types";
+import { storeMidnight } from "@/lib/bi/periods";
+import type { Category, Order, Product, Sale, SalePaymentMethod, UserProfile } from "@/types";
 
 const MONTH_NAMES_FULL = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
@@ -82,11 +92,23 @@ const DONUT_METRICS: DonutMetricDef[] = [
 const DONUT_DEFAULT_KEYS = ["m_cash", "m_credit", "m_debit", "m_pix"];
 const DONUT_STORAGE_KEY = "shark:financial:donut-metrics";
 
+type TabId = "resumo" | "vendas" | "operacao" | "estoque";
+const TABS: { id: TabId; label: string; icon: LucideIcon }[] = [
+  { id: "resumo", label: "Resumo", icon: LayoutDashboard },
+  { id: "vendas", label: "Vendas", icon: ShoppingBag },
+  { id: "operacao", label: "Operação", icon: CalendarClock },
+  { id: "estoque", label: "Estoque", icon: Package2 },
+];
+
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
 export default function AdminFinancial() {
   const [sales, setSales] = useState<Sale[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [sellers, setSellers] = useState<UserProfile[]>([]);
   const [costMap, setCostMap] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [startDate, setStartDate] = useState(DEFAULT_RANGE.start);
@@ -103,17 +125,26 @@ export default function AdminFinancial() {
     } catch { /* ignora storage inválido */ }
     return DONUT_DEFAULT_KEYS;
   });
+  const [activeTab, setActiveTab] = useState<TabId>("resumo");
+  const [biFilters, setBiFilters] = useState<BiFilters>(DEFAULT_BI_FILTERS);
 
   const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
-      const [allSales, products] = await Promise.all([
+      const [allSales, allProducts, allOrders, allCategories, allUsers] = await Promise.all([
         getSales(undefined, undefined, force), // todas: KPIs por data da venda, caixa por data do recebimento
         getProducts(force),
+        getOrders(undefined, force),
+        getCategories(force),
+        getAllUsers(undefined, force),
       ]);
       // Vendas com produto interno ficam só na área interna (vendas separadas).
-      setSales(filterNormalSales(allSales, internalProductIdsOf(products)));
-      setCostMap(new Map(products.map((p) => [p.id, p.costPrice ?? 0])));
+      setSales(filterNormalSales(allSales, internalProductIdsOf(allProducts)));
+      setOrders(allOrders);
+      setProducts(allProducts);
+      setCategories(allCategories);
+      setSellers(allUsers.filter((u) => u.role === "seller"));
+      setCostMap(new Map(allProducts.map((p) => [p.id, p.costPrice ?? 0])));
     } catch {
       toast.error("Não foi possível carregar os dados financeiros.");
     } finally {
@@ -128,8 +159,27 @@ export default function AdminFinancial() {
     try { localStorage.setItem(DONUT_STORAGE_KEY, JSON.stringify(donutKeys)); } catch { /* */ }
   }, [donutKeys]);
 
-  const rangeStart = useMemo(() => { const d = new Date(startDate); d.setHours(0, 0, 0, 0); return d; }, [startDate]);
-  const rangeEnd = useMemo(() => { const d = new Date(endDate); d.setHours(23, 59, 59, 999); return d; }, [endDate]);
+  // Intervalo no FUSO DA LOJA (mesmo do BI): `new Date("YYYY-MM-DD")` + setHours
+  // sofre off-by-one fora de UTC — o último dia selecionado ficava de fora.
+  const parseDateStr = (v: string): [number, number, number] | null => {
+    const [y, m, d] = v.split("-").map(Number);
+    return [y, m, d].some(Number.isNaN) ? null : [y, m, d];
+  };
+  const rangeStart = useMemo(() => {
+    const p = parseDateStr(startDate) ?? parseDateStr(DEFAULT_RANGE.start)!;
+    return storeMidnight(p[0], p[1], p[2]);
+  }, [startDate]);
+  const rangeEnd = useMemo(() => {
+    const p = parseDateStr(endDate) ?? parseDateStr(DEFAULT_RANGE.end)!;
+    return new Date(storeMidnight(p[0], p[1], p[2] + 1).getTime() - 1);
+  }, [endDate]);
+
+  /* Fonte de dados do BI (PDV + online + catálogo) e intervalo compartilhado. */
+  const biSource = useMemo<BiSource>(
+    () => ({ sales, orders, products, categories, sellers }),
+    [sales, orders, products, categories, sellers],
+  );
+  const biRange = useMemo(() => ({ start: rangeStart, end: rangeEnd }), [rangeStart, rangeEnd]);
 
   /* KPIs por COMPETÊNCIA: vendas cuja data está no período. */
   const kpis = useMemo(() => {
@@ -255,6 +305,29 @@ export default function AdminFinancial() {
           </CardContent>
         </Card>
 
+        {/* Abas */}
+        <div className="mb-6 flex gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-1 overflow-x-auto">
+          {TABS.map((t) => {
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                  active
+                    ? "bg-[var(--color-neon-blue)] text-[var(--color-bg-base)]"
+                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                }`}
+              >
+                <t.icon className="w-4 h-4" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {activeTab === "resumo" && (
+          <>
         {/* KPIs */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {kpiCards.map((c, i) => (
@@ -385,8 +458,33 @@ export default function AdminFinancial() {
             )}
           </CardContent>
         </Card>
+          </>
+        )}
 
-        <p className="text-[11px] text-[var(--color-text-muted)]">
+        {activeTab === "vendas" && (
+          <div className="space-y-6">
+            <BiFiltersBar source={biSource} filters={biFilters} onChange={(f) => setBiFilters(f)} />
+            <BiComparison source={biSource} range={biRange} filters={biFilters} />
+            <BiEvolution source={biSource} range={biRange} filters={biFilters} />
+            <BiProductRanking source={biSource} range={biRange} filters={biFilters} />
+            <BiCategoryPayment source={biSource} range={biRange} filters={biFilters} />
+          </div>
+        )}
+
+        {activeTab === "operacao" && (
+          <div className="space-y-6">
+            <BiFiltersBar source={biSource} filters={biFilters} onChange={(f) => setBiFilters(f)} />
+            <BiTimeAnalysis source={biSource} range={biRange} filters={biFilters} />
+            <BiSellersNeighborhoods source={biSource} range={biRange} filters={biFilters} />
+            <BiGrowth source={biSource} range={biRange} filters={biFilters} />
+          </div>
+        )}
+
+        {activeTab === "estoque" && (
+          <BiStock source={biSource} range={biRange} />
+        )}
+
+        <p className="text-[11px] text-[var(--color-text-muted)] mt-8">
           O lucro usa o custo congelado em cada venda. Vendas registradas antes desta atualização não têm custo
           gravado — nesses casos é usado o custo atual do produto como estimativa (0 se o produto não existir mais).
         </p>
