@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isMercadoPagoConfigured, createPixPayment } from "@/lib/payments/mercadopago";
 import { getOrderAdmin, setOrderProviderRef } from "@/lib/firebase/orders.server";
 import { resolveOrderPayment } from "@/lib/payments";
+import { logSystemError, recordMonitoredRequest } from "@/lib/observability.server";
+import { requestIdFrom } from "@/lib/requestId";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,9 @@ function resolveBaseUrl(request: NextRequest): string {
  * cliente acompanha pelo polling de GET /api/payments/mercadopago/status.
  */
 export async function POST(request: NextRequest) {
+  const requestId = requestIdFrom(request.headers);
+  void recordMonitoredRequest("payments-create");
+
   if (!isMercadoPagoConfigured()) {
     return NextResponse.json(
       { error: "Pagamento pelo Mercado Pago não configurado." },
@@ -108,6 +113,17 @@ export async function POST(request: NextRequest) {
     const isMpError = err instanceof Error && err.name === "MercadoPagoError";
     const reason = err instanceof Error ? err.message : String(err);
     const mpStatus = isMpError ? (err as { status?: number }).status : undefined;
+    void logSystemError({
+      type: "payment",
+      message: "Falha ao criar cobrança PIX no Mercado Pago",
+      stack: err instanceof Error ? err.stack : undefined,
+      route: "/api/payments/mercadopago/create",
+      method: "POST",
+      statusCode: 502,
+      userId: typeof order.customerId === "string" ? order.customerId : undefined,
+      requestId,
+      metadata: { orderId, mpStatus },
+    });
     return NextResponse.json(
       { error: "Não foi possível iniciar o pagamento.", reason, mpStatus },
       { status: 502 },

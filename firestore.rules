@@ -253,6 +253,38 @@ service cloud.firestore {
       allow read, update, delete: if isAdmin();
     }
 
+    // ── Observabilidade / Centro de Operações (admin) ────────
+    // Erros de sistema, logs de webhook, execuções de cron, alertas e métricas
+    // diárias. A CRIAÇÃO é exclusiva do servidor (Admin SDK, bypassa as regras);
+    // o cliente nunca cria nada aqui. O admin pode ler tudo e resolver alertas/
+    // erros apenas nos campos de resolução (o resto é imutável do servidor).
+    match /systemErrors/{errorId} {
+      allow read: if isAdmin();
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['resolved', 'resolvedAt', 'resolvedBy']);
+      allow delete: if isAdmin();
+    }
+
+    match /webhookLogs/{logId} {
+      allow read: if isAdmin();
+    }
+
+    match /cronExecutions/{execId} {
+      allow read: if isAdmin();
+    }
+
+    match /systemAlerts/{alertId} {
+      allow read: if isAdmin();
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['status', 'resolvedAt', 'resolvedBy']);
+    }
+
+    match /systemMetrics/{day} {
+      allow read: if isAdmin();
+    }
+
     // ── Notificações in-app (por usuário) ─────────────────────
     // O dono lê as suas e pode marcá-las como lida (apenas o campo `read`).
     // A equipe (admin/vendedor/motoboy) cria notificações — ex.: atualização

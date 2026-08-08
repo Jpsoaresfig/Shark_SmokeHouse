@@ -31,7 +31,7 @@ const ADMIN_MORE_LINKS = [
   { href: "/admin/announcements", label: "Promoções", icon: Megaphone   },
   { href: "/admin/payments", label: "Pagamentos",  icon: QrCode         },
   { href: "/admin/lounge",   label: "Lounge",      icon: CalendarDays   },
-  { href: "/admin/reports",  label: "Reportes",    icon: MessageSquareWarning },
+  { href: "/admin/reports",  label: "Operações",   icon: MessageSquareWarning },
 ];
 
 const SELLER_LINKS = [

@@ -1,6 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isMercadoPagoConfigured } from "@/lib/payments/mercadopago";
 import { syncMercadoPagoPayment } from "@/lib/payments/mercadopago.server";
+import {
+  createSystemAlert,
+  logSystemError,
+  logWebhookEvent,
+  recordMonitoredRequest,
+} from "@/lib/observability.server";
+import { requestIdFrom } from "@/lib/requestId";
 
 export const runtime = "nodejs";
 
@@ -26,8 +33,12 @@ export const runtime = "nodejs";
  *   - 500 só em falha real, para o MP tentar de novo.
  */
 export async function POST(request: NextRequest) {
+  const requestId = requestIdFrom(request.headers);
+  void recordMonitoredRequest("webhook-mercadopago");
+
   if (!isMercadoPagoConfigured()) {
     // Sem credencial não há como validar/buscar; confirma para não reenviar.
+    void logWebhookEvent({ provider: "mercadopago", status: "skipped", requestId, error: "não configurado" });
     return NextResponse.json({ received: true, skipped: "não configurado" });
   }
 
@@ -51,14 +62,28 @@ export async function POST(request: NextRequest) {
 
   // Só tratamos eventos de pagamento.
   if (type && type !== "payment") {
+    void logWebhookEvent({ provider: "mercadopago", type, status: "skipped", requestId, error: "tipo não tratado" });
     return NextResponse.json({ received: true, skipped: type });
   }
   if (!paymentId) {
+    void logWebhookEvent({ provider: "mercadopago", type: type ?? "payment", status: "skipped", requestId, error: "sem id de pagamento" });
     return NextResponse.json({ received: true, skipped: "sem id de pagamento" });
   }
 
+  const started = Date.now();
   try {
     const result = await syncMercadoPagoPayment(paymentId);
+    const webhookStatus =
+      result.applied ? "success" : result.status ? "duplicate" : "skipped";
+    void logWebhookEvent({
+      provider: "mercadopago",
+      type: type ?? "payment",
+      providerRef: String(paymentId),
+      orderId: result.orderId ?? undefined,
+      status: webhookStatus,
+      processingTime: Date.now() - started,
+      requestId,
+    });
     if (!result.status) {
       // Status sem transição (pending, in_process, etc.).
       return NextResponse.json({ received: true, skipped: "sem transição" });
@@ -74,7 +99,35 @@ export async function POST(request: NextRequest) {
       applied: result.applied,
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error("Erro ao processar webhook do Mercado Pago:", err);
+    void logWebhookEvent({
+      provider: "mercadopago",
+      type: type ?? "payment",
+      providerRef: String(paymentId),
+      status: "failed",
+      statusCode: 500,
+      processingTime: Date.now() - started,
+      requestId,
+      error: message,
+    });
+    void logSystemError({
+      type: "webhook",
+      message: "Webhook do Mercado Pago falhou",
+      stack: err instanceof Error ? err.stack : undefined,
+      route: "/api/webhooks/mercadopago",
+      method: "POST",
+      statusCode: 500,
+      requestId,
+      metadata: { paymentId: String(paymentId) },
+    });
+    void createSystemAlert({
+      key: "webhook:mercadopago",
+      type: "webhook_failures",
+      severity: "warning",
+      message: "Falha ao processar webhook do Mercado Pago",
+      metadata: { requestId, paymentId: String(paymentId) },
+    });
     // 500 → MP reenvia o evento mais tarde.
     return NextResponse.json({ error: "Falha ao processar." }, { status: 500 });
   }

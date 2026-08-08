@@ -769,3 +769,181 @@ export interface Report {
   status: ReportStatus;
   createdAt: string;
 }
+
+/* ── Observabilidade / Centro de Operações ───────────────── */
+export type ServiceStatus = "operational" | "degraded" | "down" | "unknown";
+
+/** Serviços monitorados pelo centro de operações. */
+export type SystemServiceName =
+  | "api"
+  | "firestore"
+  | "mercadopago"
+  | "cloudinary"
+  | "resend"
+  | "cron";
+
+export interface ServiceHealth {
+  status: ServiceStatus;
+  /** Tempo de resposta da última verificação (ms). */
+  responseTime?: number;
+  /** Quando a última verificação foi feita (ISO). */
+  lastCheckedAt: string;
+  /** Mensagem de erro/observação, se houver. */
+  message?: string;
+}
+
+export interface SystemHealth {
+  status: "healthy" | "degraded" | "unhealthy";
+  timestamp: string;
+  services: Record<SystemServiceName, ServiceHealth>;
+}
+
+export type SystemErrorType =
+  | "api"
+  | "payment"
+  | "webhook"
+  | "cron"
+  | "firestore"
+  | "cloudinary"
+  | "resend"
+  | "stock"
+  | "order"
+  | "other";
+
+/** Erro técnico registrado pelo servidor (coleção `systemErrors`). */
+export interface SystemError {
+  id: string;
+  type: SystemErrorType;
+  message: string;
+  stack?: string;
+  route?: string;
+  method?: string;
+  statusCode?: number;
+  userId?: string;
+  userRole?: string;
+  requestId?: string;
+  /** ISO. */
+  timestamp: string;
+  environment?: string;
+  metadata?: Record<string, unknown>;
+  resolved: boolean;
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
+
+export type WebhookLogStatus = "success" | "skipped" | "failed" | "duplicate";
+
+/** Registro de um evento de webhook recebido (coleção `webhookLogs`). */
+export interface WebhookLog {
+  id: string;
+  provider: string;
+  /** Tipo do evento (ex.: "payment"). */
+  type?: string;
+  /** Id do pagamento no provedor (ex.: id do MP). */
+  providerRef?: string;
+  orderId?: string;
+  status: WebhookLogStatus;
+  statusCode?: number;
+  /** Tempo de processamento (ms). */
+  processingTime?: number;
+  requestId?: string;
+  /** ISO. */
+  timestamp: string;
+  error?: string;
+}
+
+export type CronExecutionStatus = "success" | "failed";
+
+/** Execução de um cron job (coleção `cronExecutions`). */
+export interface CronExecution {
+  id: string;
+  /** Nome do job (ex.: "loyalty-maintenance"). */
+  job: string;
+  /** ISO. */
+  startedAt: string;
+  /** ISO. */
+  finishedAt?: string;
+  /** Duração em ms. */
+  duration?: number;
+  status: CronExecutionStatus;
+  processed?: number;
+  failed?: number;
+  error?: string;
+  requestId?: string;
+  /** ISO. */
+  timestamp: string;
+}
+
+export type AlertSeverity = "critical" | "warning" | "info";
+export type SystemAlertStatus = "active" | "resolved";
+export type SystemAlertType =
+  | "service_down"
+  | "cron_failed"
+  | "stuck_orders"
+  | "stock_inconsistency"
+  | "error_rate"
+  | "webhook_failures"
+  | "mercadopago_failures"
+  | "other";
+
+/** Alerta do sistema (coleção `systemAlerts` — criado no servidor). */
+export interface SystemAlert {
+  id: string;
+  /** Chave de deduplicação do incidente (ex.: "cron:loyalty-maintenance"). */
+  key?: string;
+  type: SystemAlertType;
+  severity: AlertSeverity;
+  message: string;
+  /** ISO. */
+  timestamp: string;
+  status: SystemAlertStatus;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/** Pedido que permaneceu tempo excessivo num status de processamento. */
+export interface StuckOrderInfo {
+  id: string;
+  status: OrderStatus;
+  customerName?: string;
+  /** ISO — quando ficou preso no status atual. */
+  stuckSince: string;
+  hoursInStatus: number;
+}
+
+/** Divergência de estoque detectada (negativo ou soma de variações ≠ produto). */
+export interface StockInconsistency {
+  productId: string;
+  name: string;
+  sku?: string;
+  currentStock: number;
+  expectedStock: number;
+  difference: number;
+  variationName?: string;
+}
+
+/** Períodos disponíveis no filtro de métricas. */
+export type MetricsPeriod = "1h" | "6h" | "24h" | "7d" | "30d";
+
+/** Métricas agregadas do sistema (GET /api/metrics). */
+export interface SystemMetrics {
+  period: MetricsPeriod;
+  /** Requisições monitoradas (webhooks, crons, pagamentos). */
+  requests: number;
+  /** Erros registrados no período. */
+  errors: number;
+  /** Erros ÷ requisições (%). */
+  errorRate: number;
+  /** Erros ainda não resolvidos. */
+  openErrors: number;
+  webhooks: number;
+  webhookFailures: number;
+  webhookDuplicates: number;
+  cronExecutions: number;
+  cronFailures: number;
+  stuckOrders: number;
+  stockInconsistencies: number;
+  stuckOrderSample: StuckOrderInfo[];
+  stockInconsistencySample: StockInconsistency[];
+}

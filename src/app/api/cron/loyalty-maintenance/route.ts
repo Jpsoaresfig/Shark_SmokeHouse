@@ -5,6 +5,8 @@ import {
   planExpiry, isBirthdayMonth, birthdayBonusFor, POINTS_VALIDITY_DAYS,
   type PointGrant,
 } from "@/lib/loyalty/levels";
+import { createSystemAlert, logCronExecution, logSystemError, recordMonitoredRequest } from "@/lib/observability.server";
+import { requestIdFrom } from "@/lib/requestId";
 
 export const runtime = "nodejs";
 // Sem cache: é uma rotina de manutenção disparada por cron.
@@ -38,17 +40,50 @@ function authorized(request: NextRequest): boolean {
 }
 
 async function run(request: NextRequest) {
+  const requestId = requestIdFrom(request.headers);
+  void recordMonitoredRequest("cron-loyalty-maintenance");
+
   if (!authorized(request)) {
     return NextResponse.json({ error: "não autorizado" }, { status: 401 });
   }
 
-  const now = new Date();
+  const startedAt = new Date().toISOString();
   try {
-    const expired = await expirePoints(now);
-    const birthdays = await creditBirthdayBonuses(now);
+    const expired = await expirePoints(new Date());
+    const birthdays = await creditBirthdayBonuses(new Date());
+    void logCronExecution({
+      job: "loyalty-maintenance",
+      status: "success",
+      startedAt,
+      requestId,
+      processed: expired.usersExpired + birthdays.usersBirthday,
+    });
     return NextResponse.json({ ok: true, ...expired, ...birthdays });
   } catch (err) {
     console.error("Cron loyalty-maintenance falhou:", err);
+    void logCronExecution({
+      job: "loyalty-maintenance",
+      status: "failed",
+      startedAt,
+      requestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    void logSystemError({
+      type: "cron",
+      message: "Cron loyalty-maintenance falhou",
+      stack: err instanceof Error ? err.stack : undefined,
+      route: "/api/cron/loyalty-maintenance",
+      method: "POST",
+      statusCode: 500,
+      requestId,
+    });
+    void createSystemAlert({
+      key: "cron:loyalty-maintenance",
+      type: "cron_failed",
+      severity: "critical",
+      message: "Rotina de manutenção do Clube Shark falhou",
+      metadata: { requestId },
+    });
     return NextResponse.json({ error: "falha na manutenção" }, { status: 500 });
   }
 }

@@ -3,6 +3,8 @@ import { getOrderAdmin } from "@/lib/firebase/orders.server";
 import { resolveOrderPayment } from "@/lib/payments";
 import { isMercadoPagoConfigured } from "@/lib/payments/mercadopago";
 import { syncMercadoPagoPayment } from "@/lib/payments/mercadopago.server";
+import { logSystemError, recordMonitoredRequest } from "@/lib/observability.server";
+import { requestIdFrom } from "@/lib/requestId";
 
 export const runtime = "nodejs";
 
@@ -23,6 +25,9 @@ const SETTLED = new Set(["paid", "cancelled", "refunded", "failed"]);
  * Retorna: { status, orderStatus }
  */
 export async function GET(request: NextRequest) {
+  const requestId = requestIdFrom(request.headers);
+  void recordMonitoredRequest("payments-status");
+
   const orderId = new URL(request.url).searchParams.get("orderId")?.trim();
   if (!orderId) {
     return NextResponse.json({ error: "orderId é obrigatório." }, { status: 400 });
@@ -49,6 +54,15 @@ export async function GET(request: NextRequest) {
       }
     } catch (err) {
       console.error("[mercadopago-status] sync", err);
+      void logSystemError({
+        type: "payment",
+        message: "Falha na sincronização de status pelo polling",
+        stack: err instanceof Error ? err.stack : undefined,
+        route: "/api/payments/mercadopago/status",
+        method: "GET",
+        requestId,
+        metadata: { orderId, providerRef: pay.providerRef },
+      });
     }
   }
 

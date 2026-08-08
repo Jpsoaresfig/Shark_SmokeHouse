@@ -28,7 +28,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/announcements", label: "Promoções", icon: Megaphone },
   { href: "/admin/payments",  label: "Pagamentos",    icon: QrCode },
   { href: "/admin/lounge",    label: "Agenda Lounge", icon: CalendarDays },
-  { href: "/admin/reports",   label: "Reportes",      icon: MessageSquareWarning },
+  { href: "/admin/reports",   label: "Operações",     icon: MessageSquareWarning },
 ];
 
 const SELLER_NAV: NavItem[] = [
