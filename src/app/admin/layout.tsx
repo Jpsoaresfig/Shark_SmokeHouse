@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 import { AdminMobileNav } from "@/components/admin/AdminMobileNav";
+import { StuckOrdersDialog } from "@/components/admin/StuckOrdersDialog";
 
 const ADMIN_EMAIL = "admin@shark.com";
 
@@ -38,6 +39,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <>
+      {/* Popup de pedidos pendentes (entregues há tempo demais sem conclusão) — só para o admin. */}
+      {isAdmin && <StuckOrdersDialog />}
       {/* Extra bottom padding on mobile so content doesn't hide behind the tab bar */}
       <div className="md:pb-0 pb-16" style={{ paddingBottom: "calc(3.5rem + env(safe-area-inset-bottom))" }}>
         {children}

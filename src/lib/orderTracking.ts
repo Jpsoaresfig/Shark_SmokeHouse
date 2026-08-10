@@ -274,3 +274,43 @@ export function isCourierLocationFresh(location: { updatedAt: string } | undefin
   const age = now.getTime() - toDate(location.updatedAt).getTime();
   return Number.isFinite(age) && age >= 0 && age <= 5 * 60 * 1000;
 }
+
+/** Horas decorridas desde que o pedido entrou no status dado (fallback: createdAt). */
+export function hoursInStatus(order: Order, status: OrderStatus, now = new Date()): number {
+  const since = findStatusEvent(order, status)?.timestamp ?? order.createdAt;
+  const diff = now.getTime() - toDate(since).getTime();
+  return Number.isFinite(diff) && diff > 0 ? diff / 3600_000 : 0;
+}
+
+/**
+ * Entrega em rota há mais tempo que o limite — sinal de que o motoboy esqueceu
+ * de concluir (marcar como entregue) ou cancelar o pedido.
+ */
+export function isDeliveryStuck(order: Order, thresholdHours = 4, now = new Date()): boolean {
+  return (
+    order.status === "out_for_delivery" &&
+    hoursInStatus(order, "out_for_delivery", now) >= thresholdHours
+  );
+}
+
+/**
+ * Limite de horas por status antes de o pedido ser considerado "preso" (sem
+ * conclusão). Espelha os limites usados no servidor (observability.server.ts).
+ */
+export const STUCK_THRESHOLD_HOURS: Record<OrderStatus, number> = {
+  reserved: 0,
+  received: 6,
+  analyzing: 6,
+  approved: 24,
+  preparing: 4,
+  out_for_delivery: 4,
+  delivered: 0,
+  cancelled: 0,
+};
+
+/** Pedido há tempo excessivo no status atual sem ser concluído (entregue/cancelado). */
+export function isOrderStuck(order: Order, now = new Date()): boolean {
+  const threshold = STUCK_THRESHOLD_HOURS[order.status];
+  if (!threshold) return false;
+  return hoursInStatus(order, order.status, now) >= threshold;
+}

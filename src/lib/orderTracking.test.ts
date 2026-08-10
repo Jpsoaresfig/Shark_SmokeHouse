@@ -4,7 +4,10 @@ import {
   getTrackingSteps,
   getTrackingStatusMeta,
   getCancelReason,
+  hoursInStatus,
   isCourierLocationFresh,
+  isDeliveryStuck,
+  isOrderStuck,
 } from "@/lib/orderTracking";
 import type { Order, OrderStatus } from "@/types";
 
@@ -241,5 +244,90 @@ describe("isCourierLocationFresh", () => {
 
   it("ausente → falsa", () => {
     expect(isCourierLocationFresh(undefined, now)).toBe(false);
+  });
+});
+
+describe("hoursInStatus / isDeliveryStuck", () => {
+  const now = new Date("2026-08-08T14:30:00.000Z");
+
+  it("horas desde a entrada no status via statusHistory", () => {
+    const order = withHistory(
+      makeOrder({ status: "out_for_delivery" }),
+      [{ status: "out_for_delivery", timestamp: "2026-08-08T10:00:00.000Z" }],
+    );
+    expect(hoursInStatus(order, "out_for_delivery", now)).toBeCloseTo(4.5, 5);
+  });
+
+  it("usa createdAt como fallback sem histórico", () => {
+    const order = makeOrder({ status: "out_for_delivery", createdAt: "2026-08-08T09:30:00.000Z" });
+    expect(hoursInStatus(order, "out_for_delivery", now)).toBeCloseTo(5, 5);
+  });
+
+  it("usa a última ocorrência do status quando ele aparece mais de uma vez", () => {
+    const order = withHistory(
+      makeOrder({ status: "out_for_delivery" }),
+      [
+        { status: "out_for_delivery", timestamp: "2026-08-08T08:00:00.000Z" },
+        { status: "out_for_delivery", timestamp: "2026-08-08T12:30:00.000Z" },
+      ],
+    );
+    expect(hoursInStatus(order, "out_for_delivery", now)).toBeCloseTo(2, 5);
+  });
+
+  it("em rota há ≥ 4h → preso", () => {
+    const order = withHistory(
+      makeOrder({ status: "out_for_delivery" }),
+      [{ status: "out_for_delivery", timestamp: "2026-08-08T10:00:00.000Z" }],
+    );
+    expect(isDeliveryStuck(order, 4, now)).toBe(true);
+  });
+
+  it("em rota há < 4h → não preso", () => {
+    const order = withHistory(
+      makeOrder({ status: "out_for_delivery" }),
+      [{ status: "out_for_delivery", timestamp: "2026-08-08T11:00:00.000Z" }],
+    );
+    expect(isDeliveryStuck(order, 4, now)).toBe(false);
+  });
+
+  it("só considera pedidos realmente em rota", () => {
+    const order = makeOrder({ status: "preparing" });
+    expect(isDeliveryStuck(order, 0, now)).toBe(false);
+  });
+});
+
+describe("isOrderStuck", () => {
+  const now = new Date("2026-08-08T14:30:00.000Z");
+  const stuckAt = (status: OrderStatus, hoursAgo: number) =>
+    withHistory(
+      makeOrder({ status }),
+      [{ status, timestamp: new Date(now.getTime() - hoursAgo * 3600_000).toISOString() }],
+    );
+
+  it("em rota há ≥ 4h → preso", () => {
+    expect(isOrderStuck(stuckAt("out_for_delivery", 4.5), now)).toBe(true);
+  });
+
+  it("em rota há < 4h → não preso", () => {
+    expect(isOrderStuck(stuckAt("out_for_delivery", 2), now)).toBe(false);
+  });
+
+  it("preparando há ≥ 4h → preso", () => {
+    expect(isOrderStuck(stuckAt("preparing", 5), now)).toBe(true);
+  });
+
+  it("recebido há < 6h → não preso; ≥ 6h → preso", () => {
+    expect(isOrderStuck(stuckAt("received", 5), now)).toBe(false);
+    expect(isOrderStuck(stuckAt("received", 6), now)).toBe(true);
+  });
+
+  it("aprovado só prende após 24h", () => {
+    expect(isOrderStuck(stuckAt("approved", 20), now)).toBe(false);
+    expect(isOrderStuck(stuckAt("approved", 25), now)).toBe(true);
+  });
+
+  it("entregue/cancelado nunca prende", () => {
+    expect(isOrderStuck(stuckAt("delivered", 100), now)).toBe(false);
+    expect(isOrderStuck(stuckAt("cancelled", 100), now)).toBe(false);
   });
 });
