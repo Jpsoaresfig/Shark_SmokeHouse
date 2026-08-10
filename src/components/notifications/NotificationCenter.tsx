@@ -8,6 +8,7 @@ import { useAuthStore } from "@/stores/authStore";
 import {
   subscribeNotifications, markNotificationRead, markNotificationsRead,
 } from "@/lib/firebase/notifications";
+import { registerMarketingClick } from "@/lib/firebase/marketing";
 import { getActiveAnnouncements } from "@/lib/firebase/announcements";
 import { formatDateTime } from "@/lib/utils";
 import type { AppNotification, Announcement, NotificationCategory } from "@/types";
@@ -23,6 +24,8 @@ interface Item {
   read: boolean;
   createdAt: string;
   source: "notif" | "announcement";
+  /** Campanha de marketing (quando a notificação veio de uma campanha). */
+  campaignId?: string;
 }
 
 const TABS: { value: Tab; label: string }[] = [
@@ -73,6 +76,7 @@ export function NotificationCenter() {
     const orderItems: Item[] = notifs.map((n) => ({
       id: n.id, category: "order", title: n.title, body: n.body,
       link: n.link, read: n.read, createdAt: n.createdAt, source: "notif",
+      campaignId: n.marketingCampaignId,
     }));
     const promoItems: Item[] = announcements.map((a) => ({
       id: a.id, category: "promo", title: a.title, body: a.body,
@@ -109,6 +113,11 @@ export function NotificationCenter() {
   function handleClick(item: Item) {
     markRead(item);
     setOpen(false);
+    // Toque em notificação de campanha = métrica "Toques (link)" (best-effort,
+    // não pode travar a navegação).
+    if (item.source === "notif" && item.campaignId) {
+      void registerMarketingClick(item.id, item.campaignId);
+    }
     if (item.link) router.push(item.link);
   }
 

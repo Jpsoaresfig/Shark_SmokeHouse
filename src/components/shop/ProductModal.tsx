@@ -7,7 +7,7 @@ import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, normalizeColors } from "@/lib/utils";
 import type { Product } from "@/types";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -56,16 +56,21 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
     : [];
   // Variação com foto própria: as fotos dela aparecem primeiro, seguidas das gerais.
   const baseImages = product.images.length > 0 ? product.images : [];
+  const colors = normalizeColors(product.colors);
+  const hasColors = !hasVariations && colors.length > 0;
+  // Cor selecionada com foto própria: ela aparece primeiro na galeria também.
+  const selectedColorInfo = colors.find(c => c.name === selectedColor) ?? null;
+  const colorImages = selectedColorInfo?.image ? [selectedColorInfo.image] : [];
   const images = variationImages.length
     ? [...variationImages, ...baseImages.filter(u => !variationImages.includes(u))]
+    : colorImages.length
+    ? [...colorImages, ...baseImages.filter(u => !colorImages.includes(u))]
     : baseImages;
   const hasImages = images.length > 0;
   const hasMultiple = images.length > 1;
   const discount = product.compareAtPrice
     ? Math.round((1 - product.price / product.compareAtPrice) * 100)
     : null;
-  const colors = product.colors ?? [];
-  const hasColors = !hasVariations && colors.length > 0;
 
   // Estoque disponível depende da variação escolhida (quando há grade).
   const availableStock = hasVariations
@@ -87,7 +92,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
         image: variationImages[0],    // 1ª foto da variação (quando houver)
       });
     } else {
-      addItem(product, qty, { color: selectedColor || undefined });
+      addItem(product, qty, { color: selectedColor, image: selectedColorInfo?.image });
     }
     setAdded(true);
     setTimeout(() => {
@@ -355,16 +360,25 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                     <div className="flex flex-wrap gap-2">
                       {colors.map((c) => (
                         <button
-                          key={c}
+                          key={c.name}
                           type="button"
-                          onClick={() => setSelectedColor(c)}
-                          className={`px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
-                            selectedColor === c
+                          onClick={() => { setSelectedColor(c.name); setImgIndex(0); }}
+                          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
+                            selectedColor === c.name
                               ? "border-[var(--color-neon-blue)] bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)]"
                               : "border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] hover:border-[var(--color-neon-blue)]/40"
                           }`}
                         >
-                          {c}
+                          {c.image && (
+                            <Image
+                              src={c.image}
+                              alt=""
+                              width={24}
+                              height={24}
+                              className="w-6 h-6 rounded-md object-cover shrink-0"
+                            />
+                          )}
+                          {c.name}
                         </button>
                       ))}
                     </div>

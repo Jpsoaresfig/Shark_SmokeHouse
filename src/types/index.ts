@@ -102,10 +102,10 @@ export interface Product {
   costPrice?: number;
   /** Imposto (%) sobre o produto. USO INTERNO — nunca exibido ao cliente. */
   taxPercent?: number;
-  /** Cores disponíveis (nomes) para o cliente escolher. Mesma peça, mesmo preço.
-   *  @deprecated Use `variations` (com SKU e estoque por variação). Mantido para
-   *  produtos antigos. */
-  colors?: string[];
+  /** Cores/estampas disponíveis para o cliente escolher. Mesma peça, mesmo preço.
+   *  Produtos legados gravavam apenas o NOME como string; novos produtos podem
+   *  ter foto própria (image). Normalize com normalizeColors() antes de usar. */
+  colors?: ProductColor[];
   /** Variações/grade do produto: mesmo preço, atributo (sabor/aroma/cor) e
    *  código de barras (SKU) diferentes, com estoque próprio por variação.
    *  Quando presente, `stock` deste produto é a SOMA dos estoques das variações. */
@@ -124,6 +124,17 @@ export interface Product {
   doublePoints?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Cor/estampa de um produto. Produtos legados gravavam apenas o NOME (string);
+ *  produtos novos podem trazer foto própria (`{ name, image? }`).
+ *  Sempre normalize com normalizeColors() antes de usar. */
+export type ProductColor = string | { name: string; image?: string };
+
+/** Cor já normalizada (sempre objeto com `name`). Retorno de normalizeColors(). */
+export interface NormalizedColor {
+  name: string;
+  image?: string;
 }
 
 /** Uma variação (grade) do produto: mesmo preço, atributo e SKU diferentes. */
@@ -369,6 +380,8 @@ export interface LoyaltyTransaction {
   rewardId?: string;
   /** uid de quem fez o ajuste manual (PDV/balcão). Ausente em eventos do sistema. */
   by?: string;
+  /** Guard do cron de manutenção: lote já contabilizado como expirado. */
+  expired?: boolean;
   createdAt: string;
 }
 
@@ -426,6 +439,12 @@ export interface Coupon {
   usageLimitPerCpf?: number;
   /** Slugs de categorias a que o cupom se restringe. Vazio/ausente = todas. */
   categories?: string[];
+  /** Cupom criado pelo módulo de marketing ("marketing"). */
+  source?: string;
+  /** Campanha que gerou o cupom (quando aplicável). */
+  marketingCampaignId?: string;
+  /** Automação que gerou o cupom (quando aplicável). */
+  marketingAutomationId?: string;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -725,6 +744,10 @@ export interface AppNotification {
   read: boolean;
   /** Pedido relacionado, quando aplicável. */
   orderId?: string;
+  /** Campanha de marketing que gerou a notificação (rastreio de toque). */
+  marketingCampaignId?: string;
+  /** Automação de marketing que gerou a notificação. */
+  marketingAutomationId?: string;
   createdAt: string;
 }
 

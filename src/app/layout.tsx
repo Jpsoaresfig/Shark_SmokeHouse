@@ -11,6 +11,7 @@ import { AgeGate } from "@/components/AgeGate";
 import { FirebaseAnalytics } from "@/components/FirebaseAnalytics";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { Toaster } from "@/components/ui/toaster";
+import { MarketingCartTracker } from "@/components/MarketingCartTracker";
 
 const bodoniModa = Bodoni_Moda({
   variable: "--font-bodoni",
@@ -72,6 +73,7 @@ export default function RootLayout({
           <ReportButton />
           <PromoPopup />
           <Toaster />
+          <MarketingCartTracker />
         </AuthProvider>
       </body>
     </html>

@@ -12,7 +12,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
-import { formatCurrency, slugify } from "@/lib/utils";
+import { formatCurrency, slugify, normalizeColors } from "@/lib/utils";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "@/lib/firebase/products";
 import {
   getCategories, ensureCategoriesSeeded, createCategory, deleteCategory, setCategoryDoublePoints,
@@ -21,7 +21,7 @@ import { CloudinaryUpload, uploadToCloudinary } from "@/components/ui/Cloudinary
 import { ImportSpreadsheetDialog } from "@/components/admin/ImportSpreadsheetDialog";
 import { toast } from "@/stores/toastStore";
 import { computeRedemption, MIN_REDEMPTION_MARGIN, REDEMPTION_POINTS_PER_REAL } from "@/lib/loyalty/redemption";
-import type { Product, ProductCategory, Category } from "@/types";
+import type { Product, ProductCategory, Category, ProductColor } from "@/types";
 
 const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   name: "", slug: "", description: "", shortDescription: "",
@@ -130,19 +130,68 @@ export default function AdminProducts() {
     }));
   }
 
+  /* Foto por cor/estampa: input de arquivo compartilhado (aceita várias fotos,
+     mas só a primeira é usada). Guarda em colorImgTargetRef qual cor recebe a foto. */
+  const colorImgInputRef = useRef<HTMLInputElement>(null);
+  const colorImgTargetRef = useRef<string | null>(null);
+  const [colorImgUploading, setColorImgUploading] = useState<string | null>(null);
+
+  function colorName(c: ProductColor) {
+    return typeof c === "string" ? c : c.name;
+  }
+  function colorImage(c: ProductColor) {
+    return typeof c === "string" ? undefined : c.image;
+  }
+
+  function pickColorImage(name: string) {
+    colorImgTargetRef.current = name;
+    colorImgInputRef.current?.click();
+  }
+
+  async function handleColorImages(files: FileList | null) {
+    const name = colorImgTargetRef.current;
+    if (!files || files.length === 0 || !name) return;
+    setColorImgUploading(name);
+    try {
+      const urls = await Promise.all(Array.from(files).map(f => uploadToCloudinary(f)));
+      const image = urls[0];
+      setForm(f => ({
+        ...f,
+        colors: (f.colors ?? []).map(c =>
+          colorName(c) === name ? { name, image } : c
+        ),
+      }));
+    } catch {
+      toast.error("Erro ao enviar a foto da cor/estampa.");
+    } finally {
+      setColorImgUploading(null);
+      colorImgTargetRef.current = null;
+      if (colorImgInputRef.current) colorImgInputRef.current.value = "";
+    }
+  }
+
+  function removeColorImage(name: string) {
+    setForm(f => ({
+      ...f,
+      colors: (f.colors ?? []).map(c =>
+        colorName(c) === name ? { name } : c
+      ),
+    }));
+  }
+
   function addColor() {
     const c = colorInput.trim();
     if (!c) return;
     setForm(f => {
       const list = f.colors ?? [];
-      if (list.some(x => x.toLowerCase() === c.toLowerCase())) return f;
-      return { ...f, colors: [...list, c] };
+      if (list.some(x => colorName(x).toLowerCase() === c.toLowerCase())) return f;
+      return { ...f, colors: [...list, { name: c }] };
     });
     setColorInput("");
   }
 
-  function removeColor(c: string) {
-    setForm(f => ({ ...f, colors: (f.colors ?? []).filter(x => x !== c) }));
+  function removeColor(name: string) {
+    setForm(f => ({ ...f, colors: (f.colors ?? []).filter(x => colorName(x) !== name) }));
   }
 
   /* Categorias dinâmicas (gerenciadas pelo admin) */
@@ -260,7 +309,7 @@ export default function AdminProducts() {
       redeemDisabled: p.redeemDisabled ?? false,
       loyaltyPointsOverride: p.loyaltyPointsOverride,
       pointsEarned: p.pointsEarned,
-      colors: p.colors ?? [],
+      colors: normalizeColors(p.colors),
       // Migra a foto única legada (`image`) para a galeria (`images`) ao editar.
       variations: (p.variations ?? []).map(v => ({
         ...v,
@@ -297,6 +346,16 @@ export default function AdminProducts() {
         };
       });
       const usesVariations = cleanVariations.length > 0;
+      // Cores/estampas: sempre objetos `{ name, image? }` sem `image` quando não há foto
+      // (Firestore rejeita undefined aninhado).
+      const cleanColors = (form.colors ?? [])
+        .map(c => {
+          const name = colorName(c).trim();
+          if (!name) return null;
+          const image = colorImage(c);
+          return image ? { name, image } : { name };
+        })
+        .filter((c): c is { name: string; image?: string } => c !== null);
       const priceNum = Number(form.price);
       const costNum = form.costPrice ? Number(form.costPrice) : undefined;
       const taxNum = form.taxPercent ? Number(form.taxPercent) : undefined;
@@ -315,6 +374,7 @@ export default function AdminProducts() {
         stock: usesVariations ? cleanVariations.reduce((s, v) => s + v.stock, 0) : Number(form.stock),
         minStock: Number(form.minStock),
         variations: cleanVariations,
+        colors: cleanColors,
         loyaltyPoints: redemption.eligible ? redemption.pointsCost ?? undefined : undefined,
         redeemDisabled: form.redeemDisabled || undefined,
         loyaltyPointsOverride: overrideNum,
@@ -892,10 +952,10 @@ export default function AdminProducts() {
               />
             </div>
 
-            {/* Cores/estampas disponíveis (opcional, legado — prefira Variações) */}
+            {/* Cores/estampas disponíveis (opcional — foto própria por cor) */}
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">
-                Cores/estampas disponíveis <span className="text-[var(--color-text-muted)] font-normal">(legado — sem código/estoque próprio; prefira Variações)</span>
+                Cores/estampas disponíveis <span className="text-[var(--color-text-muted)] font-normal">(opcional — anexe uma foto por cor; o cliente visualiza ao escolher)</span>
               </label>
               <div className="flex gap-2">
                 <input
@@ -911,19 +971,63 @@ export default function AdminProducts() {
               </div>
               {(form.colors ?? []).length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {(form.colors ?? []).map(c => (
-                    <span
-                      key={c}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/30"
-                    >
-                      {c}
-                      <button type="button" onClick={() => removeColor(c)} className="hover:text-[var(--color-error)]" aria-label={`Remover ${c}`}>
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
+                  {(form.colors ?? []).map(c => {
+                    const name = colorName(c);
+                    const img = colorImage(c);
+                    return (
+                      <span
+                        key={name}
+                        className="inline-flex items-center gap-1.5 pl-1.5 pr-2.5 py-1 rounded-lg text-xs font-medium bg-[var(--color-neon-blue-glow)] text-[var(--color-neon-blue)] border border-[var(--color-neon-blue)]/30"
+                      >
+                        {img ? (
+                          <span className="relative w-6 h-6 rounded-md overflow-hidden border border-[var(--color-neon-blue)]/30 shrink-0 group">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={img} alt={name} className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => removeColorImage(name)}
+                              title="Remover a foto desta cor"
+                              className="absolute top-0 right-0 w-3 h-3 rounded-bl bg-black/60 hover:bg-[var(--color-error)] flex items-center justify-center text-white"
+                            >
+                              <X className="w-2 h-2" />
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => pickColorImage(name)}
+                            disabled={colorImgUploading !== null}
+                            title="Adicionar foto a esta cor"
+                            className="w-6 h-6 rounded-md border border-dashed border-[var(--color-neon-blue)]/40 flex items-center justify-center shrink-0 hover:border-[var(--color-neon-blue)] transition-colors disabled:opacity-50"
+                          >
+                            {colorImgUploading === name
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <ImageIcon className="w-3 h-3" />}
+                          </button>
+                        )}
+                        {name}
+                        <button type="button" onClick={() => removeColor(name)} className="hover:text-[var(--color-error)]" aria-label={`Remover ${name}`}>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
+              <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                A cor com foto troca a imagem do produto no site quando o cliente a seleciona.
+                Para opções com código de barras e estoque próprio, use Variações.
+              </p>
+
+              {/* input compartilhado para as fotos das cores */}
+              <input
+                ref={colorImgInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={e => handleColorImages(e.target.files)}
+              />
             </div>
             <div className="flex items-center gap-4 sm:col-span-2">
               <label className="flex items-center gap-2 cursor-pointer">

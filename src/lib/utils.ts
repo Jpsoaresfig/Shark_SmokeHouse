@@ -1,8 +1,17 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { NormalizedColor, ProductColor } from "@/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+/** Normaliza `colors` de um produto (strings legadas ou `{ name, image? }`)
+ *  para uma lista estável de `NormalizedColor`. */
+export function normalizeColors(colors?: ProductColor[]): NormalizedColor[] {
+  return (colors ?? []).map(c =>
+    typeof c === "string" ? { name: c } : { name: c.name, image: c.image },
+  );
 }
 
 export function formatCurrency(value: number): string {

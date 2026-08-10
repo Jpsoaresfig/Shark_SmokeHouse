@@ -177,6 +177,29 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── Marketing / CRM ───────────────────────────────────────
+    // Leitura e escrita de TODAS as coleções de marketing: exclusivas do admin
+    // (o vendedor não acessa esta área). O único acesso de cliente é a própria
+    // sessão de carrinho abandonado, que ele mesmo cria/atualiza no heartbeat.
+    match /marketingCampaigns/{id}  { allow read, write: if isAdmin(); }
+    match /marketingSegments/{id}   { allow read, write: if isAdmin(); }
+    match /marketingAutomations/{id}{ allow read, write: if isAdmin(); }
+    match /marketingTemplates/{id}  { allow read, write: if isAdmin(); }
+    match /marketingExecutions/{id} { allow read, write: if isAdmin(); }
+    match /marketingEvents/{id}     { allow read, write: if isAdmin(); }
+    match /marketingSettings/{id}   { allow read, write: if isAdmin(); }
+
+    // Sessão de carrinho (doc id = uid): o cliente grava apenas a própria, e só
+    // com userId igual ao próprio uid. A leitura das sessões (público de carrinho
+    // abandonado) é admin; o dono também pode ler a própria.
+    match /marketingCartSessions/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create, update: if isAuth()
+                            && request.auth.uid == uid
+                            && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
     // ── Lounge Bookings ───────────────────────────────────────
     // Criação pública (formulário sem login), mas valida os campos obrigatórios
     // e força status "pending" para impedir reservas-lixo ou já "aprovadas".

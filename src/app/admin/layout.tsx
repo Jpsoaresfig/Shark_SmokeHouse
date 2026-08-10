@@ -25,6 +25,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if (isSeller && pathname === "/admin") { router.replace("/admin/seller"); }
     // Área "Produtos Ocultos" é exclusiva do admin — vendedor não entra nem por URL.
     if (isSeller && pathname.startsWith("/admin/internal")) { router.replace("/admin/seller"); }
+    // Marketing/CRM é exclusivo do admin — o vendedor não acessa nem por URL.
+    if (isSeller && pathname.startsWith("/admin/marketing")) { router.replace("/admin/seller"); }
   }, [user, loading, isAllowed, isSeller, pathname, router]);
 
   if (loading && !user) {
