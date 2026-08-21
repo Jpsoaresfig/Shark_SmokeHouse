@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Clock, CheckCircle, Flame, ArrowRight, CalendarOff } from "lucide-react";
+import { Clock, CheckCircle, Flame, ArrowRight, CalendarOff, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { createLoungeBooking, getTakenSlots, SLOT_TAKEN } from "@/lib/firebase/l
 import { DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
 import { useSiteSettingsStore, useSiteSections, useSiteLounge } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
+import { formatCurrency } from "@/lib/utils";
 
 const features = [
   { icon: "🎵", title: "Música ao Vivo", desc: "Sex & Sáb das 20h às 01h" },
@@ -27,6 +28,8 @@ export default function LoungePage() {
   const timeSlots = loungeSettings?.timeSlots?.length
     ? loungeSettings.timeSlots
     : DEFAULT_LOUNGE_TIME_SLOTS;
+  // Sabores/essências com preço e promoção — configurados pelo admin na Agenda do Lounge.
+  const flavors = loungeSettings?.flavors ?? [];
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [selectedTime, setSelectedTime] = useState("");
@@ -177,6 +180,46 @@ export default function LoungePage() {
             </motion.div>
           ))}
         </div>
+
+        {/* Sabores disponíveis & promoções — configurados pelo admin */}
+        {flavors.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mb-16"
+          >
+            <div className="flex items-center gap-3 justify-center mb-8">
+              <Sparkles className="w-5 h-5 text-[var(--color-neon-cyan)]" />
+              <h2 className="text-3xl font-black text-[var(--color-text-primary)]">
+                Sabores <span className="text-neon">Disponíveis</span>
+              </h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {flavors.map((f) => (
+                <div
+                  key={f.id}
+                  className="glass rounded-2xl border border-[var(--color-border)] p-5 flex flex-col gap-2"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-base font-semibold text-[var(--color-text-primary)] leading-snug">
+                      {f.name}
+                    </p>
+                    <span className="shrink-0 text-lg font-black text-[var(--color-neon-blue)]">
+                      {typeof f.price === "number" ? formatCurrency(f.price) : "Consulte"}
+                    </span>
+                  </div>
+                  {f.promo && (
+                    <Badge variant="premium" className="self-start text-xs">
+                      <Flame className="w-3 h-3" />
+                      {f.promo}
+                    </Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Booking form */}
         <div className="grid lg:grid-cols-5 gap-10 items-start">

@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   ChevronLeft, ChevronRight, Users, Clock, Phone, Mail,
   CheckCircle, XCircle, AlertCircle, CalendarDays, RefreshCw,
-  Trash2, MessageCircle, Plus, Pencil, X, Save,
+  Trash2, MessageCircle, Plus, Pencil, X, Save, Sparkles,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,7 @@ import { getSiteSettings, updateSiteSettings, DEFAULT_LOUNGE_TIME_SLOTS } from "
 import { todayISO } from "@/lib/booking";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
-import type { LoungeBooking, BookingStatus } from "@/types";
+import type { LoungeBooking, BookingStatus, LoungeFlavor } from "@/types";
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const MONTHS = [
@@ -96,6 +96,11 @@ export default function AdminLoungePage() {
   const [savingSlots, setSavingSlots] = useState(false);
   const [newTime, setNewTime] = useState("");
 
+  /* ── Sabores disponíveis + promoções (editáveis pelo admin) ── */
+  const [flavors, setFlavors] = useState<LoungeFlavor[]>([]);
+  const [flavorsDirty, setFlavorsDirty] = useState(false);
+  const [savingFlavors, setSavingFlavors] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -109,7 +114,7 @@ export default function AdminLoungePage() {
 
   useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
 
-  /* Carrega os horários configurados (fallback para os padrões se ainda não houver). */
+  /* Carrega os horários e sabores configurados (fallback para os padrões se ainda não houver). */
   useEffect(() => {
     if (!firebaseReady) return;
     let active = true;
@@ -117,6 +122,7 @@ export default function AdminLoungePage() {
       .then((s) => {
         if (!active) return;
         setSlots(s.lounge?.timeSlots?.length ? s.lounge.timeSlots : DEFAULT_LOUNGE_TIME_SLOTS);
+        setFlavors(s.lounge?.flavors ?? []);
       })
       .catch(() => { if (active) toast.error("Não foi possível carregar os horários."); })
       .finally(() => { if (active) setSlotsLoading(false); });
@@ -137,17 +143,63 @@ export default function AdminLoungePage() {
     setSlotsDirty(true);
   }
 
+  /* O merge do Firestore substitui o objeto `lounge` inteiro, então os dois
+     saves sempre enviam horários + sabores juntos para não perder dados. */
   async function saveSlots() {
     if (slots.length === 0) { toast.error("Adicione pelo menos um horário disponível."); return; }
     setSavingSlots(true);
     try {
-      await updateSiteSettings({ lounge: { timeSlots: slots } });
+      await updateSiteSettings({ lounge: { timeSlots: slots, flavors } });
       setSlotsDirty(false);
       toast.success("Horários do lounge atualizados!");
     } catch {
       toast.error("Erro ao salvar horários. Tente novamente.");
     } finally {
       setSavingSlots(false);
+    }
+  }
+
+  function addFlavor() {
+    setFlavors((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name: "", price: null },
+    ]);
+    setFlavorsDirty(true);
+  }
+
+  function updateFlavor(id: string, patch: Partial<LoungeFlavor>) {
+    setFlavors((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+    setFlavorsDirty(true);
+  }
+
+  function removeFlavor(id: string) {
+    setFlavors((prev) => prev.filter((f) => f.id !== id));
+    setFlavorsDirty(true);
+  }
+
+  async function saveFlavors() {
+    const valid = flavors.filter((f) => f.name.trim().length > 0);
+    if (valid.length === 0) { toast.error("Adicione pelo menos um sabor com nome."); return; }
+    setSavingFlavors(true);
+    try {
+      await updateSiteSettings({
+        lounge: {
+          timeSlots: slots,
+          flavors: valid.map((f) => ({
+            id: f.id,
+            name: f.name.trim(),
+            price: typeof f.price === "number" && Number.isFinite(f.price) ? f.price : null,
+            ...(f.promo?.trim() ? { promo: f.promo.trim() } : {}),
+          })),
+        },
+      });
+      setFlavors(valid);
+      setFlavorsDirty(false);
+      toast.success("Sabores e promoções atualizados!");
+    } catch {
+      toast.error("Erro ao salvar sabores. Tente novamente.");
+    } finally {
+      setSavingFlavors(false);
     }
   }
 
@@ -418,6 +470,102 @@ export default function AdminLoungePage() {
                   {savingSlots
                     ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     : <><Save className="w-4 h-4" /> Salvar horários</>}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Sabores & promoções — editáveis pelo admin */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 }}
+          className="mb-6"
+        >
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[var(--color-neon-cyan)]" />
+                Sabores disponíveis &amp; Promoções
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2 space-y-4">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Estes sabores aparecem na página do Lounge com preço e promoção. Deixe o preço vazio para
+                exibir &quot;Consulte&quot;. A promoção é opcional (ex.: &quot;2 por R$ 60&quot;).
+              </p>
+
+              {flavors.length === 0 ? (
+                <p className="text-sm text-[var(--color-text-muted)]">
+                  Nenhum sabor cadastrado — adicione abaixo para exibir no site.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {flavors.map((f) => (
+                    <div key={f.id} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <input
+                        type="text"
+                        value={f.name}
+                        onChange={(e) => updateFlavor(f.id, { name: e.target.value })}
+                        placeholder="Nome do sabor (ex.: Duplo Maçã)"
+                        aria-label="Nome do sabor"
+                        className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 h-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                      />
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={f.price ?? ""}
+                        onChange={(e) =>
+                          updateFlavor(f.id, { price: e.target.value === "" ? null : Number(e.target.value) })
+                        }
+                        placeholder="Preço (R$)"
+                        aria-label="Preço do sabor"
+                        className="sm:w-32 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 h-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
+                      />
+                      <input
+                        type="text"
+                        value={f.promo ?? ""}
+                        onChange={(e) => updateFlavor(f.id, { promo: e.target.value })}
+                        placeholder="Promoção (opcional)"
+                        aria-label="Promoção do sabor"
+                        className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 h-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-cyan)] transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeFlavor(f.id)}
+                        className="self-end sm:self-auto w-10 h-10 shrink-0 rounded-lg flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-red-500/10 transition-colors"
+                        aria-label={`Remover sabor ${f.name || "sem nome"}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={addFlavor}
+                  className="h-10"
+                >
+                  <Plus className="w-4 h-4" /> Adicionar sabor
+                </Button>
+                <Button
+                  type="button"
+                  variant="premium"
+                  size="sm"
+                  onClick={saveFlavors}
+                  disabled={!flavorsDirty || savingFlavors}
+                  className="h-10"
+                >
+                  {savingFlavors
+                    ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    : <><Save className="w-4 h-4" /> Salvar sabores</>}
                 </Button>
               </div>
             </CardContent>
