@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Save, RefreshCw, Truck, Megaphone, Clock } from "lucide-react";
+import { Eye, EyeOff, Save, RefreshCw, Truck, Megaphone, Clock, Store } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -10,11 +10,11 @@ import { Button } from "@/components/ui/button";
 import { CloudinaryUpload } from "@/components/ui/CloudinaryUpload";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { Badge } from "@/components/ui/badge";
-import { getSiteSettings, updateSiteSettings } from "@/lib/firebase/settings";
+import { getSiteSettings, updateSiteSettings, DEFAULT_VITRINE } from "@/lib/firebase/settings";
 import { getActiveProducts } from "@/lib/firebase/products";
 import { toast } from "@/stores/toastStore";
 import { DAY_LABELS_FULL, DAY_LABELS, isOpenNow, formatTodayStatus } from "@/lib/businessHours";
-import type { SiteSettings, Product, BusinessHours } from "@/types";
+import type { SiteSettings, Product, BusinessHours, VitrineContent } from "@/types";
 
 const SECTION_META: {
   key: keyof SiteSettings["sections"];
@@ -67,6 +67,7 @@ export default function AdminSections() {
     days: [null, null, null, null, null, null, null],
     closedMessage: "",
   });
+  const [vitrine, setVitrine] = useState<VitrineContent>(DEFAULT_VITRINE);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,6 +81,7 @@ export default function AdminSections() {
       setCart(s.cart);
       setPromo(s.promoPopup);
       if (s.businessHours) setHours(s.businessHours);
+      setVitrine(s.vitrine ?? DEFAULT_VITRINE);
     } catch {
       toast.error("Não foi possível carregar as configurações.");
     } finally {
@@ -116,6 +118,12 @@ export default function AdminSections() {
           enabled: hours.enabled,
           days: hours.days.map((d) => (d ? { ...d } : null)),
           closedMessage: hours.closedMessage.trim(),
+        },
+        vitrine: {
+          about: vitrine.about.trim() || DEFAULT_VITRINE.about,
+          address: vitrine.address.trim() || DEFAULT_VITRINE.address,
+          phone: vitrine.phone.trim() || DEFAULT_VITRINE.phone,
+          hours: vitrine.hours.trim() || DEFAULT_VITRINE.hours,
         },
       });
       setSaved(true);
@@ -179,7 +187,7 @@ export default function AdminSections() {
       <div className="max-w-3xl mx-auto">
         <AdminPageHeader
           title="Site & Vitrine"
-          subtitle="Seções da página inicial, frete grátis e popup promocional."
+          subtitle="Conteúdo e seções da página inicial, frete grátis e popup promocional."
           action={<Badge variant="default">{activeCount}/{SECTION_META.length} seções</Badge>}
         />
 
@@ -261,6 +269,83 @@ export default function AdminSections() {
                       </motion.div>
                     );
                   })}
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Conteúdo da Vitrine (home + rodapé) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          className="mt-6"
+        >
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Store className="w-4 h-4 text-[var(--color-neon-blue)]" />
+                Conteúdo da Página Inicial
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-2 space-y-5">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                Texto institucional, endereço, telefone e horários exibidos na página inicial e no rodapé.
+              </p>
+
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                  Texto institucional
+                </label>
+                <textarea
+                  value={vitrine.about}
+                  maxLength={400}
+                  rows={3}
+                  placeholder="Ex.: Na Shark Smoke House, você encontra produtos selecionados..."
+                  onChange={(e) => setVitrine((prev) => ({ ...prev, about: e.target.value }))}
+                  className="mt-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
+                />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                    Endereço
+                  </label>
+                  <Input
+                    value={vitrine.address}
+                    maxLength={120}
+                    placeholder="Rua, número — bairro, cidade, UF"
+                    onChange={(e) => setVitrine((prev) => ({ ...prev, address: e.target.value }))}
+                    className="mt-1.5"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                    Telefone / WhatsApp
+                  </label>
+                  <Input
+                    value={vitrine.phone}
+                    maxLength={20}
+                    placeholder="(83) 99902-0606"
+                    onChange={(e) => setVitrine((prev) => ({ ...prev, phone: e.target.value }))}
+                    className="mt-1.5"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                  Horários de funcionamento (uma linha por período)
+                </label>
+                <textarea
+                  value={vitrine.hours}
+                  maxLength={300}
+                  rows={4}
+                  placeholder={"Segunda: Fechado\nTer – Sex: 13h às 21h\nSáb – Dom: 14h às 21h"}
+                  onChange={(e) => setVitrine((prev) => ({ ...prev, hours: e.target.value }))}
+                  className="mt-1.5 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all resize-none"
+                />
+              </div>
             </CardContent>
           </Card>
         </motion.div>

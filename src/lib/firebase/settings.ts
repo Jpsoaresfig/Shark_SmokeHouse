@@ -1,7 +1,7 @@
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
-import type { SiteSettings, BusinessHours } from "@/types";
+import type { SiteSettings, BusinessHours, LoungeFlavor, VitrineContent } from "@/types";
 
 /** Horários padrão de reserva do lounge (usados enquanto o admin não configura).
  *  Exportado para o admin e o site usarem o mesmo fallback. */
@@ -9,6 +9,18 @@ export const DEFAULT_LOUNGE_TIME_SLOTS = [
   "14:00", "15:00", "16:00", "17:00", "18:00",
   "19:00", "20:00", "21:00", "22:00", "23:00",
 ];
+
+/** Conteúdo padrão da vitrine (home + rodapé) enquanto o admin não edita
+ *  em Site & Vitrine. Exportado para site e admin usarem o mesmo fallback. */
+export const DEFAULT_VITRINE: VitrineContent = {
+  about:
+    "Na Shark Smoke House, você encontra produtos selecionados, atendimento de qualidade e um ambiente pensado para quem valoriza conforto e bons momentos. Tudo isso em um espaço que se tornou referência em João Pessoa.",
+  address:
+    "Rua Comerciante Alfredo Ferreira da Rocha, 742 — Mangabeira, João Pessoa, PB",
+  phone: "(83) 99902-0606",
+  hours:
+    "Segunda: Fechado\nTer – Sex: 13h às 21h\nSáb – Dom: 14h às 21h\nLounge (Ter – Dom): 20h às 22h",
+};
 
 const DOC = doc(db, "settings", "site");
 
@@ -21,6 +33,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
   },
   lounge: {
     timeSlots: DEFAULT_LOUNGE_TIME_SLOTS,
+    flavors: [],
   },
   payment: {
     pixKey: "",
@@ -65,6 +78,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
         Array.isArray(data.lounge?.timeSlots) && data.lounge.timeSlots.length > 0
           ? data.lounge.timeSlots
           : DEFAULT_LOUNGE_TIME_SLOTS,
+      flavors: normalizeLoungeFlavors(data.lounge?.flavors),
     },
     payment: {
       pixKey: data.payment?.pixKey ?? DEFAULT_SETTINGS.payment.pixKey,
@@ -94,6 +108,23 @@ export async function getSiteSettings(): Promise<SiteSettings> {
       days: normalizeBusinessDays(data.businessHours?.days),
       closedMessage: data.businessHours?.closedMessage ?? "",
     },
+    vitrine: normalizeVitrine(data.vitrine),
+  };
+}
+
+/** Normaliza o conteúdo da vitrine: aceita apenas strings e cai no padrão
+ *  (DEFAULT_VITRINE) quando o campo está ausente ou vazio. */
+function normalizeVitrine(raw?: unknown): VitrineContent {
+  const v = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const str = (key: keyof VitrineContent): string => {
+    const val = v[key];
+    return typeof val === "string" && val.trim() !== "" ? val : DEFAULT_VITRINE[key];
+  };
+  return {
+    about: str("about"),
+    address: str("address"),
+    phone: str("phone"),
+    hours: str("hours"),
   };
 }
 
@@ -112,6 +143,32 @@ function normalizeBusinessDays(days?: unknown): BusinessHours["days"] {
     }
   });
   return out;
+}
+
+/** Normaliza o array de sabores do lounge: mantém apenas itens com nome,
+ *  garante id/preço válidos e remove promoções vazias. */
+function normalizeLoungeFlavors(raw?: unknown): LoungeFlavor[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((f): f is Record<string, unknown> => !!f && typeof f === "object")
+    .map((f, i) => {
+      const name = typeof f.name === "string" ? f.name.trim() : "";
+      const priceRaw = f.price;
+      const price =
+        typeof priceRaw === "number" && Number.isFinite(priceRaw) && priceRaw >= 0
+          ? priceRaw
+          : typeof priceRaw === "string" && priceRaw.trim() !== "" && Number.isFinite(Number(priceRaw))
+          ? Number(priceRaw)
+          : null;
+      const promo = typeof f.promo === "string" ? f.promo.trim() : "";
+      return {
+        id: typeof f.id === "string" && f.id ? f.id : `flavor-${i}`,
+        name,
+        price,
+        ...(promo ? { promo } : {}),
+      } satisfies LoungeFlavor;
+    })
+    .filter((f) => f.name.length > 0);
 }
 
 export async function updateSiteSettings(settings: Partial<SiteSettings>): Promise<void> {

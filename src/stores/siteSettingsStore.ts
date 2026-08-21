@@ -2,10 +2,10 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
-import { getSiteSettings } from "@/lib/firebase/settings";
+import { getSiteSettings, DEFAULT_VITRINE } from "@/lib/firebase/settings";
 import { DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
 import { DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
-import type { SiteSettings } from "@/types";
+import type { SiteSettings, VitrineContent } from "@/types";
 
 const DEFAULT: SiteSettings["sections"] = {
   hero: true,
@@ -16,6 +16,7 @@ const DEFAULT: SiteSettings["sections"] = {
 
 const DEFAULT_LOUNGE: SiteSettings["lounge"] = {
   timeSlots: DEFAULT_LOUNGE_TIME_SLOTS,
+  flavors: [],
 };
 
 const DEFAULT_PAYMENT: SiteSettings["payment"] = {
@@ -47,6 +48,8 @@ const DEFAULT_BUSINESS_HOURS: SiteSettings["businessHours"] = {
   closedMessage: "",
 };
 
+const DEFAULT_VITRINE_CONTENT: VitrineContent = DEFAULT_VITRINE;
+
 interface SiteSettingsStore {
   sections: SiteSettings["sections"];
   lounge: SiteSettings["lounge"];
@@ -54,6 +57,7 @@ interface SiteSettingsStore {
   cart: SiteSettings["cart"];
   promoPopup: SiteSettings["promoPopup"];
   businessHours: SiteSettings["businessHours"];
+  vitrine: VitrineContent;
   loaded: boolean;
   load: () => Promise<void>;
 }
@@ -67,13 +71,14 @@ export const useSiteSettingsStore = create<SiteSettingsStore>((set) => ({
   cart: DEFAULT_CART,
   promoPopup: DEFAULT_PROMO,
   businessHours: DEFAULT_BUSINESS_HOURS,
+  vitrine: DEFAULT_VITRINE_CONTENT,
   loaded: false,
   load: async () => {
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
         const s = await getSiteSettings();
-        set({ sections: s.sections, lounge: s.lounge, payment: s.payment, cart: s.cart, promoPopup: s.promoPopup, businessHours: s.businessHours, loaded: true });
+        set({ sections: s.sections, lounge: s.lounge, payment: s.payment, cart: s.cart, promoPopup: s.promoPopup, businessHours: s.businessHours, vitrine: s.vitrine ?? DEFAULT_VITRINE_CONTENT, loaded: true });
       } catch {
         set({ loaded: true });
       }
@@ -143,4 +148,15 @@ export function useBusinessHours() {
     load();
   }, [load]);
   return { businessHours, loaded };
+}
+
+/** Loads the site settings once and exposes the live `vitrine` content
+ *  (texto institucional + contato da home/rodapé — editável em Site & Vitrine). */
+export function useSiteVitrine(): VitrineContent {
+  const vitrine = useSiteSettingsStore((s) => s.vitrine);
+  const load = useSiteSettingsStore((s) => s.load);
+  useEffect(() => {
+    load();
+  }, [load]);
+  return vitrine;
 }

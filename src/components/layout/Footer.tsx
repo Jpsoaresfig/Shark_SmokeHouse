@@ -5,12 +5,13 @@ import Link from "next/link";
 import { MessageCircle, MapPin, Phone, Clock } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/ui/Logo";
-import { useSiteSections } from "@/stores/siteSettingsStore";
+import { useSiteSections, useSiteVitrine } from "@/stores/siteSettingsStore";
 import { getCategories } from "@/lib/firebase/categories";
 import type { Category } from "@/types";
 
 export function Footer() {
   const sections = useSiteSections();
+  const vitrine = useSiteVitrine();
 
   // Categorias reais cadastradas no admin — os links da coluna "Loja" nunca
   // ficam quebrados quando as categorias mudam.
@@ -58,9 +59,7 @@ export function Footer() {
               <Logo variant="black" size="md" />
             </div>
             <p className="text-sm text-[var(--color-text-muted)] leading-relaxed max-w-xs mb-6">
-              Na Shark Smoke House, você encontra produtos selecionados, atendimento de
-              qualidade e um ambiente pensado para quem valoriza conforto e bons momentos.
-              Tudo isso em um espaço que se tornou referência em João Pessoa.
+              {vitrine.about}
             </p>
             {/* Contact info */}
             <div className="space-y-2.5">
@@ -71,19 +70,25 @@ export function Footer() {
                 className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-neon-blue)] transition-colors"
               >
                 <MapPin className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>Rua Comerciante Alfredo Ferreira da Rocha, 742 — Mangabeira, João Pessoa, PB</span>
+                <span>{vitrine.address}</span>
               </a>
               <div className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Phone className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0" />
-                <span>(83) 99902-0606</span>
+                <span>{vitrine.phone}</span>
               </div>
               <div className="flex items-start gap-2.5 text-sm text-[var(--color-text-secondary)]">
                 <Clock className="w-4 h-4 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
                 <span>
-                  Segunda: Fechado<br />
-                  Ter – Sex: 13h às 21h<br />
-                  Sáb – Dom: 14h às 21h<br />
-                  Lounge (Ter – Dom): 20h às 22h
+                  {vitrine.hours
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean)
+                    .map((line, i, arr) => (
+                      <span key={line}>
+                        {line}
+                        {i < arr.length - 1 && <br />}
+                      </span>
+                    ))}
                 </span>
               </div>
             </div>

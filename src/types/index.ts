@@ -505,6 +505,30 @@ export interface InstallmentFee {
   feePercent: number;
 }
 
+/** Sabor/essência disponível no lounge, com preço e promoção opcionais.
+ *  Editável pelo admin na Agenda do Lounge; exibido na página do Lounge. */
+export interface LoungeFlavor {
+  id: string;
+  name: string;
+  /** Preço em R$. null = "consulte na casa". */
+  price: number | null;
+  /** Rótulo opcional de promoção (ex.: "2 por R$ 60"). */
+  promo?: string;
+}
+
+/** Conteúdo da vitrine (página inicial) — editável pelo admin em Site & Vitrine.
+ *  Exibido na home (bloco institucional) e no rodapé, sempre em sincronia. */
+export interface VitrineContent {
+  /** Texto institucional da casa. */
+  about: string;
+  /** Endereço da loja (uma linha). */
+  address: string;
+  /** Telefone/WhatsApp exibido (ex.: "(83) 99902-0606"). */
+  phone: string;
+  /** Horários de funcionamento — texto livre, uma linha por período. */
+  hours: string;
+}
+
 export interface SiteSettings {
   sections: {
     hero: boolean;
@@ -517,6 +541,8 @@ export interface SiteSettings {
     /** Horários (HH:MM) liberados para reserva — aparecem no site e no admin.
      *  O admin decide quais horários ficam disponíveis, sem lista fixa. */
     timeSlots?: string[];
+    /** Sabores/essências disponíveis, com preço e promoção opcionais. */
+    flavors?: LoungeFlavor[];
   };
   /** Dados de pagamento configuráveis pelo admin. */
   payment: {
@@ -562,6 +588,9 @@ export interface SiteSettings {
   };
   /** Horário de funcionamento da loja (limitador de compras fora do horário). */
   businessHours?: BusinessHours;
+  /** Conteúdo da vitrine da página inicial (texto institucional + contato).
+   *  Ausente = usa os padrões em DEFAULT_VITRINE (lib/firebase/settings). */
+  vitrine?: VitrineContent;
   updatedAt?: string;
 }
 
