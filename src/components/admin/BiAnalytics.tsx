@@ -85,11 +85,17 @@ export function BiFiltersBar({
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [source]);
 
+  const brandOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of source.products) if (p.brand) set.add(p.brand);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [source]);
+
   const paymentOptions = useMemo(() => Object.entries(BI_PAYMENT_LABELS), []);
 
   const set = (patch: Partial<BiFilters>) => onChange({ ...filters, ...patch });
 
-  const hasFilter = !!filters.category || !!filters.productId || !!filters.sellerId || !!filters.paymentMethod || !!filters.neighborhood || filters.origin !== "all";
+  const hasFilter = !!filters.category || !!filters.brand || !!filters.productId || !!filters.sellerId || !!filters.paymentMethod || !!filters.neighborhood || filters.origin !== "all";
 
   return (
     <Card>
@@ -108,6 +114,13 @@ export function BiFiltersBar({
             <select value={filters.category ?? ""} onChange={(e) => set({ category: e.target.value || undefined })} className={inputCls}>
               <option value="">Todas</option>
               {source.categories.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+            </select>
+          </div>
+          <div className="min-w-[140px] flex-1">
+            <label className="text-xs font-medium text-[var(--color-text-muted)] block mb-1.5">Marca</label>
+            <select value={filters.brand ?? ""} onChange={(e) => set({ brand: e.target.value || undefined })} className={inputCls}>
+              <option value="">Todas</option>
+              {brandOptions.map((b) => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
           <div className="min-w-[160px] flex-1">

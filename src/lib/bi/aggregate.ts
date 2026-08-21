@@ -12,8 +12,8 @@
  *  - o custo do PDV usa o custo CONGELADO no item (`item.costPrice`), com
  *    fallback para o custo atual do produto (mesmo fallback do financeiro);
  *  - pedidos online usam o custo atual do produto (não congelam custo);
- *  - quando há filtro de categoria/produto, o faturamento/custo do resumo usa
- *    os ITENS do filtro (subtotais), mantendo coerência com o ranking.
+ *  - quando há filtro de categoria/marca/produto, o faturamento/custo do resumo
+ *    usa os ITENS do filtro (subtotais), mantendo coerência com o ranking.
  */
 import {
   saleStatus, saleCost, saleGrossProfit, saleCommission,
@@ -101,6 +101,7 @@ export function buildLines(source: BiSource): BiLine[] {
         variationName: item.variationName,
         sku: item.sku,
         category: item.category,
+        brand: productMap.get(item.productId)?.brand,
         quantity: item.quantity,
         unitPrice: item.price,
         subtotal: item.subtotal ?? item.price * item.quantity,
@@ -126,6 +127,7 @@ export function buildLines(source: BiSource): BiLine[] {
         variationName: item.color,
         sku: item.variationSku,
         category: prod?.category,
+        brand: prod?.brand,
         quantity: item.quantity,
         unitPrice: item.price,
         subtotal: item.price * item.quantity,
@@ -146,11 +148,12 @@ function toDate(value: unknown): Date {
 }
 
 function matchesItemFilter(
-  item: { productId: string; category?: string },
+  item: { productId: string; category?: string; brand?: string },
   filters: BiFilters,
 ): boolean {
   if (filters.productId && item.productId !== filters.productId) return false;
   if (filters.category && item.category !== filters.category) return false;
+  if (filters.brand && item.brand !== filters.brand) return false;
   return true;
 }
 
@@ -160,8 +163,9 @@ export function filterLines(lines: BiLine[], range: { start: Date; end: Date }, 
     (l) =>
       inRange(l.date, range) &&
       (filters.origin === "all" || l.source === filters.origin) &&
-      (!filters.category || l.category === filters.category) &&
-      (!filters.productId || l.productId === filters.productId) &&
+       (!filters.category || l.category === filters.category) &&
+       (!filters.brand || l.brand === filters.brand) &&
+       (!filters.productId || l.productId === filters.productId) &&
       (!filters.paymentMethod || l.paymentMethod === filters.paymentMethod) &&
       (!filters.sellerId || l.sellerId === filters.sellerId) &&
       (!filters.neighborhood || l.neighborhood === filters.neighborhood),
@@ -172,15 +176,15 @@ export function filterLines(lines: BiLine[], range: { start: Date; end: Date }, 
 
 /**
  * Linhas de TRANSAÇÃO (venda/pedido inteiro) no período que casam os filtros.
- * - Sem filtro de categoria/produto: faturamento = total da transação, custo =
- *   custo da transação (mesma base do financeiro).
- * - Com filtro de categoria/produto: usa os subtotais dos itens que casam,
+ * - Sem filtro de categoria/marca/produto: faturamento = total da transação,
+ *   custo = custo da transação (mesma base do financeiro).
+ * - Com filtro de categoria/marca/produto: usa os subtotais dos itens que casam,
  *   mantendo coerência com o ranking de produtos/categorias.
  */
 export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }, filters: BiFilters): BiTxnRow[] {
   const costMap = costMapOf(source);
   const productMap = new Map(source.products.map((p) => [p.id, p]));
-  const hasItemFilter = !!filters.category || !!filters.productId;
+  const hasItemFilter = !!filters.category || !!filters.brand || !!filters.productId;
   const rows: BiTxnRow[] = [];
 
   for (const s of source.sales) {
@@ -196,7 +200,7 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
     let cost: number;
     let units: number;
     if (hasItemFilter) {
-      const match = s.items.filter((it) => matchesItemFilter(it, filters));
+      const match = s.items.filter((it) => matchesItemFilter({ ...it, brand: productMap.get(it.productId)?.brand }, filters));
       if (match.length === 0) continue;
       revenue = match.reduce((a, it) => a + (it.subtotal ?? it.price * it.quantity), 0);
       cost = match.reduce((a, it) => a + (it.costPrice ?? costMap.get(it.productId) ?? 0) * it.quantity, 0);
@@ -223,7 +227,10 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
     let cost: number;
     let units: number;
     if (hasItemFilter) {
-      const match = o.items.filter((it) => matchesItemFilter({ productId: it.productId, category: productMap.get(it.productId)?.category }, filters));
+      const match = o.items.filter((it) => {
+        const prod = productMap.get(it.productId);
+        return matchesItemFilter({ productId: it.productId, category: prod?.category, brand: prod?.brand }, filters);
+      });
       if (match.length === 0) continue;
       revenue = match.reduce((a, it) => a + it.price * it.quantity, 0);
       cost = match.reduce((a, it) => a + (productMap.get(it.productId)?.costPrice ?? 0) * it.quantity, 0);
@@ -411,8 +418,9 @@ export function salesByNeighborhood(source: BiSource, range: { start: Date; end:
 
 export function salesBySeller(source: BiSource, range: { start: Date; end: Date }, filters: BiFilters): BiSellerRow[] {
   const costMap = costMapOf(source);
+  const productMap = new Map(source.products.map((p) => [p.id, p]));
   const rateMap = new Map(source.sellers.map((s) => [s.uid, s.commissionRate ?? 0]));
-  const hasItemFilter = !!filters.category || !!filters.productId;
+  const hasItemFilter = !!filters.category || !!filters.brand || !!filters.productId;
   const map = new Map<string, BiSellerRow>();
   for (const s of source.sales) {
     if (saleStatus(s) === "cancelled") continue;
@@ -421,8 +429,8 @@ export function salesBySeller(source: BiSource, range: { start: Date; end: Date 
     if (filters.paymentMethod && s.paymentMethod !== filters.paymentMethod) continue;
     if (filters.neighborhood) continue;
     if (!inRange(toDate(s.createdAt), range)) continue;
-    if (filters.category || filters.productId) {
-      const match = s.items.filter((it) => matchesItemFilter(it, filters));
+    if (hasItemFilter) {
+      const match = s.items.filter((it) => matchesItemFilter({ ...it, brand: productMap.get(it.productId)?.brand }, filters));
       if (match.length === 0) continue;
     }
     const key = s.sellerId ?? "(sem vendedor)";

@@ -21,6 +21,8 @@ export interface BiRange {
 export interface BiFilters {
   /** Slug da categoria (ex.: "beverages"). Ausente = todas. */
   category?: string;
+  /** Marca do produto (ex.: "Zomo"). Ausente = todas. */
+  brand?: string;
   /** productId exato. Ausente = todos. */
   productId?: string;
   /** sellerId exato (vendas PDV). Ausente = todos. */
@@ -47,6 +49,8 @@ export interface BiLine {
   sku?: string;
   /** Slug da categoria (pedidos online buscam no produto atual). */
   category?: string;
+  /** Marca do produto (sempre do catálogo atual — itens não congelam marca). */
+  brand?: string;
   quantity: number;
   unitPrice: number;
   /** Receita atribuída ao item (subtotal do item). */
