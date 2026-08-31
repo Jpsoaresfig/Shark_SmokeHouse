@@ -484,7 +484,7 @@ export default function AdminSections() {
                   return (
                     <div
                       key={day}
-                      className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors ${
+                      className={`flex items-center gap-3 flex-wrap rounded-xl border px-3 py-2.5 transition-colors ${
                         dayHours
                           ? "border-[var(--color-neon-blue)]/30 bg-[var(--color-bg-overlay)]"
                           : "border-[var(--color-border)] bg-transparent opacity-60"
@@ -495,19 +495,19 @@ export default function AdminSections() {
                         {label}
                       </span>
                       {dayHours ? (
-                        <div className="flex items-center gap-1.5 ml-auto">
+                        <div className="flex items-center gap-1.5 ml-auto w-full sm:w-auto">
                           <Input
                             type="time"
                             value={dayHours.open}
                             onChange={(e) => setDayTime(day, "open", e.target.value)}
-                            className="h-8 w-[110px] text-xs px-2"
+                            className="h-8 flex-1 min-w-0 sm:w-[110px] sm:flex-none text-xs px-2"
                           />
-                          <span className="text-xs text-[var(--color-text-muted)]">às</span>
+                          <span className="text-xs text-[var(--color-text-muted)] shrink-0">às</span>
                           <Input
                             type="time"
                             value={dayHours.close}
                             onChange={(e) => setDayTime(day, "close", e.target.value)}
-                            className="h-8 w-[110px] text-xs px-2"
+                            className="h-8 flex-1 min-w-0 sm:w-[110px] sm:flex-none text-xs px-2"
                           />
                         </div>
                       ) : (

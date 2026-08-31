@@ -19,7 +19,7 @@ export function BusinessHoursBanner() {
 
   return (
     <div
-      className={`w-full px-4 py-2.5 text-center text-xs font-medium border-b ${
+      className={`w-full mt-24 px-4 py-2.5 text-center text-xs font-medium border-b ${
         open
           ? "bg-[var(--color-success)]/10 border-[var(--color-success)]/20 text-[var(--color-success)]"
           : "bg-[var(--color-warning)]/10 border-[var(--color-warning)]/25 text-[var(--color-warning)]"

@@ -824,7 +824,7 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="min-h-screen pt-20 pb-28 md:pb-20 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen pt-24 pb-28 md:pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
 
         {/* Loja fechada — aviso informativo (o pedido entra na fila de espera) */}
