@@ -313,7 +313,7 @@ export default function AdminFinancial() {
               <button
                 key={t.id}
                 onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                className={`shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                   active
                     ? "bg-[var(--color-neon-blue)] text-[var(--color-bg-base)]"
                     : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"

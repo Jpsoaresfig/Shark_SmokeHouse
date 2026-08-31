@@ -31,7 +31,7 @@ export function MarketingNav() {
           <Link
             key={item.href}
             href={item.href}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium whitespace-nowrap shrink-0 transition-all ${
               active
                 ? "bg-[var(--color-neon-blue)] text-white shadow-[var(--shadow-neon-sm)]"
                 : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-overlay)]"
