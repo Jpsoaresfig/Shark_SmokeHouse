@@ -5,6 +5,7 @@ import { CalendarDays } from "lucide-react";
 import { getEvents } from "@/lib/firebase/events";
 import { EventsGrid } from "@/components/events/EventsGrid";
 import { Badge } from "@/components/ui/badge";
+import { isEventUpcoming } from "@/lib/utils";
 import type { Event } from "@/types";
 
 function EventsSkeleton() {
@@ -32,10 +33,8 @@ export default function EventsPage() {
 
   useEffect(() => {
     getEvents(true).then((events) => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      setUpcoming(events.filter((e) => new Date(e.date) >= today));
-      setPast(events.filter((e) => new Date(e.date) < today));
+      setUpcoming(events.filter((e) => isEventUpcoming(e)));
+      setPast(events.filter((e) => !isEventUpcoming(e)));
     }).finally(() => setLoading(false));
   }, []);
 

@@ -356,6 +356,8 @@ export interface Event {
   description: string;
   imageUrl: string;
   date: string;
+  /** Data opcional de encerramento — permite que o evento "rode" por um período. */
+  endDate?: string;
   active: boolean;
   createdAt: string;
 }

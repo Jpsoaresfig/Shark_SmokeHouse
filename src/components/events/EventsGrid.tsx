@@ -2,16 +2,15 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Calendar, CalendarDays, ArrowRight } from "lucide-react";
+import { Calendar, CalendarDays, MessageCircle } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { formatDate, isEventUpcoming } from "@/lib/utils";
 import type { Event } from "@/types";
 
 function EventCard({ event, index }: { event: Event; index: number }) {
-  const isUpcoming = new Date(event.date) >= new Date(new Date().setHours(0, 0, 0, 0));
+  const upcoming = isEventUpcoming(event);
 
   return (
     <motion.article
@@ -41,15 +40,20 @@ function EventCard({ event, index }: { event: Event; index: number }) {
         {/* Date chip floating on image */}
         <div className="absolute bottom-3 left-3">
           <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2 border border-white/10">
-            <Calendar className="w-3.5 h-3.5 text-[var(--color-neon-blue)]" />
-            <span className="text-xs font-semibold text-white">{formatDate(event.date)}</span>
+            <Calendar className="w-3.5 h-3.5 text-[var(--color-neon-blue)] shrink-0" />
+            <span className="text-xs font-semibold text-white">
+              {formatDate(event.date)}
+              {event.endDate && (
+                <span className="opacity-80"> → {formatDate(event.endDate)}</span>
+              )}
+            </span>
           </div>
         </div>
 
         {/* Status */}
         <div className="absolute top-3 right-3">
-          <Badge variant={isUpcoming ? "success" : "secondary"} className="text-xs backdrop-blur-sm">
-            {isUpcoming ? "Em breve" : "Encerrado"}
+          <Badge variant={upcoming ? "success" : "secondary"} className="text-xs backdrop-blur-sm">
+            {upcoming ? "Em breve" : "Encerrado"}
           </Badge>
         </div>
       </div>
@@ -63,12 +67,16 @@ function EventCard({ event, index }: { event: Event; index: number }) {
           {event.description}
         </p>
 
-        {isUpcoming && (
+        {upcoming && (
           <Button variant="outline" size="sm" className="w-full" asChild>
-            <Link href="/lounge">
-              Reservar Mesa
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
+            <a
+              href={`https://wa.me/5583999020606?text=${encodeURIComponent(`Olá! Quero mais informações sobre o evento: ${event.title}`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+              Fale conosco
+            </a>
           </Button>
         )}
       </div>

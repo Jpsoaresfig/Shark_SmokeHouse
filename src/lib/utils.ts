@@ -45,6 +45,31 @@ export function formatDateTime(date: unknown): string {
   }).format(toDate(date));
 }
 
+/** Converte "YYYY-MM-DD" em um Date LOCAL à meia-noite. Evita o bug de
+ *  `new Date("YYYY-MM-DD")` ser interpretado como UTC (desloca -1 dia em
+ *  fusos a oeste de Greenwich). */
+export function parseLocalDate(value: string): Date {
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+/** Meia-noite local de hoje (mesma base de `parseLocalDate`). */
+export function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/** Data efetiva de um evento: a do encerramento, se houver período;
+ *  caso contrário, a data única. */
+export function eventTargetDate(e: { date: string; endDate?: string }): Date {
+  return parseLocalDate(e.endDate || e.date);
+}
+
+/** Evento ainda ativo (hoje dentro da janela `data inicio → encerramento`). */
+export function isEventUpcoming(e: { date: string; endDate?: string }): boolean {
+  return eventTargetDate(e) >= startOfToday();
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

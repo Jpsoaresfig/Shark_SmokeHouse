@@ -15,8 +15,10 @@ import { NotificationCenter } from "@/components/notifications/NotificationCente
 import { useCartStore } from "@/stores/cartStore";
 import { useSiteSections } from "@/stores/siteSettingsStore";
 import { getCategories } from "@/lib/firebase/categories";
+import { getEvents } from "@/lib/firebase/events";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
+import { isEventUpcoming } from "@/lib/utils";
 import type { Category } from "@/types";
 
 const allNavLinks = [
@@ -33,6 +35,7 @@ export function Header() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileCatsOpen, setMobileCatsOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [newEvent, setNewEvent] = useState(false);
   const pathname = usePathname();
 
   const itemCount = useCartStore((s) => s.itemCount);
@@ -47,6 +50,13 @@ export function Header() {
   /* Categorias para o menu cascata do Catálogo (Task 4.2) */
   useEffect(() => {
     getCategories().then(setCategories).catch(() => {});
+  }, []);
+
+  /* Eventos com data ativa hoje (dentro da janela de exibição) — pisca o link "Eventos". */
+  useEffect(() => {
+    getEvents(true)
+      .then((evs) => setNewEvent(evs.some((e) => isEventUpcoming(e))))
+      .catch(() => setNewEvent(false));
   }, []);
 
   /* Scroll listener */
@@ -102,8 +112,9 @@ export function Header() {
 
             {/* Desktop Nav */}
             <nav className="hidden md:flex items-center gap-8">
-              {navLinks.map((link) =>
-                link.href === "/catalog" && categories.length > 0 ? (
+              {navLinks.map((link) => {
+                const notify = link.href === "/events" && newEvent;
+                return (link.href === "/catalog" && categories.length > 0 ? (
                   // Menu cascata de categorias (Task 4.2) — abre no hover, via CSS,
                   // sem recarregar a página; clicar numa categoria filtra o catálogo.
                   <div key={link.href} className="relative group">
@@ -140,12 +151,18 @@ export function Header() {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="text-eyebrow text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] border-b-2 border-transparent hover:border-[var(--color-neon-blue)] pb-0.5 transition-all duration-200"
+                    className={cn(
+                      "text-eyebrow border-b-2 pb-0.5 transition-all duration-200",
+                      notify
+                        ? "flex items-center gap-2 text-[var(--color-neon-blue)] border-[var(--color-neon-blue)]/60 animate-pulse"
+                        : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] border-transparent hover:border-[var(--color-neon-blue)]"
+                    )}
                   >
+                    {notify && <NewEventDot />}
                     {link.label}
                   </Link>
-                ),
-              )}
+                ));
+              })}
             </nav>
 
             {/* Right actions */}
@@ -377,8 +394,10 @@ export function Header() {
                         key={link.href}
                         href={link.href}
                         onClick={() => setMobileOpen(false)}
+                        className={link.href === "/events" && newEvent ? "text-[var(--color-neon-blue)] animate-pulse" : undefined}
                       >
                         {link.label}
+                        {link.href === "/events" && newEvent && <NewEventDot className="ml-auto" />}
                       </DrawerLink>
                     ),
                   )}
@@ -443,6 +462,16 @@ export function Header() {
 }
 
 /* ── Internal helpers ───────────────────────────────────── */
+
+/** Pontinho neon pulsante — indica evento novo ativo (link "Eventos"). */
+function NewEventDot({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative flex w-2 h-2 shrink-0", className)}>
+      <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-neon-blue)] opacity-75 animate-ping" />
+      <span className="relative inline-flex rounded-full w-2 h-2 bg-[var(--color-neon-blue)]" />
+    </span>
+  );
+}
 
 function DropdownLink({
   href, icon: Icon, children, onClick,

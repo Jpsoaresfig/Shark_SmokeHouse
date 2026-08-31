@@ -8,7 +8,7 @@ import Link from "next/link";
 import { getEvents } from "@/lib/firebase/events";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/utils";
+import { formatDate, isEventUpcoming } from "@/lib/utils";
 import type { Event } from "@/types";
 
 export function EventsSection() {
@@ -20,7 +20,7 @@ export function EventsSection() {
       .then((all) =>
         setEvents(
           all
-            .filter((e) => new Date(e.date) >= new Date(new Date().setHours(0, 0, 0, 0)))
+            .filter((e) => isEventUpcoming(e))
             .slice(0, 3)
         )
       )
@@ -101,8 +101,13 @@ export function EventsSection() {
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                   <div className="absolute bottom-3 left-3">
                     <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2 border border-white/10">
-                      <Calendar className="w-3.5 h-3.5 text-[var(--color-neon-blue)]" />
-                      <span className="text-xs font-semibold text-white">{formatDate(event.date)}</span>
+                      <Calendar className="w-3.5 h-3.5 text-[var(--color-neon-blue)] shrink-0" />
+                      <span className="text-xs font-semibold text-white">
+                        {formatDate(event.date)}
+                        {event.endDate && (
+                          <span className="opacity-80"> → {formatDate(event.endDate)}</span>
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>

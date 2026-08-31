@@ -16,13 +16,12 @@ import { Separator } from "@/components/ui/separator";
 import {
   getEvents, createEvent, updateEvent, deleteEvent, toggleEventActive,
 } from "@/lib/firebase/events";
-import { formatDate } from "@/lib/utils";
+import { formatDate, isEventUpcoming } from "@/lib/utils";
 import type { Event } from "@/types";
 
 /* ── helpers ─────────────────────────────────────────────── */
-function isUpcoming(dateStr: string) {
-  return new Date(dateStr) >= new Date(new Date().setHours(0, 0, 0, 0));
-}
+// `isUpcoming` agora vem de `isEventUpcoming` (utils) — corrige o deslocamento
+// UTC/local e considera a data de encerramento quando houver período.
 
 /* ── Image upload picker (Cloudinary) ────────────────────── */
 function ImagePicker({
@@ -109,6 +108,7 @@ function EventModal({
     title: event?.title ?? "",
     description: event?.description ?? "",
     date: event?.date ?? "",
+    endDate: event?.endDate ?? "",
     active: event?.active ?? true,
   });
   const [imageUrl, setImageUrl] = useState(event?.imageUrl ?? "");
@@ -120,14 +120,19 @@ function EventModal({
     e.preventDefault();
     setError("");
     if (imgUploading) return; // aguarda o upload da imagem terminar
+    if (form.endDate && new Date(form.endDate) < new Date(form.date)) {
+      setError("A data de encerramento não pode ser antes da data de início.");
+      return;
+    }
     setLoading(true);
     try {
+      const clean = { ...form, endDate: form.endDate.trim() || undefined };
       // Imagem é opcional — segue com imageUrl vazio se não houver.
       if (isEdit) {
-        await updateEvent(event.id, { ...form, imageUrl });
-        onSaved({ ...event, ...form, imageUrl });
+        await updateEvent(event.id, { ...clean, imageUrl });
+        onSaved({ ...event, ...clean, imageUrl });
       } else {
-        const created = await createEvent({ ...form, imageUrl });
+        const created = await createEvent({ ...clean, imageUrl });
         onSaved(created);
       }
     } catch {
@@ -186,13 +191,26 @@ function EventModal({
             />
           </div>
 
-          <Input
-            type="date"
-            label="Data do Evento"
-            value={form.date}
-            onChange={(e) => setForm({ ...form, date: e.target.value })}
-            required
-          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Input
+              type="date"
+              label="Data de início *"
+              value={form.date}
+              onChange={(e) => setForm({ ...form, date: e.target.value })}
+              required
+            />
+            <Input
+              type="date"
+              label="Encerra em (opcional)"
+              value={form.endDate}
+              min={form.date || undefined}
+              onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+            />
+          </div>
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Para um evento de um dia só, deixe &quot;Encerra em&quot; em branco. Para o evento
+            ficar rodando por vários dias, defina a data em que ele sai do ar.
+          </p>
 
           {/* Active toggle */}
           <div className="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)]">
@@ -308,8 +326,8 @@ export default function AdminEventsPage() {
     setTogglingId(null);
   };
 
-  const upcoming = events.filter((e) => isUpcoming(e.date));
-  const past = events.filter((e) => !isUpcoming(e.date));
+  const upcoming = events.filter((e) => isEventUpcoming(e));
+  const past = events.filter((e) => !isEventUpcoming(e));
 
   return (
     <>
@@ -421,7 +439,7 @@ function EventAdminCard({ event, index, toggling, onEdit, onDelete, onToggle }: 
   event: Event; index: number; toggling: boolean;
   onEdit: () => void; onDelete: () => void; onToggle: () => void;
 }) {
-  const upcoming = isUpcoming(event.date);
+  const upcoming = isEventUpcoming(event);
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -454,8 +472,11 @@ function EventAdminCard({ event, index, toggling, onEdit, onDelete, onToggle }: 
       {/* Info */}
       <div className="p-4">
         <div className="flex items-center gap-1.5 text-xs text-[var(--color-neon-blue)] font-medium mb-1.5">
-          <Calendar className="w-3.5 h-3.5" />
+          <Calendar className="w-3.5 h-3.5 shrink-0" />
           {formatDate(event.date)}
+          {event.endDate && (
+            <span className="text-[var(--color-text-muted)]">→ {formatDate(event.endDate)}</span>
+          )}
         </div>
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1 line-clamp-1">
           {event.title}
