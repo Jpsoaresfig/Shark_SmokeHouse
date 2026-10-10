@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   getLevel, getNextLevel, getLevelProgress, computeOrderPoints, computeOrderPointsForItems,
-  birthdayBonusFor, isExpired, expiresAt, isBirthdayMonth, planExpiry,
+  birthdayBonusFor, isExpired, expiresAt, isBirthdayMonth, planExpiry, eligibleOrderPointItems,
   WELCOME_BONUS_POINTS, POINTS_VALIDITY_DAYS,
 } from "./levels";
 
@@ -160,5 +160,60 @@ describe("planExpiry — não deixa saldo negativo", () => {
     const plan = planExpiry([{ id: "b", points: 50, createdAt: fresh }], 50, now);
     expect(plan.totalExpire).toBe(0);
     expect(plan.items).toEqual([]);
+  });
+
+  it("FIFO: resgate já consumiu o lote antigo → não expira os pontos novos", () => {
+    // +100 (antigo), resgate -100, +100 (novo). Saldo 100 = só pontos novos.
+    const plan = planExpiry(
+      [{ id: "a", points: 100, createdAt: old }, { id: "b", points: 100, createdAt: fresh }],
+      100, now, 100,
+    );
+    expect(plan.totalExpire).toBe(0);
+    expect(plan.markExpiredIds).toEqual(["a"]);
+  });
+
+  it("FIFO: consumo parcial do lote antigo expira só o restante", () => {
+    const plan = planExpiry(
+      [{ id: "a", points: 100, createdAt: old }, { id: "b", points: 100, createdAt: fresh }],
+      160, now, 40,
+    );
+    expect(plan.totalExpire).toBe(60);
+    expect(plan.items).toEqual([{ id: "a", expiredPoints: 60 }]);
+  });
+
+  it("FIFO idempotente: expiração anterior conta como consumo", () => {
+    // Lote 'a' (100) já expirado em execução anterior (débito -100 no ledger).
+    const plan = planExpiry([{ id: "a", points: 100, createdAt: old }], 0, now, 100);
+    expect(plan.totalExpire).toBe(0);
+  });
+});
+
+describe("eligibleOrderPointItems — não confia no pedido gravado pelo cliente", () => {
+  it("ignora multiplicador do pedido: 2x só com produto em dobro no catálogo", () => {
+    const items = eligibleOrderPointItems({
+      items: [{ productId: "a", price: 10, quantity: 2 }, { productId: "b", price: 5, quantity: 1 }],
+      total: 25,
+      isDouble: (id) => id === "b",
+    });
+    expect(items).toEqual([{ reais: 20, multiplier: 1 }, { reais: 5, multiplier: 2 }]);
+  });
+
+  it("limita a base ao total cobrado em produtos (preço inflado / cupom)", () => {
+    const items = eligibleOrderPointItems({
+      items: [{ productId: "a", price: 1000, quantity: 1 }],
+      total: 60,
+      deliveryFee: 10,
+      isDouble: () => false,
+    });
+    expect(items[0].reais).toBe(50);
+  });
+
+  it("valores inválidos não pontuam", () => {
+    const items = eligibleOrderPointItems({
+      items: [{ productId: "a", price: -5, quantity: 1 }, { productId: "b", price: 10, quantity: NaN }],
+      total: 100,
+      isDouble: () => true,
+    });
+    expect(items.every((i) => i.reais === 0)).toBe(true);
   });
 });

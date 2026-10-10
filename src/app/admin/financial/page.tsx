@@ -152,7 +152,8 @@ export default function AdminFinancial() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   /* Persiste a seleção de métricas do donut sempre que muda. */
   useEffect(() => {

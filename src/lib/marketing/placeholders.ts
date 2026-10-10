@@ -53,7 +53,7 @@ export function buildMessageVars(
 ): MessageVars {
   const vars: MessageVars = {
     nome: contact.name?.trim() || "cliente",
-    pontos: contact.loyaltyPoints != null ? String(contact.loyaltyPoints) : "",
+    pontos: contact.loyaltyPoints != null ? contact.loyaltyPoints.toLocaleString("pt-BR") : "",
   };
   if (extra.coupon) vars.cupom = extra.coupon;
   if (extra.couponValue != null) vars.valor = fmtCouponValue(extra.couponType, extra.couponValue);

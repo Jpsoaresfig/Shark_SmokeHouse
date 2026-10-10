@@ -1,6 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -13,12 +13,30 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  console.error(
+    "[firebase] NEXT_PUBLIC_FIREBASE_API_KEY / NEXT_PUBLIC_FIREBASE_PROJECT_ID ausentes — verifique o .env.",
+  );
+}
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+
+/** Firestore com `ignoreUndefinedProperties`: um campo opcional `undefined`
+ *  é simplesmente omitido em vez de derrubar a escrita inteira ("Unsupported
+ *  field value: undefined"). Para APAGAR um campo, use `deleteField()`.
+ *  No HMR o Firestore já pode ter sido inicializado → reaproveita a instância. */
+function createDb(): Firestore {
+  try {
+    return initializeFirestore(app, { ignoreUndefinedProperties: true });
+  } catch {
+    return getFirestore(app);
+  }
+}
 
 export const auth = getAuth(app);
 // E-mails do Firebase (reset de senha, verificação) saem em português.
 auth.languageCode = "pt-BR";
-export const db = getFirestore(app);
+export const db = createDb();
 export const storage = getStorage(app);
 
 export async function getAnalytics() {

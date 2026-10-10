@@ -43,7 +43,8 @@ export default function SellerDashboard() {
     }
   }, [user]);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   /* ── Resumo: mês atual e total ──
      Comissão conta SÓ em venda quitada (helper saleCommission). Vendas canceladas

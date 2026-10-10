@@ -84,7 +84,7 @@ export function ReportButton() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Reportar um problema"
-        className="fixed z-40 bottom-20 md:bottom-5 right-4 md:right-5 flex items-center gap-2 h-11 px-3.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] shadow-[var(--shadow-elevated)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/40 transition-all"
+        className="fixed z-40 bottom-[calc(var(--mobile-nav-h)+0.75rem)] md:bottom-5 right-4 md:right-5 flex items-center gap-2 h-11 px-3.5 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] shadow-[var(--shadow-elevated)] hover:text-[var(--color-neon-blue)] hover:border-[var(--color-neon-blue)]/40 transition-all"
       >
         <MessageSquareWarning className="w-5 h-5 shrink-0" />
         <span className="hidden sm:inline text-sm font-medium">Reportar problema</span>
@@ -134,6 +134,7 @@ export function ReportButton() {
           </div>
 
           <textarea
+            aria-label="Descreva o problema"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={5}

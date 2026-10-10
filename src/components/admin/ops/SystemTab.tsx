@@ -128,7 +128,7 @@ export function SystemTab() {
     }
   }, [period]);
 
-  useEffect(() => { if (firebaseReady) void load(); }, [firebaseReady, load]);
+  useEffect(() => { if (firebaseReady) void Promise.resolve().then(() => load()); }, [firebaseReady, load]);
 
   async function toggleResolve(err: SystemError) {
     setActionId(err.id);
@@ -144,6 +144,7 @@ export function SystemTab() {
   }
 
   async function removeError(id: string) {
+    if (!window.confirm("Excluir este registro de erro?")) return;
     setActionId(id);
     try {
       await deleteSystemError(id);

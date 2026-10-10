@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
-  serverTimestamp, Timestamp,
+  serverTimestamp, Timestamp, runTransaction,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
@@ -238,6 +238,21 @@ export async function getMarketingEvents(force = false): Promise<MarketingEvent[
   }, force);
 }
 
+/* ── LGPD: opt-out de marketing (pelo próprio cliente) ────── */
+/**
+ * Grava a preferência do cliente sobre comunicações de marketing. Com opt-out,
+ * campanhas, automações e o envio manual por WhatsApp o ignoram.
+ */
+export async function setMarketingOptOut(uid: string, optOut: boolean): Promise<void> {
+  await updateDoc(doc(db, "users", uid), {
+    marketingOptOut: optOut,
+    marketingOptOutAt: new Date().toISOString(),
+    updatedAt: serverTimestamp(),
+  });
+  invalidate("users");
+  invalidate("marketing:contacts");
+}
+
 /* ── Configurações ────────────────────────────────────────── */
 export const DEFAULT_MARKETING_SETTINGS: MarketingSettings = {
   active: true,
@@ -457,6 +472,7 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
   const campaign = (await getMarketingCampaigns(true)).find((c) => c.id === campaignId);
   if (!campaign) throw new Error("Campanha não encontrada.");
   if (campaign.status === "sent") throw new Error("Esta campanha já foi enviada.");
+  if (campaign.status === "cancelled") throw new Error("Esta campanha foi cancelada.");
   if (campaign.channel === "whatsapp") {
     throw new Error("Campanha de WhatsApp é de envio manual (wa.me) — envie pelo botão WhatsApp na página de Clientes.");
   }
@@ -479,6 +495,8 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
   const recentByUser = new Map<string, number>();
   const windowStart = new Date(Date.now() - settings.windowHours * 3600_000).getTime();
   for (const e of executions) {
+    // Mesma regra do cron: skips/cancelamentos/erros não contam como envio.
+    if (e.status === "skipped_spam" || e.status === "cancelled" || e.status === "error") continue;
     const t = new Date(e.createdAt).getTime();
     if (Number.isFinite(t) && t >= windowStart) {
       recentByUser.set(e.userId, (recentByUser.get(e.userId) ?? 0) + 1);
@@ -519,19 +537,30 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
     cap: settings.maxAudiencePerCampaign,
   });
 
+  let sent = 0;
   for (const msg of planned) {
-    await setDoc(doc(db, EXECUTIONS, msg.dedupKey), {
-      userId: msg.userId,
-      channel: msg.channel,
-      title: msg.title,
-      message: msg.message,
-      ...(msg.link ? { link: msg.link } : {}),
-      ...(msg.couponCode ? { couponCode: msg.couponCode } : {}),
-      ...(msg.campaignId ? { campaignId: msg.campaignId } : {}),
-      dedupKey: msg.dedupKey,
-      status: "processed",
-      createdAt: serverTimestamp(),
+    // Cria a execução só se ainda não existir (transação): se o cron ou outro
+    // "Enviar agora" estiver rodando ao mesmo tempo, apenas um envia a
+    // notificação — antes o setDoc sobrescrevia e o cliente recebia 2x.
+    const execRef = doc(db, EXECUTIONS, msg.dedupKey);
+    const created = await runTransaction(db, async (tx) => {
+      if ((await tx.get(execRef)).exists()) return false;
+      tx.set(execRef, {
+        userId: msg.userId,
+        channel: msg.channel,
+        title: msg.title,
+        message: msg.message,
+        ...(msg.link ? { link: msg.link } : {}),
+        ...(msg.couponCode ? { couponCode: msg.couponCode } : {}),
+        ...(msg.campaignId ? { campaignId: msg.campaignId } : {}),
+        dedupKey: msg.dedupKey,
+        status: "processed",
+        createdAt: serverTimestamp(),
+      });
+      return true;
     });
+    if (!created) continue;
+    sent++;
     await createNotification({
       userId: msg.userId,
       category: "promo",
@@ -555,7 +584,7 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
     status: "sent",
     sentAt: nowIso(),
     executedBy: by,
-    sentCount: planned.length,
+    sentCount: sent,
     segmentSnapshot: { name: segment.name, size: planned.length },
     ...(couponCode ? { couponCode } : {}),
     updatedAt: serverTimestamp(),
@@ -566,7 +595,7 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
 
   return {
     campaignId,
-    planned: planned.length,
+    planned: sent,
     deduped: skipped.filter((s) => s.reason === "dedup" || s.reason === "dedup (envio único)").length,
     skippedSpam: skipped.filter((s) => s.reason.includes("anti-spam")).length,
   };

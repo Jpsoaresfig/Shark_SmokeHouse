@@ -74,13 +74,16 @@ export function useAuth() {
   }
 
   async function loginGoogle() {
+    let profile: UserProfile;
     try {
-      const profile = await loginWithGoogle();
-      setUser(profile);
-      redirectByRole(profile.role, router);
+      profile = await loginWithGoogle();
     } catch (err) {
       throw parseFirebaseError(err);
     }
+    // Mesmo bloqueio de menores do login por e-mail (antes o Google pulava).
+    await enforceAgeOrThrow(profile);
+    setUser(profile);
+    redirectByRole(profile.role, router);
   }
 
   async function register(

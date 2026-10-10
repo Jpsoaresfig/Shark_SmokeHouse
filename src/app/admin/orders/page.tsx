@@ -177,12 +177,17 @@ export default function AdminOrders() {
     const id = new URLSearchParams(window.location.search).get("order");
     if (!id) return;
     const match = orders.find(o => o.id === id);
-    if (match) openOrder(match);
+    // Fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+    if (match) void Promise.resolve().then(() => openOrder(match));
   }, [loading, orders]);
 
   /** Baixa financeira manual (ou estorno/cancelamento) do pagamento do pedido. */
   async function handlePaymentStatus(status: PaymentStatus) {
     if (!selected) return;
+    if ((status === "cancelled" || status === "refunded") &&
+        !window.confirm(status === "refunded"
+          ? "Marcar o pagamento deste pedido como ESTORNADO?"
+          : "Cancelar o pagamento deste pedido?")) return;
     setPayingStatus(status);
     try {
       await updatePaymentStatus(selected.id, status, {

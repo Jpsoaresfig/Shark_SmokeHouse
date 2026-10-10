@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase";
 import { addStockMovement } from "@/lib/firebase/inventory";
 import { addLoyaltyPoints, adjustLoyaltyPoints } from "@/lib/firebase/loyalty";
 import { cached, invalidate } from "@/lib/firebase/cache";
-import { deriveStatus, saleStatus, saleReceivedAmount, saleOutstanding, CENTS_EPSILON } from "@/lib/sales/helpers";
+import { deriveStatus, saleStatus, saleReceivedAmount, saleOutstanding, saleDueDate, CENTS_EPSILON } from "@/lib/sales/helpers";
 import { SALE_PAYMENT_STATUS_LABELS } from "@/lib/payments/labels";
 import type { Sale, SalePaymentMethod, SaleChannel, SaleAuditEvent } from "@/types";
 
@@ -40,8 +40,42 @@ function toDate(value: any): Date {
   return new Date(0);
 }
 
+/** "YYYY-MM-DD" no fuso LOCAL — mesma base dos limites `setHours` da consulta.
+ *  (`toISOString()` usa UTC: datas diferentes podiam colidir na mesma chave de
+ *  cache e devolver vendas de outro período.) */
+function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Venda gravada, mas a baixa de estoque de algum item falhou. O chamador NÃO
+ *  deve tentar registrar a venda de novo (duplicaria); o estoque precisa de
+ *  ajuste manual dos itens listados. */
+export class SaleStockError extends Error {
+  constructor(public saleId: string, public failedItems: string[]) {
+    super(
+      `Venda #${saleId.slice(-8).toUpperCase()} registrada, mas a baixa de estoque falhou para: ` +
+      `${failedItems.join(", ")}. Ajuste o estoque manualmente.`,
+    );
+    this.name = "SaleStockError";
+  }
+}
+
+/** Download de CSV (revoga a URL depois — revogar logo após o click pode
+ *  cancelar o download em alguns navegadores). */
+function downloadCsvBlob(csv: string, filename: string): void {
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function getSales(startDate?: Date, endDate?: Date, force = false): Promise<Sale[]> {
-  const key = `sales:${startDate ? startDate.toISOString().slice(0, 10) : "-"}:${endDate ? endDate.toISOString().slice(0, 10) : "-"}`;
+  const key = `sales:${startDate ? localDayKey(startDate) : "-"}:${endDate ? localDayKey(endDate) : "-"}`;
   return cached(key, async () => {
     const constraints: QueryConstraint[] = [];
     if (startDate) {
@@ -143,7 +177,9 @@ export async function createSale(
   // Baixa o estoque registrando uma movimentação por item (aparece no histórico
   // de estoque e alimenta o alerta de estoque mínimo).
   const saleRef = `#${ref.id.slice(-6).toUpperCase()}`;
-  await Promise.all(
+  // allSettled: a venda já existe — uma falha de estoque não pode virar "erro ao
+  // registrar venda" (o operador registraria de novo e duplicaria a venda).
+  const results = await Promise.allSettled(
     data.items.map(item =>
       addStockMovement({
         productId: item.productId,
@@ -160,6 +196,14 @@ export async function createSale(
   );
   invalidate("sales");
   invalidate("products"); // estoque baixado
+  const failed = data.items.filter((_, i) => results[i].status === "rejected");
+  if (failed.length) {
+    console.error("[createSale] baixa de estoque falhou", results.filter(r => r.status === "rejected"));
+    throw new SaleStockError(
+      ref.id,
+      failed.map(it => (it.variationName ? `${it.productName} - ${it.variationName}` : it.productName)),
+    );
+  }
   return ref.id;
 }
 
@@ -380,7 +424,7 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
     const receivedStr = money(saleReceivedAmount(sale));
     const outstandingStr = money(saleOutstanding(sale));
     const manualDiscStr = money(sale.manualDiscount?.amount ?? 0);
-    const dueStr = sale.dueDate ? toDate(sale.dueDate).toLocaleDateString("pt-BR") : "";
+    const dueStr = saleDueDate(sale)?.toLocaleDateString("pt-BR") ?? "";
     for (const item of sale.items) {
       rows.push([
         dateStr,
@@ -392,10 +436,10 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
         item.productName,
         item.variationName ?? "",
         item.sku ?? "",
-        item.category,
+        item.category ?? "",
         String(item.quantity),
         money(item.price),
-        money(item.subtotal),
+        money(item.subtotal ?? item.price * item.quantity),
         money(productsSubtotal),
         sale.couponCode ?? "",
         money(sale.discount ?? 0),
@@ -403,7 +447,7 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
         money(sale.cardFee ?? 0),
         installmentsStr,
         money(sale.total),
-        PAYMENT_LABELS[sale.paymentMethod],
+        PAYMENT_LABELS[sale.paymentMethod] ?? sale.paymentMethod ?? "",
         deliveryStr,
         sale.notes ?? "",
         statusStr,
@@ -416,15 +460,9 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
   }
 
   const csv = rows
-    .map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(";"))
+    .map(r => r.map(cell => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(";"))
     .join("\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename ?? `vendas_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsvBlob(csv, filename ?? `vendas_${localDayKey(new Date())}.csv`);
 }
 
 /** Linha do ranking de produtos (mais/menos vendidos). */
@@ -451,7 +489,7 @@ export function aggregateProductSales(sales: Sale[]): ProductSalesRow[] {
       const existing = map.get(key);
       if (existing) {
         existing.quantity += item.quantity;
-        existing.revenue += item.subtotal;
+        existing.revenue += item.subtotal ?? item.price * item.quantity;
       } else {
         map.set(key, {
           productName: item.productName,
@@ -459,7 +497,7 @@ export function aggregateProductSales(sales: Sale[]): ProductSalesRow[] {
           ...(item.sku ? { sku: item.sku } : {}),
           ...(item.category ? { category: item.category } : {}),
           quantity: item.quantity,
-          revenue: item.subtotal,
+          revenue: item.subtotal ?? item.price * item.quantity,
         });
       }
     }
@@ -493,13 +531,7 @@ export function exportProductSalesCSV(
   });
 
   const csv = csvRows
-    .map(r => r.map(cell => `"${cell.replace(/"/g, '""')}"`).join(";"))
+    .map(r => r.map(cell => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(";"))
     .join("\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename ?? `produtos_mais_vendidos_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCsvBlob(csv, filename ?? `produtos_mais_vendidos_${localDayKey(new Date())}.csv`);
 }

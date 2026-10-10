@@ -100,8 +100,12 @@ export async function ensureCategoriesSeeded(): Promise<Category[]> {
 /** Cria uma categoria a partir do nome (gera o slug). */
 export async function createCategory(label: string): Promise<string> {
   const clean = label.trim();
+  const slug = slugify(clean);
+  // Evita categorias duplicadas (mesmo slug) — ex.: importação de planilha.
+  const existing = (await getCategories(true)).find(c => c.slug === slug && c.id !== c.slug);
+  if (existing) return existing.id;
   const ref = await addDoc(collection(db, COL), {
-    slug: slugify(clean),
+    slug,
     label: clean,
     order: Date.now(),
     createdAt: serverTimestamp(),
@@ -114,7 +118,9 @@ export async function createCategory(label: string): Promise<string> {
 
 export async function updateCategory(id: string, label: string): Promise<void> {
   const clean = label.trim();
-  await updateDoc(doc(db, COL, id), { slug: slugify(clean), label: clean });
+  // O slug NÃO muda ao renomear: produtos (Product.category), cupons e URLs do
+  // catálogo referenciam o slug — trocá-lo deixaria esses itens órfãos.
+  await updateDoc(doc(db, COL, id), { label: clean });
   invalidate(COL);
 }
 

@@ -24,7 +24,11 @@ function GoogleIcon() {
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect");
+  // Só aceita caminhos internos ("/orders"): bloqueia open redirect
+  // ("https://evil", "//evil") e XSS via "javascript:" no window.location.
+  const rawRedirect = searchParams.get("redirect");
+  const redirect =
+    rawRedirect && /^\/(?![/\\])/.test(rawRedirect) ? rawRedirect : null;
   const router = useRouter();
 
   const { login, loginGoogle } = useAuth();

@@ -81,11 +81,12 @@ const COLUMN_MATCHERS: [ColumnKey, RegExp][] = [
   ["cost",         /CUSTO/],
   ["tax",          /IMPOSTO/],
   ["price",        /PRECO|VALOR VENDA/],
+  // SKU antes de "name": "CÓDIGO DO PRODUTO" contém PRODUTO e roubava a coluna de nome.
+  ["sku",          /SKU|CODIGO|COD BARRAS/],
   ["name",         /DESCRICAO|PRODUTO|NOME/],
   ["category",     /CATEGORIA/],
   ["brand",        /MARCA/],
   ["stock",        /ESTOQUE/],
-  ["sku",          /SKU|CODIGO|COD BARRAS/],
 ];
 
 /** Mapeia índice de coluna → campo. Retorna null se faltar o essencial. */
@@ -124,13 +125,28 @@ function firstNonEmptyRow(rows: string[][]): string[] | undefined {
 
 /* ── Números pt-BR ───────────────────────────────────────── */
 
-/** "R$ 1.234,56" → 1234.56 · "12,5" → 12.5 · "12.5" → 12.5 · "" → undefined */
+/**
+ * "R$ 1.234,56" → 1234.56 · "12,5" → 12.5 · "12.5" → 12.5 · "1.500" → 1500 ·
+ * "R$ 1,234.56" → 1234.56 (texto formatado do .xlsx sai no padrão en-US, pois os
+ * códigos de formato do Excel não dependem do idioma) · "" → undefined
+ */
 export function parseBrNumber(raw: string | undefined): number | undefined {
   if (!raw) return undefined;
-  let s = raw.replace(/R\$|%/gi, "").trim();
+  let s = raw.replace(/R\$|%/gi, "").replace(/[\s ]/g, "").trim();
   if (!s) return undefined;
-  const hasComma = s.includes(",");
-  if (hasComma) s = s.replace(/\./g, "").replace(",", ".");
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+  if (lastComma >= 0 && lastDot >= 0) {
+    // Os dois separadores: o que vem por último é o decimal.
+    s = lastComma > lastDot
+      ? s.replace(/\./g, "").replace(",", ".")
+      : s.replace(/,/g, "");
+  } else if (lastComma >= 0) {
+    s = s.replace(",", ".");
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    // Só pontos em grupos de 3 ("1.500", "12.345.678") = milhar pt-BR.
+    s = s.replace(/\./g, "");
+  }
   const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 }

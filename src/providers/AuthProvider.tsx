@@ -91,6 +91,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } else {
           // Firebase confirmed: no authenticated user (definitive after authStateReady)
+          // Limpa o cookie de sessão órfão: senão o proxy continua redirecionando
+          // /login e /register para "/" e o usuário fica sem conseguir entrar.
+          if (typeof document !== "undefined") {
+            document.cookie = "shark_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+          }
           setUser(null);
           writeCache(null);
           setLoading(false);

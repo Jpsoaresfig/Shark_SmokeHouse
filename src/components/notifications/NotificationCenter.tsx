@@ -96,8 +96,10 @@ export function NotificationCenter() {
 
   function persistSeen(next: Set<string>) {
     setSeenPromos(next);
-    if (typeof window !== "undefined") {
+    try {
       localStorage.setItem(seenKey(uid), JSON.stringify([...next]));
+    } catch {
+      // Storage cheio/bloqueado (Safari privado): mantém só em memória.
     }
   }
 
@@ -133,7 +135,8 @@ export function NotificationCenter() {
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="Notificações"
+        aria-label={unreadTotal > 0 ? `Notificações (${unreadTotal} não lidas)` : "Notificações"}
+        aria-expanded={open}
         className="relative flex items-center justify-center w-10 h-10 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
       >
         <Bell className="w-5 h-5" />
@@ -153,7 +156,7 @@ export function NotificationCenter() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -8, scale: 0.97 }}
               transition={{ duration: 0.15 }}
-              className="fixed sm:absolute right-2 sm:right-0 top-16 sm:top-full sm:mt-2 z-[56] w-[calc(100vw-1rem)] sm:w-96 max-w-sm glass-strong rounded-xl border border-[var(--color-border)] shadow-[var(--shadow-elevated)] overflow-hidden"
+              className="fixed sm:absolute right-2 sm:right-0 top-[calc(5.5rem+env(safe-area-inset-top))] sm:top-full sm:mt-2 z-[56] w-[calc(100vw-1rem)] sm:w-96 max-w-sm glass-strong rounded-xl border border-[var(--color-border)] shadow-[var(--shadow-elevated)] overflow-hidden"
             >
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
@@ -191,7 +194,7 @@ export function NotificationCenter() {
               </div>
 
               {/* List */}
-              <div className="max-h-[60vh] sm:max-h-96 overflow-y-auto py-2">
+              <div className="max-h-[60dvh] sm:max-h-96 overflow-y-auto overscroll-contain py-2">
                 {visible.length === 0 ? (
                   <div className="flex flex-col items-center justify-center gap-2 py-12 text-center px-6">
                     <Inbox className="w-8 h-8 text-[var(--color-text-muted)]" />

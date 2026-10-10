@@ -87,7 +87,10 @@ export default function AdminLoungePage() {
   const [editing, setEditing] = useState<LoungeBooking | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [savingForm, setSavingForm] = useState(false);
-  const [formTaken, setFormTaken] = useState<string[]>([]);
+  // Horários ocupados, marcados com a data a que pertencem (evita mostrar os de
+  // outra data enquanto a nova busca não volta).
+  const [formTakenFor, setFormTakenFor] = useState<{ date: string; slots: string[] }>({ date: "", slots: [] });
+  const formTaken = formOpen && form.date && formTakenFor.date === form.date ? formTakenFor.slots : [];
 
   /* ── Horários disponíveis para reserva (editáveis pelo admin) ── */
   const [slots, setSlots] = useState<string[]>(DEFAULT_LOUNGE_TIME_SLOTS);
@@ -112,7 +115,8 @@ export default function AdminLoungePage() {
     }
   }, []);
 
-  useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
+  // Carga fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { if (firebaseReady) void Promise.resolve().then(() => load()); }, [firebaseReady, load]);
 
   /* Carrega os horários e sabores configurados (fallback para os padrões se ainda não houver). */
   useEffect(() => {
@@ -302,15 +306,16 @@ export default function AdminLoungePage() {
   /* Busca horários ocupados da data escolhida no formulário (para desabilitá-los).
      Ao editar, o próprio horário da reserva continua disponível. */
   useEffect(() => {
-    if (!formOpen || !form.date) { setFormTaken([]); return; }
+    if (!formOpen || !form.date) return;
     let active = true;
-    getTakenSlots(form.date)
+    const date = form.date;
+    getTakenSlots(date)
       .then((taken) => {
         if (!active) return;
-        const own = editing && editing.date === form.date ? editing.time : null;
-        setFormTaken(taken.filter((t) => t !== own));
+        const own = editing && editing.date === date ? editing.time : null;
+        setFormTakenFor({ date, slots: taken.filter((t) => t !== own) });
       })
-      .catch(() => { if (active) setFormTaken([]); });
+      .catch(() => { if (active) setFormTakenFor({ date, slots: [] }); });
     return () => { active = false; };
   }, [formOpen, form.date, editing]);
 

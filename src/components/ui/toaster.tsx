@@ -94,7 +94,8 @@ export function Toaster() {
     <div
       aria-label="Notificações"
       aria-live="polite"
-      className="fixed bottom-4 right-4 z-[9999] flex flex-col-reverse gap-2 sm:bottom-6 sm:right-6 pointer-events-none"
+      // Mobile: acima da MobileNav fixa (inclui safe-area); md+: canto inferior.
+      className="fixed bottom-[calc(var(--mobile-nav-h)+0.75rem)] right-4 z-[9999] flex flex-col-reverse gap-2 md:bottom-6 sm:right-6 pointer-events-none"
     >
       <AnimatePresence initial={false} mode="sync">
         {toasts.map(t => (

@@ -37,7 +37,8 @@ const DialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-        "w-full max-w-lg rounded-2xl",
+        // Mobile: margem lateral e rolagem interna quando o conteúdo é maior que a tela.
+        "w-[calc(100%-2rem)] max-w-lg rounded-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain",
         "border border-[var(--color-border)] bg-[var(--color-bg-elevated)]",
         "shadow-[var(--shadow-elevated)] p-6",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
@@ -50,7 +51,7 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors">
+      <DialogPrimitive.Close className="absolute right-3 top-3 rounded-lg p-2.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors">
         <X className="h-4 w-4" />
         <span className="sr-only">Fechar</span>
       </DialogPrimitive.Close>

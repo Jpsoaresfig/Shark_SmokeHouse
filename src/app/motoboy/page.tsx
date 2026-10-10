@@ -66,6 +66,162 @@ function isPickup(o: Order) {
   return !a || a.id === "pickup" || a.label === "Retirada na loja" || !a.street;
 }
 
+/** Renderiza o card de um pedido; `footer` traz as ações específicas da aba.
+ *  Fica no escopo do módulo (não dentro da página): declarado dentro, cada
+ *  render criava um componente novo e remontava o card inteiro — o que
+ *  desligava o compartilhamento de localização (LocationShare) a cada
+ *  atualização do pedido em tempo real. */
+function OrderCard({ order, index, footer }: { order: Order; index: number; footer?: ReactNode }) {
+  const cfg = STATUS_LABEL[order.status] ?? { label: order.status, badge: "secondary" as const };
+  const pay = resolveOrderPayment(order);
+  const collectOnDelivery = pay.status === "due_on_delivery";
+  const pickup = isPickup(order);
+  return (
+    <motion.div
+      key={order.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(index * 0.05, 0.3) }}
+    >
+      <Card>
+        <CardContent className="p-4 space-y-4">
+          {/* Top: código + status + total */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-[var(--color-text-primary)]">
+                #{order.id.slice(-6).toUpperCase()}
+              </span>
+              <Badge variant={cfg.badge} className="text-xs">{cfg.label}</Badge>
+            </div>
+            <span className="text-sm font-bold text-[var(--color-neon-blue)]">
+              {formatCurrency(order.total)}
+            </span>
+          </div>
+
+          {/* Cobrança na entrega — destaque pro motoboy */}
+          {collectOnDelivery && order.status !== "cancelled" && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-3">
+              <Banknote className="w-5 h-5 text-[var(--color-warning)] shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-[var(--color-warning)]">
+                  Cobrar na entrega: {formatCurrency(order.total)}
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  {PAYMENT_METHOD_LABELS[pay.method] ?? pay.method}
+                </p>
+              </div>
+            </div>
+          )}
+          {pay.status === "paid" && (
+            <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-success)]">
+              <CheckCircle className="w-3.5 h-3.5" /> Pedido já pago — só entregar
+            </div>
+          )}
+
+          {/* Ganho do entregador — a taxa de entrega (frete) deste pedido */}
+          {!pickup && order.deliveryFee > 0 && order.status !== "cancelled" && (
+            <div className="flex items-center gap-2.5 rounded-xl bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 px-3 py-3">
+              <Bike className="w-5 h-5 text-[var(--color-neon-blue)] shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-[var(--color-neon-blue)]">
+                  Você recebe pela entrega: {formatCurrency(order.deliveryFee)}
+                </p>
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  Taxa de entrega (frete) deste pedido
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Cliente */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--color-text-primary)] truncate">{order.customerName}</p>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                {order.createdAt ? formatDateTime(order.createdAt) : ""}
+              </p>
+            </div>
+            {order.customerPhone && (
+              <div className="flex items-center gap-2">
+                <a
+                  href={telLink(order.customerPhone)}
+                  className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+                >
+                  <Phone className="w-3.5 h-3.5" /> Ligar
+                </a>
+                <a
+                  href={waLink(order.customerPhone, order)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-success)]/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                </a>
+              </div>
+            )}
+          </div>
+
+          {/* Endereço */}
+          <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3">
+            <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+              {pickup ? <Package className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
+              {pickup ? "Retirada na loja" : "Endereço de entrega"}
+            </p>
+            {pickup ? (
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                Cliente retira no balcão — sem entrega.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+                  {order.deliveryAddress.street}, {order.deliveryAddress.number}
+                  {order.deliveryAddress.complement ? `, ${order.deliveryAddress.complement}` : ""}<br />
+                  {order.deliveryAddress.neighborhood} — {order.deliveryAddress.city}/{order.deliveryAddress.state}
+                  {order.deliveryAddress.zipCode ? <> · {order.deliveryAddress.zipCode}</> : null}
+                </p>
+                <a
+                  href={mapsLink(order)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-2 px-3 h-9 rounded-lg bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 text-xs font-semibold text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue)]/20 transition-colors"
+                >
+                  <MapPin className="w-3.5 h-3.5" /> Abrir rota no Maps
+                </a>
+              </>
+            )}
+          </div>
+
+          {/* Itens */}
+          <div>
+            <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">
+              Itens ({order.items.length})
+            </p>
+            <div className="space-y-1">
+              {order.items.map((item, j) => (
+                <p key={j} className="text-sm text-[var(--color-text-secondary)]">
+                  {item.quantity}× {item.name}
+                  {item.color ? <span className="text-[var(--color-text-muted)]"> · {item.color}</span> : null}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          {/* Observações (inclui troco) */}
+          {order.notes && (
+            <div className="flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5">
+              <Clock className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning)]" />
+              <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-line">{order.notes}</p>
+            </div>
+          )}
+
+          {/* Ações (específicas da aba) */}
+          {footer}
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 export default function MotoboyPage() {
   const { user, loading: authLoading } = useAuthStore();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -160,158 +316,6 @@ export default function MotoboyPage() {
     o => !isPickup(o) && o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved",
   );
 
-  /** Renderiza o card de um pedido; `footer` traz as ações específicas da aba. */
-  function OrderCard({ order, index, footer }: { order: Order; index: number; footer?: ReactNode }) {
-    const cfg = STATUS_LABEL[order.status] ?? { label: order.status, badge: "secondary" as const };
-    const pay = resolveOrderPayment(order);
-    const collectOnDelivery = pay.status === "due_on_delivery";
-    const pickup = isPickup(order);
-    return (
-      <motion.div
-        key={order.id}
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: Math.min(index * 0.05, 0.3) }}
-      >
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            {/* Top: código + status + total */}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-[var(--color-text-primary)]">
-                  #{order.id.slice(-6).toUpperCase()}
-                </span>
-                <Badge variant={cfg.badge} className="text-xs">{cfg.label}</Badge>
-              </div>
-              <span className="text-sm font-bold text-[var(--color-neon-blue)]">
-                {formatCurrency(order.total)}
-              </span>
-            </div>
-
-            {/* Cobrança na entrega — destaque pro motoboy */}
-            {collectOnDelivery && order.status !== "cancelled" && (
-              <div className="flex items-center gap-2.5 rounded-xl bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-3">
-                <Banknote className="w-5 h-5 text-[var(--color-warning)] shrink-0" />
-                <div>
-                  <p className="text-sm font-bold text-[var(--color-warning)]">
-                    Cobrar na entrega: {formatCurrency(order.total)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {PAYMENT_METHOD_LABELS[pay.method] ?? pay.method}
-                  </p>
-                </div>
-              </div>
-            )}
-            {pay.status === "paid" && (
-              <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-success)]">
-                <CheckCircle className="w-3.5 h-3.5" /> Pedido já pago — só entregar
-              </div>
-            )}
-
-            {/* Ganho do entregador — a taxa de entrega (frete) deste pedido */}
-            {!pickup && order.deliveryFee > 0 && order.status !== "cancelled" && (
-              <div className="flex items-center gap-2.5 rounded-xl bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 px-3 py-3">
-                <Bike className="w-5 h-5 text-[var(--color-neon-blue)] shrink-0" />
-                <div>
-                  <p className="text-sm font-bold text-[var(--color-neon-blue)]">
-                    Você recebe pela entrega: {formatCurrency(order.deliveryFee)}
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    Taxa de entrega (frete) deste pedido
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Cliente */}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--color-text-primary)] truncate">{order.customerName}</p>
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  {order.createdAt ? formatDateTime(order.createdAt) : ""}
-                </p>
-              </div>
-              {order.customerPhone && (
-                <div className="flex items-center gap-2">
-                  <a
-                    href={telLink(order.customerPhone)}
-                    className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-                  >
-                    <Phone className="w-3.5 h-3.5" /> Ligar
-                  </a>
-                  <a
-                    href={waLink(order.customerPhone, order)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-[var(--color-success)]/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
-                  </a>
-                </div>
-              )}
-            </div>
-
-            {/* Endereço */}
-            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3">
-              <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                {pickup ? <Package className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
-                {pickup ? "Retirada na loja" : "Endereço de entrega"}
-              </p>
-              {pickup ? (
-                <p className="text-sm text-[var(--color-text-secondary)]">
-                  Cliente retira no balcão — sem entrega.
-                </p>
-              ) : (
-                <>
-                  <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">
-                    {order.deliveryAddress.street}, {order.deliveryAddress.number}
-                    {order.deliveryAddress.complement ? `, ${order.deliveryAddress.complement}` : ""}<br />
-                    {order.deliveryAddress.neighborhood} — {order.deliveryAddress.city}/{order.deliveryAddress.state}
-                    {order.deliveryAddress.zipCode ? <> · {order.deliveryAddress.zipCode}</> : null}
-                  </p>
-                  <a
-                    href={mapsLink(order)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 mt-2 px-3 h-9 rounded-lg bg-[var(--color-neon-blue)]/10 border border-[var(--color-neon-blue)]/30 text-xs font-semibold text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue)]/20 transition-colors"
-                  >
-                    <MapPin className="w-3.5 h-3.5" /> Abrir rota no Maps
-                  </a>
-                </>
-              )}
-            </div>
-
-            {/* Itens */}
-            <div>
-              <p className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-1.5">
-                Itens ({order.items.length})
-              </p>
-              <div className="space-y-1">
-                {order.items.map((item, j) => (
-                  <p key={j} className="text-sm text-[var(--color-text-secondary)]">
-                    {item.quantity}× {item.name}
-                    {item.color ? <span className="text-[var(--color-text-muted)]"> · {item.color}</span> : null}
-                  </p>
-                ))}
-              </div>
-            </div>
-
-            {/* Observações (inclui troco) */}
-            {order.notes && (
-              <div className="flex items-start gap-2 rounded-lg bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 px-3 py-2.5">
-                <Clock className="w-4 h-4 shrink-0 mt-0.5 text-[var(--color-warning)]" />
-                <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-line">{order.notes}</p>
-              </div>
-            )}
-
-            {/* Ações (específicas da aba) */}
-            {footer}
-          </CardContent>
-        </Card>
-      </motion.div>
-    );
-  }
-
   const tabs: { key: typeof tab; label: string; count: number }[] = [
     { key: "available", label: "Disponíveis", count: pool.length },
     { key: "active", label: "Minhas", count: active.length },
@@ -343,7 +347,7 @@ export default function MotoboyPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {tabs.map(t => (
             <button
               key={t.key}

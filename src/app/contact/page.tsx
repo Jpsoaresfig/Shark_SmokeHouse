@@ -6,17 +6,15 @@ import {
   MessageCircle, MapPin, Phone, Clock, Anchor,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { parseHourLines, useSiteVitrine, useStoreContact } from "@/stores/siteSettingsStore";
 
 /* Glifo do Instagram (lucide desta versão não exporta o ícone). */
 function InstagramGlyph({ className = "" }: { className?: string }) {
   return <span className={`text-base font-bold leading-none ${className}`}>IG</span>;
 }
 
-/* ── Contato da loja ─────────────────────────────────────── */
-const STORE_WHATSAPP = "5583999020606"; // somente dígitos, com DDI
-const WA_LINK = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
-  "Olá, vim pelo site da Shark Smokehouse! Gostaria de mais informações.",
-)}`;
+/* ── Contato da loja (telefone e horários vêm de Site & Vitrine, no admin) ── */
+const WA_MESSAGE = "Olá, vim pelo site da Shark Smokehouse! Gostaria de mais informações.";
 
 /* ── Animation helper ────────────────────────────────────── */
 function FadeIn({
@@ -46,37 +44,36 @@ function FadeIn({
 }
 
 /* ── Canais de contato ───────────────────────────────────── */
-const channels = [
-  {
-    icon: Phone,
-    label: "Telefone",
-    value: "(83) 99902-0606",
-    href: "tel:+5583999020606",
-    color: "text-[var(--color-neon-blue)]",
-    bg: "bg-[var(--color-neon-blue-glow)]",
-    border: "border-[var(--color-neon-blue)]/20",
-  },
-  {
-    icon: InstagramGlyph,
-    label: "Instagram",
-    value: "@shark.smokehouse.ofc",
-    href: "https://www.instagram.com/shark.smokehouse.ofc",
-    color: "text-[var(--color-accent-pink)]",
-    bg: "bg-pink-500/10",
-    border: "border-pink-500/20",
-  },
-];
-
-const hours = [
-  { day: "Segunda-feira", value: "Fechado", closed: true },
-  { day: "Terça a Quinta", value: "14h às 00h", closed: false },
-  { day: "Sexta-feira", value: "14h às 02h", closed: false },
-  { day: "Sábado", value: "12h às 02h", closed: false },
-  { day: "Domingo", value: "12h às 23h", closed: false },
-];
+function buildChannels(phone: { display: string; tel: string }) {
+  return [
+    {
+      icon: Phone,
+      label: "Telefone",
+      value: phone.display,
+      href: phone.tel,
+      color: "text-[var(--color-neon-blue)]",
+      bg: "bg-[var(--color-neon-blue-glow)]",
+      border: "border-[var(--color-neon-blue)]/20",
+    },
+    {
+      icon: InstagramGlyph,
+      label: "Instagram",
+      value: "@shark.smokehouse.ofc",
+      href: "https://www.instagram.com/shark.smokehouse.ofc",
+      color: "text-[var(--color-accent-pink)]",
+      bg: "bg-pink-500/10",
+      border: "border-pink-500/20",
+    },
+  ];
+}
 
 /* ── Página ──────────────────────────────────────────────── */
 export default function ContactPage() {
+  const vitrine = useSiteVitrine();
+  const contact = useStoreContact();
+  const WA_LINK = contact.waLink(WA_MESSAGE);
+  const channels = buildChannels(contact);
+  const hours = parseHourLines(vitrine.hours);
   return (
     <div className="min-h-screen overflow-x-hidden">
 
@@ -133,7 +130,7 @@ export default function ContactPage() {
 
       {/* ── CANAIS ───────────────────────────────────────── */}
       <section className="py-12 px-4">
-        <div className="max-w-5xl mx-auto grid sm:grid-cols-3 gap-4">
+        <div className="max-w-3xl mx-auto grid sm:grid-cols-2 gap-4">
           {channels.map((c, i) => {
             const Icon = c.icon;
             return (
@@ -204,8 +201,8 @@ export default function ContactPage() {
                 <p className="text-sm font-semibold text-[var(--color-text-primary)]">Horário de Funcionamento</p>
               </div>
               <div className="space-y-3">
-                {hours.map((h) => (
-                  <div key={h.day} className="flex items-center justify-between text-sm">
+                {hours.map((h, i) => (
+                  <div key={`${h.day}-${i}`} className="flex items-center justify-between gap-3 text-sm">
                     <span className="text-[var(--color-text-muted)]">{h.day}</span>
                     <span className={h.closed ? "text-[var(--color-error)] font-medium" : "text-[var(--color-text-primary)] font-medium"}>
                       {h.value}

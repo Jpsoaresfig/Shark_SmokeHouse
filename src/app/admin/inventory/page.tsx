@@ -65,7 +65,8 @@ export default function AdminInventory() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   function set(key: keyof typeof form, value: unknown) {
     // Trocar de produto zera a variação selecionada (grades diferentes).
@@ -86,6 +87,12 @@ export default function AdminInventory() {
       toast.error("Selecione a variação do produto.");
       return;
     }
+    const qty = Number(form.quantity);
+    // Quantidade inteira e positiva (0/negativo/fracionado inverteria ou corromperia o estoque).
+    if (!Number.isInteger(qty) || qty <= 0) {
+      toast.error("Informe uma quantidade inteira maior que zero.");
+      return;
+    }
     setSaving(true);
     try {
       const variation = product.variations?.find(v => v.id === form.variationId);
@@ -93,7 +100,7 @@ export default function AdminInventory() {
         productId: form.productId,
         productName: product.name,
         type: form.type,
-        quantity: Number(form.quantity),
+        quantity: qty,
         reason: form.reason,
         userId: user!.uid,
         ...(variation ? { variationId: variation.id, variationName: variation.name } : {}),

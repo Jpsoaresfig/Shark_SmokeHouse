@@ -12,6 +12,38 @@ import type { Sale, SalePaymentStatus, SalePaymentMethod } from "@/types";
 /** Tolerância de centavos para fechar a conta (arredondamentos). */
 export const CENTS_EPSILON = 0.005;
 
+/**
+ * Converte um valor digitado em reais para número (> 0, senão 0).
+ * Aceita "1.234,56", "12,50", "1234" e também ponto decimal ("12.50" — teclado
+ * numérico do celular). Um ponto seguido de 1–2 dígitos (sem vírgula) é decimal;
+ * caso contrário pontos são separadores de milhar.
+ */
+export function parseMoneyInput(v: string): number {
+  const s = v.trim().replace(/\s|R\$/g, "");
+  let norm: string;
+  if (s.includes(",")) norm = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d*\.\d{1,2}$/.test(s)) norm = s;
+  else norm = s.replace(/\./g, "");
+  const n = parseFloat(norm);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Vencimento da venda como instante LOCAL de fim do dia. O PDV grava a data do
+ * `<input type="date">` como meia-noite UTC ("2026-10-15T00:00:00.000Z"), que
+ * no fuso da loja (UTC−3) cairia no dia anterior às 21h — exibindo o dia errado
+ * e marcando "vencida" 3h antes do dia acabar. Aqui a data-calendário é lida
+ * em UTC e convertida para 23:59:59.999 locais do mesmo dia.
+ */
+export function saleDueDate(sale: Pick<Sale, "dueDate">): Date | null {
+  const raw = sale.dueDate;
+  if (!raw) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00(?::00(?:\.000)?)?Z)?$/.exec(raw);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Status efetivo da venda. Venda legada (sem campo) ⇒ "paid". */
 export function saleStatus(sale: Sale): SalePaymentStatus {
   return sale.paymentStatus ?? "paid";

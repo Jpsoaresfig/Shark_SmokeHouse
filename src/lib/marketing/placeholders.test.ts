@@ -59,3 +59,9 @@ describe("extractPlaceholders", () => {
     expect(PLACEHOLDER_HELP.length).toBeGreaterThan(0);
   });
 });
+
+describe("buildMessageVars — formatação pt-BR", () => {
+  it("pontos com separador de milhar", () => {
+    expect(buildMessageVars(baseContact({ loyaltyPoints: 12345 })).pontos).toBe("12.345");
+  });
+});

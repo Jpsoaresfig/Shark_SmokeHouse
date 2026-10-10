@@ -12,6 +12,15 @@ import type { Order } from "@/types";
  * em componentes de cliente.
  */
 
+/** Epoch (ms) de um createdAt vindo do Admin SDK (Timestamp), ISO ou Date. */
+function createdMs(value: unknown): number {
+  if (!value) return NaN;
+  if (typeof value === "string") return new Date(value).getTime();
+  if (value instanceof Date) return value.getTime();
+  const maybe = value as { toMillis?: () => number };
+  return typeof maybe.toMillis === "function" ? maybe.toMillis() : NaN;
+}
+
 /** Pontos creditados ao INDICADOR quando o indicado conclui a 1ª compra paga (Task 3.2). */
 export const REFERRAL_POINTS = REFERRAL_BONUS_POINTS;
 
@@ -43,6 +52,26 @@ export async function qualifyReferralForPaidOrder(order: Order): Promise<boolean
 
   const db = getAdminDb();
   const referralRef = db.collection("referrals").doc(referredUserId);
+
+  // "1ª compra paga": se o indicado já tinha OUTRO pedido pago antes deste, a
+  // indicação não vale (bloqueia o vínculo retroativo — um cliente antigo que
+  // cria o doc `referrals` depois de já ter comprado não gera bônus ao "amigo").
+  const previous = await db
+    .collection("orders")
+    .where("customerId", "==", referredUserId)
+    .get();
+  const thisCreated = createdMs(order.createdAt);
+  const hadEarlierPaid = previous.docs.some((d) => {
+    if (d.id === order.id) return false;
+    const o = d.data();
+    if (o.isRedemption) return false;
+    const oPaid = (o.payment?.status ?? o.paymentStatus) === "paid";
+    if (!oPaid) return false;
+    const t = createdMs(o.createdAt);
+    // Sem data comparável, trata como anterior (conservador: não credita).
+    return !Number.isFinite(t) || !Number.isFinite(thisCreated) || t < thisCreated;
+  });
+  if (hadEarlierPaid) return false;
 
   return db.runTransaction(async (tx) => {
     const refSnap = await tx.get(referralRef);

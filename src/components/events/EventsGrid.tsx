@@ -7,9 +7,11 @@ import Image from "next/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, isEventUpcoming } from "@/lib/utils";
+import { useStoreContact } from "@/stores/siteSettingsStore";
 import type { Event } from "@/types";
 
 function EventCard({ event, index }: { event: Event; index: number }) {
+  const contact = useStoreContact();
   const upcoming = isEventUpcoming(event);
 
   return (
@@ -70,7 +72,7 @@ function EventCard({ event, index }: { event: Event; index: number }) {
         {upcoming && (
           <Button variant="outline" size="sm" className="w-full" asChild>
             <a
-              href={`https://wa.me/5583999020606?text=${encodeURIComponent(`Olá! Quero mais informações sobre o evento: ${event.title}`)}`}
+              href={contact.waLink(`Olá! Quero mais informações sobre o evento: ${event.title}`)}
               target="_blank"
               rel="noopener noreferrer"
             >

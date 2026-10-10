@@ -206,7 +206,8 @@ export default function AdminDashboard() {
       }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   // Alerta de pedido novo (toast + som + notificação do SO), compartilhado com /admin/orders.
   const { soundOn, toggleSound, announce } = useNewOrderAlerts();

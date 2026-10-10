@@ -15,17 +15,17 @@ export const runtime = "nodejs";
  * webhook; esta rota cobre a baixa manual.
  */
 export async function POST(request: NextRequest) {
-  const { orderId } = (await request.json().catch(() => ({}))) as { orderId?: string };
-  if (!orderId) {
+  const { orderId } = (await request.json().catch(() => ({}))) as { orderId?: unknown };
+  // Valida o tipo/formato: um objeto ou path ("a/b") quebraria o doc() do Admin SDK.
+  if (typeof orderId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(orderId)) {
     return NextResponse.json({ error: "orderId obrigatório" }, { status: 400 });
   }
 
-  const order = await getOrderAdmin(orderId);
-  if (!order) {
-    return NextResponse.json({ error: "pedido não encontrado" }, { status: 404 });
-  }
-
   try {
+    const order = await getOrderAdmin(orderId);
+    if (!order) {
+      return NextResponse.json({ error: "pedido não encontrado" }, { status: 404 });
+    }
     const qualified = await qualifyReferralForPaidOrder(order);
     return NextResponse.json({ qualified });
   } catch (err) {

@@ -35,7 +35,7 @@ export default function EventsPage() {
     getEvents(true).then((events) => {
       setUpcoming(events.filter((e) => isEventUpcoming(e)));
       setPast(events.filter((e) => !isEventUpcoming(e)));
-    }).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   return (

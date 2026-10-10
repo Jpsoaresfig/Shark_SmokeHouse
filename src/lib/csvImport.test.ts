@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, parseBrNumber, parseProductsCsv, parseProductsRows } from "./csvImport";
+import { parseCsv, parseBrNumber, parseProductsCsv, parseProductsRows, mapHeaders } from "./csvImport";
 
 const HEADER =
   "ESTOQUE;SKU;CATEGORIA;MARCA;DESCRIÇÃO DO PRODUTO;COR/AROMA/SABOR;TAMANHO/QUANTIDADE;CUSTO UNIDADE (R$);IMPOSTO (%);PREÇO PIX/DINHEIRO (R$);PONTOS GANHOS;PONTOS RESGATE";
@@ -29,6 +29,21 @@ describe("parseBrNumber", () => {
     expect(parseBrNumber("10%")).toBe(10);
     expect(parseBrNumber("")).toBeUndefined();
     expect(parseBrNumber("abc")).toBeUndefined();
+  });
+
+  it("aceita milhar pt-BR sem vírgula e texto en-US vindo do .xlsx", () => {
+    expect(parseBrNumber("1.500")).toBe(1500);
+    expect(parseBrNumber("R$ 1,234.56")).toBe(1234.56);
+    expect(parseBrNumber("R$ 3,50")).toBe(3.5);
+    expect(parseBrNumber("1.234.567,89")).toBe(1234567.89);
+  });
+});
+
+describe("mapHeaders", () => {
+  it("não confunde CÓDIGO DO PRODUTO com a coluna de nome", () => {
+    const m = mapHeaders(["CÓDIGO DO PRODUTO", "DESCRIÇÃO DO PRODUTO", "PREÇO"]);
+    expect(m.sku).toBe(0);
+    expect(m.name).toBe(1);
   });
 });
 

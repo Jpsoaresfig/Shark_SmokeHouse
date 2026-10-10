@@ -73,11 +73,14 @@ export function Header() {
     };
   }, []);
 
-  /* Close menus on route change */
-  useEffect(() => {
+  /* Close menus on route change — ajuste de estado durante o render (padrão
+     recomendado pelo React em vez de setState dentro de um efeito). */
+  const [lastPathname, setLastPathname] = useState(pathname);
+  if (pathname !== lastPathname) {
+    setLastPathname(pathname);
     setMobileOpen(false);
     setUserMenuOpen(false);
-  }, [pathname]);
+  }
 
   /* Lock body scroll while mobile drawer is open */
   useEffect(() => {
@@ -101,6 +104,9 @@ export function Header() {
           background: scrolled
             ? "linear-gradient(180deg, rgba(15,15,26,0.92) 0%, rgba(8,8,15,0.86) 100%)"
             : "linear-gradient(180deg, rgba(15,15,26,0.78) 0%, rgba(8,8,15,0.55) 100%)",
+          // Soma o notch/status bar (viewport-fit=cover; 0 no Safari em retrato)
+          // ao mesmo respiro do py-2.5 / py-3.5.
+          paddingTop: `calc(env(safe-area-inset-top) + ${scrolled ? "0.625rem" : "0.875rem"})`,
         }}
       >
         {/* Linha neon sutil — toque premium */}
@@ -194,6 +200,9 @@ export function Header() {
                 <div className="relative hidden md:block">
                   <button
                     onClick={() => setUserMenuOpen(!userMenuOpen)}
+                    aria-label="Menu da conta"
+                    aria-haspopup="menu"
+                    aria-expanded={userMenuOpen}
                     className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
                   >
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[var(--color-electric-blue)] to-[var(--color-neon-blue)] flex items-center justify-center text-xs font-bold text-white">

@@ -4,11 +4,11 @@ import { Sparkles, UserPlus, ShoppingBag, Users, Gift, Star, Crown, CalendarHear
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/Logo";
 import {
-  LOYALTY_LEVELS, WELCOME_BONUS_POINTS, POINTS_VALIDITY_DAYS,
+  LOYALTY_LEVELS, WELCOME_BONUS_POINTS, POINTS_VALIDITY_DAYS, REFERRAL_BONUS_POINTS,
 } from "@/lib/loyalty/levels";
 
 export const metadata: Metadata = {
-  title: "Clube Shark — Programa de Fidelidade | Shark Smokehouse",
+  title: "Clube Shark — Programa de Fidelidade",
   description:
     "Conheça o Clube Shark: ganhe pontos a cada compra, suba de nível (Baby, Hunter, Predatory, Megalodon) e troque por recompensas exclusivas.",
 };
@@ -22,7 +22,7 @@ function range(min: number, max: number): string {
 const HOW_IT_WORKS = [
   { icon: UserPlus, title: "Cadastre-se", desc: `Ganhe ${WELCOME_BONUS_POINTS} pontos de boas-vindas assim que criar sua conta.` },
   { icon: ShoppingBag, title: "Acumule comprando", desc: "Cada real gasto vira pontos — e quanto maior o seu nível, mais pontos por real." },
-  { icon: Users, title: "Indique amigos", desc: "Seu indicado fez a 1ª compra? Você ganha +50 pontos de bônus." },
+  { icon: Users, title: "Indique amigos", desc: `Seu indicado fez a 1ª compra? Você ganha +${REFERRAL_BONUS_POINTS} pontos de bônus.` },
   { icon: Gift, title: "Resgate recompensas", desc: "Troque seus pontos por produtos selecionados, direto na sua conta." },
 ];
 

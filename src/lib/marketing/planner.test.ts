@@ -206,3 +206,72 @@ describe("planAutomations", () => {
     expect(couponsNeeded.size).toBe(1);
   });
 });
+
+describe("LGPD / correções do planner", () => {
+  it("opt-out nunca recebe campanha", () => {
+    const { planned, skipped } = planCampaign({
+      campaign: campaign(),
+      segment: segment(),
+      contacts: [baseContact({ uid: "u1", marketingOptOut: true }), baseContact({ uid: "u2" })],
+      ctx: ctx(),
+    });
+    expect(planned.map((p) => p.userId)).toEqual(["u2"]);
+    expect(skipped[0]).toEqual({ userId: "u1", reason: "opt-out (LGPD)" });
+  });
+
+  it("opt-out nunca recebe automação", () => {
+    const { planned } = planAutomations({
+      automations: [automation("big_spender")],
+      contacts: [baseContact({ uid: "u1", totalSpent: 9999, marketingOptOut: true })],
+      sessions: [],
+      settings: settings(),
+      ctx: ctx(),
+      now,
+    });
+    expect(planned).toHaveLength(0);
+  });
+
+  it("aniversário não repete nos dias seguintes da janela", () => {
+    const a = automation("birthday", { config: { birthdayDaysBefore: 3 } });
+    const yesterday = now.getTime() - 86400000;
+    const { planned, skipped } = planAutomations({
+      automations: [a],
+      contacts: [baseContact({ uid: "u1", birthdayInDays: 2 })],
+      sessions: [],
+      settings: settings(),
+      ctx: ctx({ lastSentByAutoUser: new Map([[`auto:${a.id}:u1`, yesterday]]) }),
+      now,
+    });
+    expect(planned).toHaveLength(0);
+    expect(skipped[0].reason).toContain("aniversário");
+  });
+
+  it("{{produto}} usa o nome do produto, não o id", () => {
+    const a = automation("promo_product", {
+      message: "Oferta de {{produto}}",
+      config: { productId: "p1", promoAudience: "never_bought" },
+    });
+    const { planned } = planAutomations({
+      automations: [a],
+      contacts: [baseContact({ uid: "u1", ordersCount: 0 })],
+      sessions: [],
+      settings: settings(),
+      ctx: ctx(),
+      now,
+      products: [{ id: "p1", name: "Essência Zomo" }],
+    });
+    expect(planned[0].message).toBe("Oferta de Essência Zomo");
+  });
+
+  it("pontos expirando ignora quem está com saldo zero", () => {
+    const { planned } = planAutomations({
+      automations: [automation("points_expiring")],
+      contacts: [baseContact({ uid: "u1", loyaltyPoints: 0, pointsExpiringInDays: 2 })],
+      sessions: [],
+      settings: settings(),
+      ctx: ctx(),
+      now,
+    });
+    expect(planned).toHaveLength(0);
+  });
+});

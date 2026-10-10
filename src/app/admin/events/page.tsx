@@ -17,6 +17,7 @@ import {
   getEvents, createEvent, updateEvent, deleteEvent, toggleEventActive,
 } from "@/lib/firebase/events";
 import { formatDate, isEventUpcoming } from "@/lib/utils";
+import { toast } from "@/stores/toastStore";
 import type { Event } from "@/types";
 
 /* ── helpers ─────────────────────────────────────────────── */
@@ -257,8 +258,13 @@ function DeleteConfirm({ event, onClose, onDeleted }: { event: Event; onClose: (
   const [loading, setLoading] = useState(false);
   const handle = async () => {
     setLoading(true);
-    await deleteEvent(event.id, event.imageUrl);
-    onDeleted(event.id);
+    try {
+      await deleteEvent(event.id, event.imageUrl);
+      onDeleted(event.id);
+    } catch {
+      toast.error("Erro ao excluir o evento.");
+      setLoading(false);
+    }
   };
   return (
     <motion.div
@@ -301,10 +307,12 @@ export default function AdminEventsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try { setEvents(await getEvents()); }
+    catch { toast.error("Não foi possível carregar os eventos."); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const handleSaved = (saved: Event) => {
     setEvents((prev) => {
@@ -321,9 +329,14 @@ export default function AdminEventsPage() {
 
   const handleToggle = async (event: Event) => {
     setTogglingId(event.id);
-    await toggleEventActive(event.id, !event.active);
-    setEvents((prev) => prev.map((e) => e.id === event.id ? { ...e, active: !e.active } : e));
-    setTogglingId(null);
+    try {
+      await toggleEventActive(event.id, !event.active);
+      setEvents((prev) => prev.map((e) => e.id === event.id ? { ...e, active: !e.active } : e));
+    } catch {
+      toast.error("Erro ao alterar o evento.");
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const upcoming = events.filter((e) => isEventUpcoming(e));

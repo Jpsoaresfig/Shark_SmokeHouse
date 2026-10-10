@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slotId, isPastDate, validateBooking, todayISO } from "@/lib/booking";
+import { slotId, isPastDate, validateBooking, todayISO, storeTodayISO } from "@/lib/booking";
 
 describe("slotId", () => {
   it("gera id determinístico removendo os ':' do horário", () => {
@@ -67,5 +67,16 @@ describe("validateBooking", () => {
 
   it("aceita reserva para hoje", () => {
     expect(validateBooking({ ...ok, date: today }, today)).toBeNull();
+  });
+});
+
+describe("storeTodayISO (fuso da loja, UTC-3)", () => {
+  it("às 22h locais (01h UTC do dia seguinte) ainda é hoje na loja", () => {
+    expect(storeTodayISO(new Date("2026-06-16T01:00:00Z"))).toBe("2026-06-15");
+  });
+
+  it("vira o dia à meia-noite local (03h UTC)", () => {
+    expect(storeTodayISO(new Date("2026-06-16T02:59:00Z"))).toBe("2026-06-15");
+    expect(storeTodayISO(new Date("2026-06-16T03:00:00Z"))).toBe("2026-06-16");
   });
 });

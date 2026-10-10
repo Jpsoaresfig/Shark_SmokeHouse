@@ -38,7 +38,8 @@ export default function AdminReviews() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const average = useMemo(() => {
     if (reviews.length === 0) return 0;

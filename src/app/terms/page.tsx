@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalDoc, P, UL, B, type LegalSection } from "@/components/legal/LegalDoc";
 
 export const metadata: Metadata = {
-  title: "Termos de Uso — Shark SmokeHouse",
+  title: "Termos de Uso", // o template do layout já acrescenta "| Shark SmokeHouse"
   description:
     "Termos e condições de uso da loja e dos serviços digitais da Shark SmokeHouse. Venda proibida para menores de 18 anos.",
 };

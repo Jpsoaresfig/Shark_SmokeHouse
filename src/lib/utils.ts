@@ -24,6 +24,9 @@ export function formatCurrency(value: number): string {
 export function toDate(value: unknown): Date {
   if (value instanceof Date) return value;
   if (value && typeof value === "object" && "toDate" in value) return (value as { toDate(): Date }).toDate();
+  // "YYYY-MM-DD" puro (datas de evento) = dia LOCAL. `new Date("2026-06-15")`
+  // seria meia-noite UTC e, em UTC-3, viraria 14/06 na exibição.
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return parseLocalDate(value);
   return new Date(value as string | number);
 }
 

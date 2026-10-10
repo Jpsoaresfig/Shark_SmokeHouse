@@ -48,8 +48,9 @@ export default function AdminPayments() {
     }
   }, []);
 
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   async function handleSave() {

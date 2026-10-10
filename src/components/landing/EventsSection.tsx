@@ -24,6 +24,7 @@ export function EventsSection() {
             .slice(0, 3)
         )
       )
+      .catch(() => setEvents([]))
       .finally(() => setLoading(false));
   }, []);
 

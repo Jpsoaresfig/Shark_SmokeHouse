@@ -74,7 +74,16 @@ export function ImportSpreadsheetDialog({
   async function handleFile(file: File | undefined) {
     if (!file) return;
     setFileName(file.name);
-    const result = await parseProductsFile(file);
+    let result: Awaited<ReturnType<typeof parseProductsFile>>;
+    try {
+      result = await parseProductsFile(file);
+    } catch (err) {
+      // Arquivo corrompido/protegido por senha: o leitor do .xlsx lança erro.
+      console.error("[import planilha]", err);
+      toast.error("Não foi possível ler o arquivo. Verifique se é um CSV ou Excel válido (sem senha).");
+      reset();
+      return;
+    }
     if (result.error) {
       toast.error(result.error);
       reset();
@@ -123,8 +132,8 @@ export function ImportSpreadsheetDialog({
             // Atualização: preserva id/imagem das variações já cadastradas (match por SKU/nome).
             const mergedVariations = parsed.variations.map(pv => {
               const old = (existing.variations ?? []).find(v =>
-                (pv.sku && v.sku.toLowerCase() === pv.sku.toLowerCase()) ||
-                v.name.toLowerCase() === pv.name.toLowerCase(),
+                (pv.sku && v.sku?.toLowerCase() === pv.sku.toLowerCase()) ||
+                v.name?.toLowerCase() === pv.name.toLowerCase(),
               );
               return old ? { ...old, name: pv.name, sku: pv.sku || old.sku, stock: pv.stock } : pv;
             });

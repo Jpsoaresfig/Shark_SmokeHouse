@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Star, Copy, Check, Gift, TrendingUp, Users,
@@ -18,6 +18,8 @@ import {
   getLoyaltyTransactions, getLoyaltyRewards, redeemReward,
 } from "@/lib/firebase/loyalty";
 import { getUserProfile, updateUserProfile } from "@/lib/firebase/users";
+import { setMarketingOptOut } from "@/lib/firebase/marketing";
+import { isValidBrPhone } from "@/lib/marketing/whatsapp";
 import { formatCpf } from "@/lib/cpf";
 import { formatDateTime } from "@/lib/utils";
 import { LoyaltyProgramModal } from "@/components/account/LoyaltyProgramModal";
@@ -45,16 +47,25 @@ function ReferralCard({ referralCode, uid }: { referralCode: string; uid: string
   const [referralCount, setReferralCount] = useState<number | null>(null);
 
   useEffect(() => {
-    getLoyaltyTransactions(uid).then((txs) => {
-      setReferralCount(txs.filter((t) => t.type === "referral").length);
-    });
+    let cancelled = false;
+    getLoyaltyTransactions(uid)
+      .then((txs) => {
+        if (!cancelled) setReferralCount(txs.filter((t) => t.type === "referral").length);
+      })
+      .catch((err) => console.error("Falha ao carregar indicações:", err));
+    return () => { cancelled = true; };
   }, [uid]);
 
   const appUrl = typeof window !== "undefined" ? window.location.origin : "";
   const link = `${appUrl}/register?ref=${referralCode}`;
 
   const copy = async () => {
-    await navigator.clipboard.writeText(link);
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch {
+      toast.error("Não foi possível copiar. Copie o link manualmente.");
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     toast.success("Link copiado!");
@@ -173,10 +184,39 @@ function ProfileTab({ user, onSaved }: { user: UserProfile; onSaved: (u: UserPro
   const [displayName, setDisplayName] = useState(user.displayName ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
   const [saving, setSaving] = useState(false);
+  const [optOut, setOptOut] = useState(
+    (user as UserProfile & { marketingOptOut?: boolean }).marketingOptOut === true,
+  );
+  const [savingOptOut, setSavingOptOut] = useState(false);
+
+  async function toggleOptOut() {
+    const next = !optOut;
+    setSavingOptOut(true);
+    try {
+      await setMarketingOptOut(user.uid, next);
+      setOptOut(next);
+      onSaved({ ...user, marketingOptOut: next } as UserProfile);
+      toast.success(next ? "Você não receberá mais ofertas." : "Ofertas reativadas.");
+    } catch {
+      toast.error("Não foi possível salvar sua preferência. Tente novamente.");
+    } finally {
+      setSavingOptOut(false);
+    }
+  }
 
   async function save() {
     if (!displayName.trim()) {
       toast.error("Informe o seu nome.");
+      return;
+    }
+    if (displayName.trim().length > 80) {
+      toast.error("Nome muito longo (máx. 80 caracteres).");
+      return;
+    }
+    // Telefone é opcional, mas se informado precisa ser um número BR válido
+    // (DDD + 8/9 dígitos) — é o contato do pedido e do WhatsApp da loja.
+    if (phone.trim() && !isValidBrPhone(phone)) {
+      toast.error("Telefone inválido. Use DDD + número, ex.: (83) 99999-0000.");
       return;
     }
     setSaving(true);
@@ -273,6 +313,31 @@ function ProfileTab({ user, onSaved }: { user: UserProfile; onSaved: (u: UserPro
             </Button>
           </div>
 
+          {/* LGPD: consentimento para comunicações de marketing */}
+          <div className="flex items-start justify-between gap-3 border-t border-[var(--color-border)] pt-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-[var(--color-text-secondary)]">Receber ofertas e promoções</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                Cupons, campanhas e lembretes no app e por WhatsApp. Avisos dos seus pedidos continuam chegando.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!optOut}
+              aria-label="Receber ofertas e promoções"
+              onClick={toggleOptOut}
+              disabled={savingOptOut}
+              className={`relative shrink-0 w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${
+                optOut ? "bg-[var(--color-bg-overlay)] border border-[var(--color-border)]" : "bg-[var(--color-neon-blue)]"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${optOut ? "left-0.5" : "left-[22px]"}`}
+              />
+            </button>
+          </div>
+
           <p className="text-xs text-[var(--color-text-muted)] border-t border-[var(--color-border)] pt-4">
             Seus endereços de entrega são gerenciados ao finalizar um pedido, no checkout.
           </p>
@@ -288,8 +353,11 @@ export default function AccountPage() {
   const [points, setPoints] = useState(storeUser?.loyaltyPoints ?? 0);
   const [transactions, setTransactions] = useState<LoyaltyTransaction[]>([]);
   const [rewards, setRewards] = useState<LoyaltyReward[]>([]);
-  const [loadingTx, setLoadingTx] = useState(true);
-  const [loadingRewards, setLoadingRewards] = useState(true);
+  // Loading derivado de "para qual uid já carregou": evita setState síncrono
+  // dentro do efeito (react-hooks/set-state-in-effect) e continua mostrando o
+  // skeleton ao trocar de conta.
+  const [txLoadedFor, setTxLoadedFor] = useState<string | null>(null);
+  const [rewardsLoadedFor, setRewardsLoadedFor] = useState<string | null>(null);
   const [redeemingId, setRedeemingId] = useState<string | null>(null);
   const [tab, setTab] = useState<"clube" | "perfil">("clube");
 
@@ -298,18 +366,21 @@ export default function AccountPage() {
   // ("piscando" sem parar). getUserProfile retorna o perfil completo, então
   // substituímos o usuário direto.
   const uid = storeUser?.uid;
+  const loadingTx = !!uid && txLoadedFor !== uid;
+  const loadingRewards = !!uid && rewardsLoadedFor !== uid;
 
-  const load = useCallback(async () => {
-    if (!uid) return;
-    setLoadingTx(true);
-    setLoadingRewards(true);
+  // Wait for Firebase Auth to be confirmed before querying Firestore
+  useEffect(() => {
+    if (!firebaseReady || !uid) return;
+    // Ignora respostas de um uid anterior (logout/troca de conta no meio).
+    let cancelled = false;
 
     // Each fetch is isolated so a single failure (e.g. a missing Firestore
     // index on rewards) can't blank out the whole page, and the `finally`
     // blocks guarantee the loading skeletons always resolve.
     getUserProfile(uid)
       .then((fresh) => {
-        if (fresh) {
+        if (fresh && !cancelled) {
           setPoints(fresh.loyaltyPoints ?? 0);
           setUser(fresh);
         }
@@ -317,21 +388,20 @@ export default function AccountPage() {
       .catch((err) => console.error("Falha ao carregar perfil:", err));
 
     getLoyaltyTransactions(uid)
-      .then(setTransactions)
+      .then((txs) => { if (!cancelled) setTransactions(txs); })
       .catch((err) => {
         console.error("Falha ao carregar histórico de pontos:", err);
-        toast.error("Não foi possível carregar o histórico de pontos.");
+        if (!cancelled) toast.error("Não foi possível carregar o histórico de pontos.");
       })
-      .finally(() => setLoadingTx(false));
+      .finally(() => { if (!cancelled) setTxLoadedFor(uid); });
 
     getLoyaltyRewards()
-      .then(setRewards)
+      .then((list) => { if (!cancelled) setRewards(list); })
       .catch((err) => console.error("Falha ao carregar recompensas:", err))
-      .finally(() => setLoadingRewards(false));
-  }, [uid, setUser]);
+      .finally(() => { if (!cancelled) setRewardsLoadedFor(uid); });
 
-  // Wait for Firebase Auth to be confirmed before querying Firestore
-  useEffect(() => { if (firebaseReady) load(); }, [firebaseReady, load]);
+    return () => { cancelled = true; };
+  }, [firebaseReady, uid, setUser]);
 
   if (!storeUser) {
     return (
@@ -359,19 +429,21 @@ export default function AccountPage() {
   const redeemableRewards = rewards.filter((r) => points >= r.pointsCost && r.stock > 0);
 
   const handleRedeem = async (reward: LoyaltyReward) => {
+    if (redeemingId) return; // um resgate por vez
     setRedeemingId(reward.id);
     try {
-      await redeemReward(storeUser.uid, reward, points, {
+      const cost = await redeemReward(storeUser.uid, reward, points, {
         name: storeUser.displayName,
         phone: storeUser.phone,
       });
-      setPoints((p) => p - reward.pointsCost);
+      setPoints((p) => Math.max(0, p - cost));
+      setUser({ ...storeUser, loyaltyPoints: Math.max(0, points - cost) });
       setRewards((prev) => prev.map((r) => r.id === reward.id ? { ...r, stock: r.stock - 1 } : r));
       setTransactions((prev) => [{
         id: Date.now().toString(),
         userId: storeUser.uid,
         type: "redeemed",
-        points: -reward.pointsCost,
+        points: -cost,
         reason: `Resgate: ${reward.name}`,
         rewardId: reward.id,
         createdAt: new Date().toISOString(),

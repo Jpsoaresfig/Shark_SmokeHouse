@@ -160,3 +160,43 @@ export function useSiteVitrine(): VitrineContent {
   }, [load]);
   return vitrine;
 }
+
+/** WhatsApp oficial usado quando o admin ainda não preencheu o telefone. */
+const FALLBACK_STORE_WHATSAPP = "5583999020606";
+
+/** Só dígitos com DDI 55 (ou "" se o texto não formar um telefone BR). */
+function storePhoneDigits(phone: string): string {
+  let d = (phone ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  if (d.length === 10 || d.length === 11) d = `55${d}`;
+  return d.length === 12 || d.length === 13 ? d : "";
+}
+
+/** Contato da loja vindo de Site & Vitrine (editável no admin), com fallback
+ *  para o número oficial — evita telefone fixo espalhado pelo código. */
+export function useStoreContact() {
+  const vitrine = useSiteVitrine();
+  const digits = storePhoneDigits(vitrine.phone) || FALLBACK_STORE_WHATSAPP;
+  const display = vitrine.phone?.trim() || "(83) 99902-0606";
+  return {
+    digits,
+    display,
+    tel: `tel:+${digits}`,
+    waLink: (message?: string) =>
+      `https://wa.me/${digits}${message ? `?text=${encodeURIComponent(message)}` : ""}`,
+  };
+}
+
+/** Linhas de horário ("Dia: horário") do texto livre de Site & Vitrine. */
+export function parseHourLines(text: string): { day: string; value: string; closed: boolean }[] {
+  return (text ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const i = line.indexOf(":");
+      // "Ter – Sex: 13h às 21h" → dia + horário; sem ":" → linha inteira no valor.
+      const day = i > 0 ? line.slice(0, i).trim() : "";
+      const value = i > 0 ? line.slice(i + 1).trim() : line;
+      return { day, value, closed: /fechad/i.test(value) };
+    });
+}

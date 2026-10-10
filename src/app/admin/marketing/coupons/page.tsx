@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Ticket, Shield, ExternalLink } from "lucide-react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { MarketingNav } from "@/components/admin/marketing/MarketingNav";
@@ -58,8 +59,10 @@ export default function MarketingCouponsPage() {
           title="Cupons de marketing"
           subtitle="Códigos gerados por campanhas e automações"
           action={
-            <Button variant="secondary" onClick={() => { window.location.href = "/admin/coupons"; }}>
-              <ExternalLink className="w-4 h-4" /> Gestão completa
+            <Button variant="secondary" asChild>
+              <Link href="/admin/coupons">
+                <ExternalLink className="w-4 h-4" /> Gestão completa
+              </Link>
             </Button>
           }
         />

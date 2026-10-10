@@ -115,7 +115,7 @@ function CampaignModal({ editing, preselectSegment, onClose, onSaved }: {
     if (isAutomationOnlySegment(seg)) return "O segmento 'Carrinho abandonado' sem regras é exclusivo para automações — não pode ser usado em campanhas.";
     if (!title.trim()) return "Escreva o título da mensagem.";
     if (!message.trim()) return "Escreva a mensagem.";
-    if (couponMode === "generate" && (!couponValue || Number(couponValue) <= 0)) return "Informe o valor do cupom.";
+    if (couponMode === "generate" && !(Number(couponValue) > 0)) return "Informe o valor do cupom.";
     if (couponMode === "generate" && couponType === "percent" && Number(couponValue) > 100) return "Percentual acima de 100%.";
     if (couponMode === "existing" && !existingCode) return "Selecione o cupom existente.";
     return "";
@@ -145,7 +145,9 @@ function CampaignModal({ editing, preselectSegment, onClose, onSaved }: {
     setSaving(true);
     try {
       const scheduledFor = action === "schedule" ? new Date(scheduledLocal).toISOString() : "";
-      const id = await persist(buildInput(action === "draft" ? "draft" : "scheduled", scheduledFor));
+      // "Enviar agora" grava como rascunho: se o envio falhar, a campanha não fica
+      // "agendada" sem data (estado órfão que o cron nunca processa).
+      const id = await persist(buildInput(action === "schedule" ? "scheduled" : "draft", scheduledFor));
       if (action === "now" && user) {
         const result = await executeCampaignNow(id, user.uid);
         toast.success(`Campanha enviada para ${result.planned} cliente(s).`);

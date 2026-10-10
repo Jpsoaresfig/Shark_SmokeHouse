@@ -442,7 +442,9 @@ export function salesBySeller(source: BiSource, range: { start: Date; end: Date 
     }
     row.transactions += 1;
     if (hasItemFilter) {
-      const match = s.items.filter((it) => matchesItemFilter(it, filters));
+      // Mesma regra do filtro acima (com a marca do produto) — sem ela, o filtro
+      // por marca zerava faturamento/lucro do vendedor.
+      const match = s.items.filter((it) => matchesItemFilter({ ...it, brand: productMap.get(it.productId)?.brand }, filters));
       row.revenue += match.reduce((a, it) => a + (it.subtotal ?? it.price * it.quantity), 0);
       row.profit += match.reduce((a, it) => a + (it.subtotal ?? it.price * it.quantity) - (it.costPrice ?? costMap.get(it.productId) ?? 0) * it.quantity, 0);
     } else {

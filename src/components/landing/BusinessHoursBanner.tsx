@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Clock } from "lucide-react";
 import { useBusinessHours } from "@/stores/siteSettingsStore";
-import { isOpenNow, formatTodayStatus, configuredDayCount } from "@/lib/businessHours";
+import { isOpenNow, formatTodayStatus, formatDayRange, configuredDayCount } from "@/lib/businessHours";
 
 /**
  * Faixa de horário de funcionamento exibida no topo da página inicial.
@@ -15,7 +15,8 @@ export function BusinessHoursBanner() {
   if (!loaded || !businessHours?.enabled) return null;
   if (configuredDayCount(businessHours) === 0) return null;
 
-  const { open } = isOpenNow(businessHours);
+  // `dayHours` é o expediente em curso (o de ontem, na madrugada de um horário que vira a noite).
+  const { open, dayHours } = isOpenNow(businessHours);
 
   return (
     <div
@@ -29,7 +30,7 @@ export function BusinessHoursBanner() {
         <Clock className="w-3.5 h-3.5 shrink-0" />
         <span>
           {open
-            ? `${formatTodayStatus(businessHours)} — estamos abertos!`
+            ? `Hoje: ${formatDayRange(dayHours)} — estamos abertos!`
             : (businessHours.closedMessage?.trim()
                 ? businessHours.closedMessage.trim()
                 : `A loja está fechada no momento. ${formatTodayStatus(businessHours)}. Quando ela abrir, seu pedido é liberado automaticamente.`)}

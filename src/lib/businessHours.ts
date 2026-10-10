@@ -74,20 +74,44 @@ export function dayHoursOf(
 /**
  * Verifica se a loja está aberta AGORA (usando o horário de hoje).
  * Retorna o objeto do dia + a flag `open`.
+ *
+ * - O padrão de `now` é o relógio do fuso da LOJA (não o do aparelho/servidor),
+ *   então cliente, checkout e cron (UTC na Vercel) concordam entre si.
+ * - Suporta horário que vira a noite (ex.: 14:00 → 02:00): depois da meia-noite
+ *   vale o expediente do dia anterior, e `dayHours` passa a ser o desse dia.
  */
 export function isOpenNow(
   hours: BusinessHours | undefined,
-  now: Date | ZonedClock = new Date(),
+  now: Date | ZonedClock = zonedClock(STORE_TIMEZONE),
 ): { open: boolean; dayHours: BusinessDayHours | null } {
-  if (!hours?.enabled) return { open: true, dayHours: dayHoursOf(hours, now.getDay()) };
-  const dayHours = dayHoursOf(hours, now.getDay());
-  if (!dayHours) return { open: false, dayHours: null };
+  const day = now.getDay();
+  if (!hours?.enabled) return { open: true, dayHours: dayHoursOf(hours, day) };
   const current = now.getHours() * 60 + now.getMinutes();
-  const start = parseTime(dayHours.open);
-  let end = parseTime(dayHours.close);
-  if (end === 0) end = 24 * 60;
-  const open = start !== null && end !== null && current >= start && current < end;
-  return { open, dayHours };
+
+  const dayHours = dayHoursOf(hours, day);
+  if (dayHours) {
+    const start = parseTime(dayHours.open);
+    let end = parseTime(dayHours.close);
+    if (end === 0) end = 24 * 60;
+    if (start !== null && end !== null) {
+      // Mesmo dia (end > start) ou virando a noite (end <= start): abre em `start`
+      // e vai até a meia-noite; o trecho da madrugada é tratado abaixo.
+      const open = end > start ? current >= start && current < end : current >= start;
+      if (open) return { open: true, dayHours };
+    }
+  }
+
+  // Madrugada coberta pelo expediente de ontem que virou a noite (ex.: sex 14h → sáb 02h).
+  const prev = dayHoursOf(hours, (day + 6) % 7);
+  if (prev) {
+    const start = parseTime(prev.open);
+    const end = parseTime(prev.close);
+    if (start !== null && end !== null && end > 0 && end <= start && current < end) {
+      return { open: true, dayHours: prev };
+    }
+  }
+
+  return { open: false, dayHours };
 }
 
 /** Converte "HH:MM" em minutos do dia (ou null se inválido). */
@@ -118,7 +142,7 @@ export function formatDayRange(dayHours: BusinessDayHours | null | undefined): s
 /** Resumo do horário de hoje (ex.: "Aberto: 10h às 22h" | "Fechado hoje"). */
 export function formatTodayStatus(
   hours: BusinessHours | undefined,
-  now: Date | ZonedClock = new Date(),
+  now: Date | ZonedClock = zonedClock(STORE_TIMEZONE),
 ): string {
   const dayHours = dayHoursOf(hours, now.getDay());
   if (!dayHours) return "Fechado hoje";

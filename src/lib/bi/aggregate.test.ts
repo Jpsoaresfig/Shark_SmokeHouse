@@ -432,6 +432,18 @@ describe("vendedores e formas de pagamento", () => {
     expect(rows[0].commission).toBeCloseTo(5, 5);
   });
 
+  it("salesBySeller com filtro de marca soma os itens da marca (não zera)", () => {
+    const s = source(
+      [sale({ id: "s1", sellerId: "s1", items: [item("p1", "A", 50, 2, { costPrice: 30 }), item("p2", "B", 20, 1)], total: 120, createdAt: "2026-03-01T12:00:00Z", paymentMethod: "pix" })],
+      [],
+      [product({ id: "p1", name: "A", brand: "Zomo", costPrice: 30 }), product({ id: "p2", name: "B", brand: "Outra" })],
+    );
+    const rows = salesBySeller(s, RANGE, { origin: "all", brand: "Zomo" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].revenue).toBe(100);
+    expect(rows[0].profit).toBe(40);
+  });
+
   it("salesByPayment agrega e calcula percentual", () => {
     const s = source(
       [

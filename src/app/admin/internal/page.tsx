@@ -23,7 +23,7 @@ import {
   getReceivables, registerSalePayment, markSalePaid, cancelSale,
 } from "@/lib/firebase/sales";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleOutstanding, saleStatus, internalProductIdsOf, saleHasInternalItem } from "@/lib/sales/helpers";
+import { saleOutstanding, saleStatus, internalProductIdsOf, saleHasInternalItem, saleDueDate, parseMoneyInput } from "@/lib/sales/helpers";
 import SalePdv from "@/components/admin/SalePdv";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
@@ -37,11 +37,9 @@ function toDate(v: any): Date {
   return new Date(0);
 }
 
-/** "12,50" / "12.50" → número (0 quando inválido). */
-function parseMoney(v: string): number {
-  const n = parseFloat(String(v).replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
+/** "12,50" / "12.50" / "1.234,56" → número (0 quando inválido). Antes, "12.50"
+ *  virava 1250 (o ponto era sempre tratado como milhar). */
+const parseMoney = parseMoneyInput;
 
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
@@ -149,8 +147,11 @@ export default function AdminInternalArea() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (tab === "receivables") loadReceivables(); }, [tab, loadReceivables]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
+  useEffect(() => {
+    if (tab === "receivables") void Promise.resolve().then(() => loadReceivables());
+  }, [tab, loadReceivables]);
 
   /* ── Indicadores do estoque interno ── */
   const stockStats = useMemo(() => {
@@ -302,6 +303,7 @@ export default function AdminInternalArea() {
   }
   async function handleSettle(sale: Sale) {
     if (!user) return;
+    if (!window.confirm(`Quitar o saldo de ${formatCurrency(saleOutstanding(sale))} de ${sale.customerName || "este cliente"}? Será registrado como recebido.`)) return;
     setSettlingId(sale.id);
     try {
       await markSalePaid(sale.id, user.uid);
@@ -679,7 +681,7 @@ export default function AdminInternalArea() {
                             </div>
                             <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
                               #{sale.id.slice(-8).toUpperCase()} · {toDate(sale.createdAt).toLocaleDateString("pt-BR")}
-                              {sale.dueDate && <> · vence {toDate(sale.dueDate).toLocaleDateString("pt-BR")}</>}
+                              {saleDueDate(sale) && <> · vence {saleDueDate(sale)?.toLocaleDateString("pt-BR")}</>}
                             </p>
                           </div>
                           <div className="text-right shrink-0">

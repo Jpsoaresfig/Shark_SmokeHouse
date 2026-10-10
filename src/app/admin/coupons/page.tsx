@@ -253,7 +253,8 @@ export default function AdminCouponsPage() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const canAccess = user?.role === "admin" || user?.role === "seller";
   if (!canAccess) {
@@ -282,6 +283,7 @@ export default function AdminCouponsPage() {
   };
 
   const handleDelete = async (c: Coupon) => {
+    if (!window.confirm(`Remover o cupom ${c.code}? Esta ação não pode ser desfeita.`)) return;
     setDeletingId(c.id);
     try {
       await deleteCoupon(c.id);

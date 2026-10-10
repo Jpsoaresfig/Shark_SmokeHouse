@@ -59,8 +59,18 @@ function messageFromTemplate(contact: MarketingContact, template?: MarketingTemp
   }));
 }
 
+/**
+ * Célula CSV segura: nome/bairro são digitados pelo cliente — um ";" quebrava as
+ * colunas e um "=", "+", "-" ou "@" no início virava fórmula ao abrir no Excel
+ * (CSV injection). Neutraliza com apóstrofo e sempre envolve em aspas.
+ */
+function csvCell(value: string): string {
+  const v = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${v.replace(/"/g, '""')}"`;
+}
+
 function contactCsv(contacts: MarketingContact[], settings: { bigSpenderThreshold: number }): string {
-  const header = "Nome;Telefone;Email;Cidade;Bairro;Gasto total;Pedidos;Ultima compra;Pontos;Nivel;Segmentos;Cadastro";
+  const header = "Nome;Telefone;Email;Cidade;Bairro;Gasto total;Pedidos;Ultima compra;Pontos;Nivel;Segmentos;Cadastro;Aceita marketing";
   const lines = contacts.map((c) => {
     const segments = categorizeContact(c, settings).map((s) => SEGMENT_PRESETS.find((p) => p.preset === s)?.name ?? s).join(", ");
     return [
@@ -68,7 +78,8 @@ function contactCsv(contacts: MarketingContact[], settings: { bigSpenderThreshol
       String(c.totalSpent), String(c.ordersCount),
       c.lastOrderAt ? formatDate(c.lastOrderAt) : "", String(c.loyaltyPoints), c.loyaltyLevel,
       segments, c.createdAt ? formatDate(c.createdAt) : "",
-    ].join(";");
+      c.marketingOptOut ? "Não" : "Sim",
+    ].map(csvCell).join(";");
   });
   return [header, ...lines].join("\n");
 }
@@ -117,13 +128,18 @@ export default function MarketingContactsPage() {
   }
 
   const openWhatsApp = (c: MarketingContact, template?: MarketingTemplate) => {
+    // LGPD: cliente que recusou marketing não recebe mensagem promocional.
+    if (c.marketingOptOut) {
+      toast.warning("Cliente optou por não receber ofertas (LGPD).");
+      return;
+    }
     const message = messageFromTemplate(c, template);
     const link = waLink(c.phone, message);
     if (!link) {
       toast.warning("Cliente sem telefone cadastrado.");
       return;
     }
-    window.open(link, "_blank");
+    window.open(link, "_blank", "noopener,noreferrer");
     toast.success("WhatsApp aberto — envio manual. Registre o resultado no atendimento.");
   };
 
@@ -193,7 +209,8 @@ export default function MarketingContactsPage() {
             <div className="space-y-3">
               {visible.map((c) => {
                 const segments = categorizeContact(c, data.settings);
-                const wa = digitsOfPhone(c.phone).length >= 12;
+                const optedOut = c.marketingOptOut === true;
+                const wa = !optedOut && digitsOfPhone(c.phone).length >= 12;
                 return (
                   <Card key={c.uid}>
                     <CardContent className="p-4 flex flex-wrap items-center gap-x-4 gap-y-3">
@@ -207,7 +224,7 @@ export default function MarketingContactsPage() {
                         </div>
                         <p className="text-xs text-[var(--color-text-muted)] mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
                           <span className={wa ? "" : "text-[var(--color-error)]"}>
-                            {wa ? prettyPhone(c.phone) : "Sem WhatsApp"}
+                            {optedOut ? "Não aceita ofertas (LGPD)" : wa ? prettyPhone(c.phone) : "Sem WhatsApp"}
                           </span>
                           {c.city && <span>· {c.city}{c.neighborhood ? ` / ${c.neighborhood}` : ""}</span>}
                           <span>· Gasto: <span className="text-[var(--color-text-primary)] font-medium">{formatCurrency(c.totalSpent)}</span></span>
@@ -219,7 +236,8 @@ export default function MarketingContactsPage() {
                         <select
                           onChange={(e) => openWhatsApp(c, templateList.find((t) => t.id === e.target.value))}
                           defaultValue=""
-                          className="hidden sm:block text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-2 py-2 text-[var(--color-text-muted)]"
+                          disabled={!wa}
+                          className="hidden sm:block disabled:opacity-40 text-xs rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-2 py-2 text-[var(--color-text-muted)]"
                         >
                           <option value="">Mensagem padrão</option>
                           {templateList.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -230,7 +248,11 @@ export default function MarketingContactsPage() {
                               <MessageCircle className="w-4 h-4" /> WhatsApp
                             </Button>
                             <button
-                              onClick={() => { navigator.clipboard.writeText(messageFromTemplate(c)); toast.success("Mensagem copiada."); }}
+                              onClick={() => {
+                                navigator.clipboard.writeText(messageFromTemplate(c))
+                                  .then(() => toast.success("Mensagem copiada."))
+                                  .catch(() => toast.error("Não foi possível copiar a mensagem."));
+                              }}
                               title="Copiar mensagem"
                               className="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-neon-blue)] hover:bg-[var(--color-neon-blue-glow)] transition-all"
                             >
@@ -239,7 +261,7 @@ export default function MarketingContactsPage() {
                           </>
                         ) : (
                           <span className="flex items-center gap-1.5 text-xs text-[var(--color-error)]">
-                            <PhoneOff className="w-4 h-4" /> Sem telefone
+                            <PhoneOff className="w-4 h-4" /> {optedOut ? "Opt-out" : "Sem telefone"}
                           </span>
                         )}
                       </div>

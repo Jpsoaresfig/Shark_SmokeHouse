@@ -90,7 +90,7 @@ async function readOperationData(db: Firestore): Promise<ContactInput> {
     fetchAllDocs(db, "loyaltyTransactions"),
   ]);
 
-  const users: UserProfile[] = userDocs.map((d) => ({
+  const users: ContactInput["users"] = userDocs.map((d) => ({
     uid: uidOf(d),
     email: String(d.email ?? ""),
     displayName: String(d.displayName ?? ""),
@@ -100,6 +100,8 @@ async function readOperationData(db: Firestore): Promise<ContactInput> {
     birthDate: d.birthDate ? String(d.birthDate) : undefined,
     loyaltyPoints: typeof d.loyaltyPoints === "number" ? d.loyaltyPoints : 0,
     referredBy: d.referredBy ? String(d.referredBy) : undefined,
+    // LGPD: opt-out de marketing gravado pelo próprio cliente (Minha Conta).
+    marketingOptOut: d.marketingOptOut === true,
     createdAt: isoOf(d.createdAt),
     updatedAt: isoOf(d.updatedAt),
   }));
@@ -224,6 +226,7 @@ function buildPlannerContext(
   const sentAutoUser = new Set<string>();
   const recentByUser = new Map<string, number>();
   const lastAutoAtByUser = new Map<string, number>();
+  const lastSentByAutoUser = new Map<string, number>();
   const now = Date.now();
   const cutoff = now - settings.windowHours * 3600_000;
 
@@ -244,6 +247,9 @@ function buildPlannerContext(
     if (e.automationId) {
       const last = lastAutoAtByUser.get(e.userId);
       if (last == null || t > last) lastAutoAtByUser.set(e.userId, t);
+      const key = automationUserKey(e.automationId, e.userId);
+      const lastAuto = lastSentByAutoUser.get(key);
+      if (lastAuto == null || t > lastAuto) lastSentByAutoUser.set(key, t);
     }
   }
 
@@ -252,6 +258,7 @@ function buildPlannerContext(
     sentAutoUser,
     recentByUser,
     lastAutoAtByUser,
+    lastSentByAutoUser,
     minDaysBetweenAuto: settings.minDaysBetweenAuto,
     maxPerDay: settings.maxPerDay,
     windowHours: settings.windowHours,
@@ -330,7 +337,16 @@ async function ensureAutomationCoupon(
 
 /* ── Persistência idempotente ─────────────────────────────── */
 
-/** Persiste uma execução com doc id = dedupKey (nunca duplica). */
+/**
+ * Persiste uma execução com doc id = dedupKey (nunca duplica).
+ *
+ * Usa `create()` (falha se o doc já existe) em vez de set/merge: duas execuções
+ * concorrentes do cron (retry do Vercel, disparo manual, "Enviar agora" do
+ * admin ao mesmo tempo) leem o mesmo snapshot de execuções e planejavam as
+ * mesmas mensagens — com set/merge as duas "venciam" e o cliente recebia a
+ * notificação 2x. Agora só quem cria o doc envia. Retorna false quando o doc
+ * já existia (mensagem já enviada/registrada por outra execução).
+ */
 async function persistExecution(db: Firestore, msg: {
   dedupKey: string;
   userId: string;
@@ -344,7 +360,7 @@ async function persistExecution(db: Firestore, msg: {
   automationEvent?: string;
   status: MarketingExecution["status"];
   reason?: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const docData: MarketingExecution = {
     id: msg.dedupKey,
     userId: msg.userId,
@@ -361,7 +377,14 @@ async function persistExecution(db: Firestore, msg: {
     ...(msg.reason ? { reason: msg.reason } : {}),
     createdAt: new Date().toISOString(),
   };
-  await db.collection("marketingExecutions").doc(msg.dedupKey).set(docData, { merge: true });
+  try {
+    await db.collection("marketingExecutions").doc(msg.dedupKey).create(docData);
+    return true;
+  } catch (err) {
+    // 6 = ALREADY_EXISTS (gRPC): outra execução já registrou esta mensagem.
+    if ((err as { code?: number }).code === 6) return false;
+    throw err;
+  }
 }
 
 async function createNotification(db: Firestore, msg: {
@@ -523,7 +546,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
       let sent = 0;
       let blocked = 0;
       for (const msg of planned) {
-        await persistExecution(db, {
+        const created = await persistExecution(db, {
           dedupKey: msg.dedupKey,
           userId: msg.userId,
           channel: msg.channel,
@@ -534,6 +557,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
           campaignId: campaign.id,
           status: "processed",
         });
+        if (!created) continue; // já enviada por outra execução
         await createNotification(db, msg);
         if (msg.couponCode) {
           await registerEvent(db, {
@@ -551,6 +575,9 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
       for (const s of skipped) {
         blocked++;
         summary.skipped++;
+        // "dedup" = já existe execução desta campanha para o cliente: gravar o
+        // skip por cima apagaria o registro "processed" (histórico/métricas).
+        if (s.reason === "dedup") continue;
         await persistExecution(db, {
           dedupKey: `campaign:${campaign.id}:${s.userId}`,
           userId: s.userId,
@@ -593,6 +620,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
     settings,
     ctx,
     now,
+    products: operation.products,
   });
 
   // Garante o cupom determinístico do dia SOMENTE das automações que vão enviar
@@ -610,7 +638,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
 
   for (const msg of plannedAuto) {
     try {
-      await persistExecution(db, {
+      const created = await persistExecution(db, {
         dedupKey: msg.dedupKey,
         userId: msg.userId,
         channel: msg.channel,
@@ -622,6 +650,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
         automationEvent: msg.automationEvent,
         status: "processed",
       });
+      if (!created) continue; // já enviada por outra execução
       await createNotification(db, msg);
       await registerEvent(db, {
         userId: msg.userId,
@@ -641,9 +670,21 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
   /* 3) Limpeza: sessões de carrinho de quem já concluiu o pedido ou que estão
    *    sem itens (carrinho esvaziado — o tracker remove ao zerar; isto pega
    *    sobras antigas e escritas concorrentes). */
-  const ordered = new Set(operation.orders.filter((o) => o.customerId).map((o) => o.customerId));
+  // "Concluiu o pedido" = pedido criado DEPOIS da última atualização do carrinho
+  // (antes bastava ter qualquer pedido na vida para a sessão ser apagada).
+  const lastOrderAt = new Map<string, number>();
+  for (const o of operation.orders) {
+    if (!o.customerId) continue;
+    const t = new Date(o.createdAt).getTime();
+    if (!Number.isFinite(t)) continue;
+    if (t > (lastOrderAt.get(o.customerId) ?? 0)) lastOrderAt.set(o.customerId, t);
+  }
   for (const s of sessions) {
-    if (ordered.has(s.userId) || !s.itemsCount || s.itemsCount <= 0) {
+    const sessionAt = new Date(s.updatedAt).getTime();
+    const orderedAfter =
+      (lastOrderAt.get(s.userId) ?? 0) >= (Number.isFinite(sessionAt) ? sessionAt : 0) &&
+      lastOrderAt.has(s.userId);
+    if (orderedAfter || !s.itemsCount || s.itemsCount <= 0) {
       await db.collection("marketingCartSessions").doc(s.userId).delete().catch(() => undefined);
     }
   }

@@ -18,9 +18,10 @@ const SOUND_KEY = "admin:orders:sound";
  * do `subscribeOrders`.
  */
 export function useNewOrderAlerts() {
-  const [soundOn, setSoundOn] = useState(
-    () => typeof window === "undefined" || localStorage.getItem(SOUND_KEY) !== "off",
-  );
+  const [soundOn, setSoundOn] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try { return localStorage.getItem(SOUND_KEY) !== "off"; } catch { return true; }
+  });
   const soundOnRef = useRef(soundOn);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
 
@@ -34,12 +35,13 @@ export function useNewOrderAlerts() {
   }, []);
 
   const toggleSound = useCallback(() => {
-    setSoundOn(prev => {
-      const next = !prev;
-      localStorage.setItem(SOUND_KEY, next ? "on" : "off");
-      if (next) { unlockAudio(); playNewOrderChime(); } // testa/destrava ao ligar
-      return next;
-    });
+    // Efeitos (storage/som) fora do updater do setState — no StrictMode o
+    // updater roda 2×, tocando o som duas vezes.
+    const next = !soundOnRef.current;
+    soundOnRef.current = next;
+    setSoundOn(next);
+    try { localStorage.setItem(SOUND_KEY, next ? "on" : "off"); } catch { /* storage bloqueado */ }
+    if (next) { unlockAudio(); playNewOrderChime(); } // testa/destrava ao ligar
   }, []);
 
   /** Dispara toast + notificação do sistema + som para cada pedido novo. */

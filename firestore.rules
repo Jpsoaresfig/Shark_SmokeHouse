@@ -22,6 +22,17 @@ service cloud.firestore {
       return isAuth() && (getRole() == 'motoboy' || getRole() == 'admin');
     }
 
+    // Campos que o próprio usuário NÃO pode alterar no perfil.
+    function ownerProfileUpdateOk() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny(['role', 'uid', 'commissionRate', 'blockedUntil', 'birthDate',
+                              'lastBirthdayBonusPeriod', 'createdAt'])
+        && (!changed.hasAny(['loyaltyPoints'])
+            || request.resource.data.loyaltyPoints <= resource.data.get('loyaltyPoints', 0))
+        && (!changed.hasAny(['referralCode']) || resource.data.get('referralCode', '') in ['', null])
+        && (!changed.hasAny(['referredBy']) || resource.data.get('referredBy', null) == null);
+    }
+
     // ── Users ─────────────────────────────────────────────────
     match /users/{uid} {
       // Dono e admin sempre; vendedor também lê (PDV: busca de cliente p/ vincular
@@ -30,7 +41,18 @@ service cloud.firestore {
       // O próprio dono cria seu perfil; além disso, admin/vendedor podem cadastrar
       // um CLIENTE de balcão (walk-in) direto do PDV — restrito a role 'customer'
       // para não permitir a criação de contas de equipe/admin por aqui.
-      allow create: if isOwner(uid)
+      // Auto-cadastro: só como 'customer' (o bootstrap do admin exige o e-mail do
+      // admin no token), sem comissão e com no máximo o bônus de boas-vindas —
+      // antes o próprio usuário podia nascer com role 'admin' ou pontos à vontade.
+      // (50 = WELCOME_BONUS_POINTS em src/lib/loyalty/levels.ts; mantenha em sincronia.)
+      allow create: if (isOwner(uid)
+                        && request.resource.data.get('uid', uid) == uid
+                        && (request.resource.data.get('role', 'customer') == 'customer'
+                            || (request.resource.data.role == 'admin'
+                                && request.auth.token.email == 'admin@shark.com'))
+                        && !('commissionRate' in request.resource.data)
+                        && request.resource.data.get('loyaltyPoints', 0) is number
+                        && request.resource.data.get('loyaltyPoints', 0) <= 50)
                     || ((isAdmin() || isSeller()) && request.resource.data.role == 'customer');
       // Owner: atualiza o próprio perfil (menos o campo role). Inclui o débito
       // dos próprios pontos no resgate.
@@ -39,8 +61,16 @@ service cloud.firestore {
       // no servidor (Admin SDK, via qualifyReferralForPaidOrder) somente após a 1ª
       // compra paga do indicado — por isso não há regra cliente que permita somar
       // pontos na conta de OUTRO usuário (fechando o vetor de abuso anterior).
-      allow update: if (isOwner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']))
-                    || isAdmin();
+      // Owner: não mexe em role/comissão/idade/aniversário (bônus do cron), só pode
+      // DIMINUIR o próprio saldo de pontos (resgate) e grava referralCode/referredBy
+      // apenas uma vez (backfill/cadastro).
+      // Vendedor (PDV): credita/estorna pontos de um CLIENTE (só loyaltyPoints).
+      allow update: if (isOwner(uid) && ownerProfileUpdateOk())
+                    || isAdmin()
+                    || (isSeller()
+                        && resource.data.get('role', 'customer') == 'customer'
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['loyaltyPoints', 'updatedAt']));
       allow delete: if isAdmin();
     }
 
@@ -60,12 +90,27 @@ service cloud.firestore {
       allow write: if isAdmin() || isSeller();
     }
 
+    // Custo e imposto dos produtos (uso interno) — fora do documento público.
+    match /productCosts/{productId} {
+      allow read, write: if isAdmin() || isSeller();
+    }
+
     match /products/{productId} {
       allow read: if true;
       allow create, delete: if isAdmin() || isSeller();
-      allow update: if isAdmin()
-                    || isSeller()
-                    || (isAuth() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock', 'variations', 'updatedAt']));
+      // Estoque do checkout/resgate/confirmação WhatsApp é baixado no servidor
+      // (Admin SDK) — clientes não gravam mais em produtos.
+      allow update: if isAdmin() || isSeller();
+    }
+
+    // Cliente só mantém o status financeiro ou o cancela (nunca "paid").
+    function customerPaymentChangeOk() {
+      let np = request.resource.data.get('payment', {});
+      let op = resource.data.get('payment', {});
+      let nps = request.resource.data.get('paymentStatus', null);
+      return np.diff(op).affectedKeys().hasOnly(['status', 'history'])
+        && (np.get('status', null) == op.get('status', null) || np.get('status', null) == 'cancelled')
+        && (nps == resource.data.get('paymentStatus', null) || nps == 'cancelled');
     }
 
     // ── Orders ────────────────────────────────────────────────
@@ -75,10 +120,15 @@ service cloud.firestore {
         isAdmin() ||
         isSeller() ||
         (isMotoboy() && resource.data.motoboyId == request.auth.uid) ||
-        // Pool de auto-atendimento: motoboys leem entregas ainda sem dono.
-        (isMotoboy() && resource.data.motoboyId == null)
+        // Pool de auto-atendimento: motoboys leem entregas ainda sem dono — só
+        // pedidos de entrega (retirada na loja não expõe o cliente ao motoboy).
+        (isMotoboy() && resource.data.motoboyId == null
+          && resource.data.deliveryAddress.id != 'pickup')
       );
-      allow create: if isAuth() && request.resource.data.customerId == request.auth.uid;
+      // Pedidos nascem só no servidor (/api/orders/create e /api/loyalty/redeem,
+      // Admin SDK), que confere preços/frete/cupom/total e baixa o estoque na
+      // mesma transação — o navegador não cria pedido direto.
+      allow create: if false;
       allow update: if isAdmin()
         || isSeller()
         || (isMotoboy() && resource.data.motoboyId == request.auth.uid)
@@ -91,16 +141,23 @@ service cloud.firestore {
                  .hasOnly(['motoboyId', 'motoboyName', 'updatedAt']))
         || (isAuth() && resource.data.customerId == request.auth.uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']))
-        // Cliente respondendo "A compra foi efetuada?" (fluxo WhatsApp): pode
-        // confirmar (awaitingConfirmation -> false) ou cancelar o próprio pedido.
-        // Restrito aos campos do fluxo e ao status final received/cancelled, para
-        // impedir escalonamento (ex.: marcar como entregue).
+        // Cliente respondendo "A compra foi efetuada?" (fluxo WhatsApp) com "não":
+        // cancela o próprio pedido enquanto ainda aguarda confirmação (o "sim"
+        // roda no servidor, que baixa o estoque). Restrito aos campos do fluxo,
+        // para impedir escalonamento (ex.: marcar como entregue). O status financeiro
+        // só pode ficar igual ou ir para "cancelled" — antes o cliente podia
+        // marcar o próprio pedido como PAGO (e liberar o bônus de indicação).
+        // Após cancelar, a 2ª escrita (updatePaymentStatus "cancelled") também
+        // precisa passar, por isso aceita resource.status == 'cancelled'.
         || (isAuth() && resource.data.customerId == request.auth.uid
-            && resource.data.status == 'received'
+            && (resource.data.get('paymentMethod', '') == 'whatsapp'
+                || resource.data.get('payment', {}).get('method', '') == 'whatsapp')
+            && resource.data.get('awaitingConfirmation', false) == true
+            && resource.data.status in ['received', 'cancelled']
+            && request.resource.data.status == 'cancelled'
             && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['awaitingConfirmation', 'status', 'statusHistory',
-                           'stockApplied', 'payment', 'paymentStatus', 'updatedAt'])
-            && request.resource.data.status in ['received', 'cancelled']);
+                 .hasOnly(['status', 'statusHistory', 'payment', 'paymentStatus', 'updatedAt'])
+            && customerPaymentChangeOk());
       allow delete: if isAdmin();
     }
 
@@ -119,13 +176,19 @@ service cloud.firestore {
     }
 
     // ── Loyalty Transactions ──────────────────────────────────
-    // List: authenticated users (app always filters by userId in the query).
-    // Get: owner or admin.
-    // Create: any authenticated user (referrals and redemptions happen client-side).
+    // Read: dono (a query filtra por userId) ou equipe — antes qualquer logado
+    // listava o extrato de todos. Create: equipe (PDV/admin) ou o próprio cliente
+    // apenas para o bônus de boas-vindas (<= 50) e débitos de resgate (<= 0).
     match /loyaltyTransactions/{txId} {
-      allow list: if isAuth();
-      allow get: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuth();
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isSeller());
+      allow create: if isSeller()
+                    || (isAuth()
+                        && request.resource.data.userId == request.auth.uid
+                        && request.resource.data.points is number
+                        // Resgates ("redeemed") agora são lançados só pelo servidor
+                        // (/api/loyalty/redeem, Admin SDK); o cliente só grava o bônus de boas-vindas.
+                        && request.resource.data.type == 'welcome'
+                        && request.resource.data.points <= 50);
       allow update, delete: if isAdmin();
     }
 
@@ -135,8 +198,13 @@ service cloud.firestore {
     // Each user creates only their own mapping (uid must match); admins may seed.
     match /referralCodes/{code} {
       allow read: if isAuth();
-      allow create, update: if isAdmin()
-                            || (isAuth() && request.resource.data.uid == request.auth.uid);
+      // Update só pelo próprio dono do código: antes qualquer logado podia
+      // sobrescrever o código de OUTRO usuário apontando-o para si (sequestro).
+      allow create: if isAdmin()
+                    || (isAuth() && request.resource.data.uid == request.auth.uid);
+      allow update: if isAdmin()
+                    || (isAuth() && resource.data.uid == request.auth.uid
+                        && request.resource.data.uid == request.auth.uid);
       allow delete: if isAdmin();
     }
 
@@ -172,8 +240,13 @@ service cloud.firestore {
     // Registros de uso do cupom: o cliente cria o próprio uso ao fechar o pedido;
     // leitura liberada a logados (contagem por CPF no checkout). Edição/remoção admin.
     match /couponRedemptions/{id} {
-      allow read: if isAuth();
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      // Guarda CPF: cada cliente lê só os próprios resgates; a contagem por CPF
+      // (limite do cupom) é feita no servidor em /api/coupons/usage.
+      allow read: if isSeller()
+                  || (isAuth() && resource.data.userId == request.auth.uid);
+      // Vendedor/admin registram o uso feito no PDV; no checkout online o uso é
+      // gravado pelo servidor na mesma transação do pedido.
+      allow create: if isSeller();
       allow update, delete: if isAdmin();
     }
 
@@ -252,9 +325,10 @@ service cloud.firestore {
     // List: autenticados (o app filtra por customerId). Get: dono ou admin.
     // Create: o próprio cliente. Update/delete: só admin.
     match /reviews/{id} {
-      allow list:   if isAuth();
-      allow get:    if isAuth() && (resource.data.customerId == request.auth.uid || isAdmin());
-      allow create: if isAuth() && request.resource.data.customerId == request.auth.uid;
+      allow read:   if isAuth() && (resource.data.customerId == request.auth.uid || isSeller());
+      allow create: if isAuth() && request.resource.data.customerId == request.auth.uid
+                    && request.resource.data.rating is int
+                    && request.resource.data.rating >= 1 && request.resource.data.rating <= 5;
       allow update, delete: if isAdmin();
     }
 

@@ -23,7 +23,11 @@ export function isOfLegalAge(birthDate: string): boolean {
 export function legalAgeDate(birthDate: string): string {
   const b = new Date(`${birthDate}T00:00:00`);
   const d = new Date(b.getFullYear() + LEGAL_AGE, b.getMonth(), b.getDate());
-  return d.toISOString().slice(0, 10);
+  // Formata pelos campos LOCAIS: `toISOString()` converte para UTC e, em fusos
+  // a leste de Greenwich, voltaria um dia.
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /**

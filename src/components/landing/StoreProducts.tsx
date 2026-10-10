@@ -24,13 +24,17 @@ const MAX_PRODUCTS = 8;
 function ProductCard({ product, index }: { product: Product; index: number }) {
   const [added, setAdded] = useState(false);
   const { addItem } = useCartStore();
-  const discount = product.compareAtPrice
-    ? Math.round((1 - product.price / product.compareAtPrice) * 100)
+  const hasCompare = !!product.compareAtPrice && product.compareAtPrice > product.price;
+  const discount = hasCompare
+    ? Math.round((1 - product.price / product.compareAtPrice!) * 100)
     : null;
 
-  const handleAdd = () => {
-    // Com cores: deixa o modal (abre pelo clique no card) cuidar da escolha.
-    if (product.colors?.length) return;
+  const handleAdd = (e: React.MouseEvent) => {
+    // Com variações (grade) ou cores: deixa o modal (abre pelo clique no card,
+    // via bubbling) cuidar da escolha — sem isso o item ia sem variação.
+    if (product.variations?.length || product.colors?.length) return;
+    // Adição direta: não abre o modal do card junto.
+    e.stopPropagation();
     addItem(product);
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
@@ -60,7 +64,7 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
             </div>
           )}
           <div className="absolute top-3 left-3 flex flex-col gap-1.5">
-            {discount && (
+            {discount != null && discount > 0 && (
               <Badge
                 variant="orange"
                 className="text-xs border-0 bg-orange-500 text-white shadow-md shadow-black/30"
@@ -98,9 +102,9 @@ function ProductCard({ product, index }: { product: Product; index: number }) {
             <span className="text-lg font-bold text-[var(--color-neon-blue)]">
               {formatCurrency(product.price)}
             </span>
-            {product.compareAtPrice && (
+            {hasCompare && (
               <span className="text-sm text-[var(--color-text-muted)] line-through">
-                {formatCurrency(product.compareAtPrice)}
+                {formatCurrency(product.compareAtPrice!)}
               </span>
             )}
           </div>
@@ -141,6 +145,7 @@ export function StoreProducts() {
         );
         setProducts(highlightedFirst.slice(0, MAX_PRODUCTS));
       })
+      .catch(() => setProducts([]))
       .finally(() => setLoading(false));
   }, []);
 

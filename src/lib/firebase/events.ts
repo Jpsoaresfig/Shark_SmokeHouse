@@ -1,6 +1,6 @@
 import {
   collection, doc, getDocs, getDoc, addDoc, updateDoc,
-  deleteDoc, serverTimestamp, query, orderBy,
+  deleteDoc, deleteField, serverTimestamp, query, orderBy,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -35,9 +35,12 @@ export async function createEvent(
   if (imageFile) {
     imageUrl = await uploadEventImage(imageFile);
   }
+  // Firestore rejeita `undefined` (ex.: endDate vazio em evento de um dia só).
+  const clean = Object.fromEntries(
+    Object.entries({ ...data, imageUrl: imageUrl ?? "" }).filter(([, v]) => v !== undefined),
+  );
   const ref_ = await addDoc(collection(db, COLLECTION), {
-    ...data,
-    imageUrl,
+    ...clean,
     createdAt: serverTimestamp(),
   });
   invalidate("events");
@@ -49,7 +52,13 @@ export async function updateEvent(
   data: Partial<Omit<Event, "id" | "createdAt">>,
   imageFile?: File
 ): Promise<void> {
-  let update = { ...data, updatedAt: serverTimestamp() };
+  // Remove `undefined` (Firestore rejeita) — exceto `endDate`, cuja ausência
+  // explícita significa "encerramento removido" e apaga o campo do documento.
+  const clean: Record<string, unknown> = Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined),
+  );
+  if ("endDate" in data && !data.endDate) clean.endDate = deleteField();
+  let update: Record<string, unknown> = { ...clean, updatedAt: serverTimestamp() };
   if (imageFile) {
     const imageUrl = await uploadEventImage(imageFile, id);
     update = { ...update, imageUrl };

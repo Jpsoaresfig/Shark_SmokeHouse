@@ -53,10 +53,12 @@ export async function markNotificationRead(id: string): Promise<void> {
 
 /** Marca várias notificações como lidas de uma vez (lote). */
 export async function markNotificationsRead(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
-  const batch = writeBatch(db);
-  ids.forEach((id) => batch.update(doc(db, COL, id), { read: true }));
-  await batch.commit();
+  // Um writeBatch aceita no máximo 500 operações — divide em lotes.
+  for (let i = 0; i < ids.length; i += 500) {
+    const batch = writeBatch(db);
+    ids.slice(i, i + 500).forEach((id) => batch.update(doc(db, COL, id), { read: true }));
+    await batch.commit();
+  }
 }
 
 /** Texto da notificação para cada status de pedido. */

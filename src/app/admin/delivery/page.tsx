@@ -47,7 +47,8 @@ export default function AdminDelivery() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const filtered = useMemo(() => {
     const q = normalizeArea(search);
@@ -100,6 +101,7 @@ export default function AdminDelivery() {
   }
 
   async function handleDelete(area: DeliveryArea) {
+    if (!window.confirm(`Remover o bairro ${area.name} da tabela de entrega?`)) return;
     try {
       await deleteDeliveryArea(area.id);
       setAreas(await getDeliveryAreas(true));

@@ -17,18 +17,67 @@ export const runtime = "nodejs";
  */
 function getBaseUrl(request: NextRequest): string {
   const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const hostIsLocal = !host || host.startsWith("localhost") || host.startsWith("127.");
+  const hostIsLocal = !host || /^(localhost|127\.)/.test(host);
 
   const envUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
   const envIsLocal = !!envUrl && /localhost|127\.|0\.0\.0\.0/.test(envUrl);
   if (envUrl && !(envIsLocal && !hostIsLocal)) return envUrl;
 
-  if (host) {
-    const proto =
-      request.headers.get("x-forwarded-proto") ?? (hostIsLocal ? "http" : "https");
+  // SEGURANÇA (host header injection): o link leva o oobCode — se o host viesse
+  // livre do header, um atacante pediria a redefinição da vítima com
+  // `Host: site-do-atacante` e capturaria o código (tomada de conta). Só
+  // aceitamos hosts conhecidos (env/Vercel) ou localhost.
+  if (host && (hostIsLocal || allowedHosts().has(host.toLowerCase()))) {
+    const proto = hostIsLocal ? "http" : "https";
     return `${proto}://${host}`;
   }
-  return "http://localhost:3000";
+  const fallback = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  return fallback ? `https://${fallback}` : "http://localhost:3000";
+}
+
+/** Hosts válidos para os links do e-mail (domínio configurado + domínios da Vercel). */
+function allowedHosts(): Set<string> {
+  const out = new Set<string>();
+  for (const raw of [process.env.NEXT_PUBLIC_APP_URL, process.env.NEXT_PUBLIC_SITE_URL]) {
+    try {
+      if (raw) out.add(new URL(raw).host.toLowerCase());
+    } catch {
+      // URL malformada na env — ignora
+    }
+  }
+  for (const h of [
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+  ]) {
+    if (h) out.add(h.toLowerCase());
+  }
+  return out;
+}
+
+/* Limite best-effort (memória da instância) contra abuso do envio de e-mails:
+   por IP e por e-mail. Não é global entre instâncias serverless, mas corta o
+   disparo em massa trivial (custo no Resend / spam na caixa da vítima). */
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const MAX_PER_IP = 5;
+const MAX_PER_EMAIL = 3;
+const hits = new Map<string, number[]>();
+
+function rateLimited(key: string, max: number): boolean {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length >= max) {
+    hits.set(key, recent);
+    return true;
+  }
+  recent.push(now);
+  hits.set(key, recent);
+  if (hits.size > 5000) {
+    for (const [k, v] of hits) {
+      if (v.every((t) => now - t >= RATE_WINDOW_MS)) hits.delete(k);
+    }
+  }
+  return false;
 }
 
 export async function POST(request: NextRequest) {
@@ -44,6 +93,21 @@ export async function POST(request: NextRequest) {
 
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return NextResponse.json({ error: "E-mail inválido." }, { status: 400 });
+  }
+
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "unknown";
+  if (rateLimited(`ip:${ip}`, MAX_PER_IP)) {
+    return NextResponse.json(
+      { error: "Muitas tentativas. Aguarde alguns minutos e tente de novo." },
+      { status: 429 },
+    );
+  }
+  // Por e-mail respondemos sucesso silencioso (não revela se a conta existe).
+  if (rateLimited(`email:${email}`, MAX_PER_EMAIL)) {
+    return NextResponse.json({ ok: true });
   }
 
   try {

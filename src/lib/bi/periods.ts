@@ -165,7 +165,10 @@ export function inRange(date: Date, range: BiRange): boolean {
 
 /** Rotula um intervalo para exibição ("01/03/2026 – 31/03/2026"). */
 export function formatBiRange(range: BiRange): string {
-  const f = (d: Date) =>
-    `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+  // No fuso da loja (os limites do intervalo são meia-noite/fim do dia da loja).
+  const f = (d: Date) => {
+    const p = storeParts(d);
+    return `${String(p.d).padStart(2, "0")}/${String(p.m).padStart(2, "0")}/${p.y}`;
+  };
   return `${f(range.start)} – ${f(range.end)}`;
 }

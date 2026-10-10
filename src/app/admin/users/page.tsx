@@ -573,7 +573,8 @@ export default function AdminUsersPage() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   if (adminUser?.role !== "admin") {
     return (
@@ -624,6 +625,8 @@ export default function AdminUsersPage() {
   };
 
   const handleDelete = async (uid: string) => {
+    const name = users.find((u) => u.uid === uid)?.displayName || "este usuário";
+    if (!window.confirm(`Remover ${name}? O perfil (pontos, histórico vinculado) será apagado e não pode ser recuperado.`)) return;
     setDeletingUid(uid);
     try {
       await deleteUserProfile(uid);

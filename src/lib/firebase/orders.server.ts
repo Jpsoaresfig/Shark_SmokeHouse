@@ -1,7 +1,10 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { isOpenNow, zonedClock, STORE_TIMEZONE } from "@/lib/businessHours";
-import type { Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent, BusinessHours } from "@/types";
+import { checkOrderPricing, type PricingCheck, type PricingProduct } from "@/lib/payments/pricing";
+import { DEFAULT_DELIVERY_AREAS } from "@/lib/firebase/delivery.defaults";
+import { toDate } from "@/lib/utils";
+import type { Coupon, Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent, BusinessHours } from "@/types";
 
 /**
  * Operações de pedido executadas no SERVIDOR via Firebase Admin SDK.
@@ -31,13 +34,50 @@ export async function findOrderIdByProviderRef(providerRef: string): Promise<str
   return q.empty ? null : q.docs[0].id;
 }
 
-/** Grava o id do pagamento do Mercado Pago no pedido (correlação para o webhook). */
-export async function setOrderProviderRef(orderId: string, providerRef: string): Promise<void> {
+/**
+ * Grava o id do pagamento do Mercado Pago no pedido (correlação para o webhook).
+ * `resetPending`: uma NOVA cobrança substituiu outra que expirou/foi recusada —
+ * volta o status financeiro para "pending" (senão o polling, que ignora estados
+ * resolvidos, nunca confirmaria o novo PIX).
+ */
+export async function setOrderProviderRef(
+  orderId: string,
+  providerRef: string,
+  opts: { resetPending?: boolean } = {},
+): Promise<void> {
+  const now = new Date().toISOString();
+  const event: PaymentEvent = {
+    status: "pending",
+    timestamp: now,
+    note: `Nova cobrança PIX gerada (${providerRef})`,
+  };
   await getAdminDb().collection(COL).doc(orderId).update({
     "payment.providerRef": providerRef,
     "payment.provider": "mercadopago",
+    ...(opts.resetPending
+      ? {
+          "payment.status": "pending",
+          "payment.history": FieldValue.arrayUnion(event),
+          paymentStatus: "pending",
+        }
+      : {}),
     updatedAt: FieldValue.serverTimestamp(),
   });
+}
+
+/**
+ * Transições financeiras permitidas a partir do servidor (webhook/polling).
+ * - "paid" só pode virar "refunded" (estorno/chargeback). Uma notificação tardia
+ *   de "cancelled"/"failed" (ex.: PIX antigo que expirou depois de o admin dar
+ *   baixa manual) NÃO pode desfazer um pagamento recebido.
+ * - "refunded" é final.
+ * - Qualquer estado em aberto pode ir para qualquer outro.
+ */
+export function canTransitionPayment(current: PaymentStatus | undefined, next: PaymentStatus): boolean {
+  if (current === next) return false;
+  if (current === "refunded") return false;
+  if (current === "paid") return next === "refunded";
+  return true;
 }
 
 /**
@@ -50,31 +90,37 @@ export async function applyPaymentStatusAdmin(
   status: PaymentStatus,
   opts: { note?: string; by?: string } = {},
 ): Promise<boolean> {
-  const ref = getAdminDb().collection(COL).doc(orderId);
-  const snap = await ref.get();
-  if (!snap.exists) return false;
+  const db = getAdminDb();
+  const ref = db.collection(COL).doc(orderId);
+  // Transação: webhook e polling chegam quase juntos — sem ela, os dois liam
+  // "pending", ambos aplicavam "paid" e o avanço/indicação rodavam em dobro.
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return false;
 
-  const current = (snap.data()?.payment?.status ?? snap.data()?.paymentStatus) as
-    | PaymentStatus
-    | undefined;
-  if (current === status) return false; // já aplicado — evita baixa duplicada
+    const current = (snap.data()?.payment?.status ?? snap.data()?.paymentStatus) as
+      | PaymentStatus
+      | undefined;
+    // já aplicado (evita baixa duplicada) ou transição proibida (ex.: paid → cancelled)
+    if (!canTransitionPayment(current, status)) return false;
 
-  const now = new Date().toISOString();
-  const event: PaymentEvent = {
-    status,
-    timestamp: now,
-    ...(opts.note ? { note: opts.note } : {}),
-    ...(opts.by ? { by: opts.by } : {}),
-  };
+    const now = new Date().toISOString();
+    const event: PaymentEvent = {
+      status,
+      timestamp: now,
+      ...(opts.note ? { note: opts.note } : {}),
+      ...(opts.by ? { by: opts.by } : {}),
+    };
 
-  await ref.update({
-    "payment.status": status,
-    "payment.history": FieldValue.arrayUnion(event),
-    ...(status === "paid" ? { "payment.paidAt": now } : {}),
-    paymentStatus: status, // espelho legado
-    updatedAt: FieldValue.serverTimestamp(),
+    tx.update(ref, {
+      "payment.status": status,
+      "payment.history": FieldValue.arrayUnion(event),
+      ...(status === "paid" ? { "payment.paidAt": now } : {}),
+      paymentStatus: status, // espelho legado
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
   });
-  return true;
 }
 
 /* Ordem do funil de entrega — usada para nunca retroceder o status.
@@ -107,26 +153,111 @@ export async function advanceOrderStatusAdmin(
   toStatus: OrderStatus,
   opts: { note?: string; by?: string } = {},
 ): Promise<boolean> {
-  const ref = getAdminDb().collection(COL).doc(orderId);
-  const snap = await ref.get();
-  if (!snap.exists) return false;
+  const db = getAdminDb();
+  const ref = db.collection(COL).doc(orderId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return false;
 
-  const current = (snap.data()?.status ?? "received") as OrderStatus;
-  if (current === "cancelled" || current === "delivered") return false;
-  if (STATUS_RANK[current] >= STATUS_RANK[toStatus]) return false; // já igual/à frente
+    const current = (snap.data()?.status ?? "received") as OrderStatus;
+    if (current === "cancelled" || current === "delivered") return false;
+    if ((STATUS_RANK[current] ?? 0) >= STATUS_RANK[toStatus]) return false; // já igual/à frente
 
-  const event: StatusEvent = {
-    status: toStatus,
-    timestamp: new Date().toISOString(),
-    ...(opts.note ? { note: opts.note } : {}),
-    ...(opts.by ? { updatedBy: opts.by } : {}),
-  };
-  await ref.update({
-    status: toStatus,
-    statusHistory: FieldValue.arrayUnion(event),
-    updatedAt: FieldValue.serverTimestamp(),
+    const event: StatusEvent = {
+      status: toStatus,
+      timestamp: new Date().toISOString(),
+      ...(opts.note ? { note: opts.note } : {}),
+      ...(opts.by ? { updatedBy: opts.by } : {}),
+    };
+    tx.update(ref, {
+      status: toStatus,
+      statusHistory: FieldValue.arrayUnion(event),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return true;
   });
-  return true;
+}
+
+/**
+ * Confere no SERVIDOR os valores de um pedido (preços do catálogo, frete do
+ * bairro, cupom resgatado) antes de cobrá-lo. O pedido é criado pelo navegador,
+ * então `total`/`items[].price` não são confiáveis por si só. Ver `checkOrderPricing`.
+ */
+export async function verifyOrderPricingAdmin(order: Order): Promise<PricingCheck> {
+  const db = getAdminDb();
+  const items = Array.isArray(order.items) ? order.items : [];
+  const ids = [...new Set(items.map((i) => String(i.productId ?? "")).filter(Boolean))];
+
+  const [productSnaps, areasSnap, settingsSnap, redemptionSnap] = await Promise.all([
+    ids.length ? db.getAll(...ids.map((id) => db.collection("products").doc(id))) : Promise.resolve([]),
+    db.collection("deliveryAreas").get(),
+    db.collection("settings").doc("site").get(),
+    db.collection("couponRedemptions").where("orderId", "==", order.id).limit(1).get(),
+  ]);
+
+  const products = new Map<string, PricingProduct>();
+  for (const snap of productSnaps) {
+    if (!snap.exists) continue;
+    const d = snap.data() ?? {};
+    products.set(snap.id, {
+      id: snap.id,
+      price: Number(d.price),
+      category: String(d.category ?? ""),
+      variations: Array.isArray(d.variations) ? d.variations : undefined,
+    });
+  }
+
+  // Coleção vazia = o checkout usa a tabela padrão (mesmo fallback do client).
+  const deliveryAreas = areasSnap.empty
+    ? DEFAULT_DELIVERY_AREAS.map((a) => ({ ...a, active: true }))
+    : areasSnap.docs.map((d) => {
+        const a = d.data();
+        return { name: String(a.name ?? ""), fee: Number(a.fee) || 0, active: a.active as boolean | undefined };
+      });
+
+  const cart = settingsSnap.data()?.cart as
+    | { freeShippingEnabled?: boolean; freeShippingThreshold?: number }
+    | undefined;
+  // Mesmos defaults de lib/firebase/settings (DEFAULT_SETTINGS.cart).
+  const freeShipping = {
+    enabled: cart?.freeShippingEnabled ?? true,
+    threshold: Number(cart?.freeShippingThreshold ?? 150) || 0,
+  };
+
+  let coupon: Coupon | null = null;
+  let priorCouponUses = 0;
+  let couponCpf = "";
+  const redemption = redemptionSnap.docs[0]?.data();
+  if (redemption?.couponId) {
+    const cSnap = await db.collection("coupons").doc(String(redemption.couponId)).get();
+    if (cSnap.exists) coupon = { ...(cSnap.data() as Coupon), id: cSnap.id };
+    couponCpf = String(redemption.cpf ?? "");
+    if (coupon && coupon.usageLimitPerCpf != null) {
+      // Usos do mesmo cupom pelo mesmo CPF OU pela mesma conta em OUTROS pedidos
+      // (pega resgates duplicados em corrida e troca de CPF).
+      const couponId = coupon.id;
+      const [byCpf, byUser] = await Promise.all([
+        couponCpf
+          ? db.collection("couponRedemptions").where("couponId", "==", couponId).where("cpf", "==", couponCpf).get()
+          : Promise.resolve(null),
+        db.collection("couponRedemptions").where("couponId", "==", couponId).where("userId", "==", order.customerId).get(),
+      ]);
+      const others = (snap: { docs: { data(): { orderId?: string } }[] } | null) =>
+        snap ? snap.docs.filter((d) => d.data().orderId !== order.id).length : 0;
+      priorCouponUses = Math.max(others(byCpf), others(byUser));
+    }
+  }
+
+  return checkOrderPricing(order, {
+    products,
+    deliveryAreas,
+    freeShipping,
+    coupon,
+    priorCouponUses,
+    couponCpf,
+    // Validade do cupom na data do pedido (o cliente pode pagar depois).
+    now: order.createdAt ? toDate(order.createdAt) : undefined,
+  });
 }
 
 /**

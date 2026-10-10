@@ -8,6 +8,7 @@ import {
   Anchor, Waves, Star, Package, Flame,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { parseHourLines, useSiteVitrine, useStoreContact } from "@/stores/siteSettingsStore";
 
 /* ── Animation helpers ───────────────────────────────────── */
 function FadeIn({
@@ -76,6 +77,10 @@ const hashtags = [
 
 /* ── Page ────────────────────────────────────────────────── */
 export default function AboutPage() {
+  // Telefone, endereço e horários vêm de Site & Vitrine (editáveis no admin).
+  const vitrine = useSiteVitrine();
+  const contact = useStoreContact();
+  const hours = parseHourLines(vitrine.hours);
   return (
     <div className="min-h-screen overflow-x-hidden">
 
@@ -150,7 +155,7 @@ export default function AboutPage() {
           >
             <Button variant="premium" size="lg" asChild>
               <a
-                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                href={contact.waLink("Olá, vim pelo site da Shark Smokehouse!")}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -340,9 +345,7 @@ export default function AboutPage() {
                       rel="noopener noreferrer"
                       className="block text-sm text-[var(--color-text-secondary)] mt-1 leading-relaxed hover:text-[var(--color-neon-blue)] transition-colors"
                     >
-                      Rua Comerciante Alfredo Ferreira da Rocha, 742<br />
-                      Mangabeira — João Pessoa, PB<br />
-                      CEP: 58055-540
+                      {vitrine.address}
                     </a>
                   </div>
                 </div>
@@ -350,16 +353,11 @@ export default function AboutPage() {
                 <div className="h-px bg-[var(--color-border)] mb-5" />
 
                 <div className="space-y-3">
-                  {[
-                    { day: "Segunda-feira", hours: "Fechado", closed: true },
-                    { day: "Terça a Sexta", hours: "13h às 21h", closed: false },
-                    { day: "Sábado e Domingo", hours: "14h às 21h", closed: false },
-                    { day: "Lounge (Ter. a Dom.)", hours: "20h às 22h", closed: false },
-                  ].map((item) => (
-                    <div key={item.day} className="flex items-center justify-between text-sm">
+                  {hours.map((item, i) => (
+                    <div key={`${item.day}-${i}`} className="flex items-center justify-between gap-3 text-sm">
                       <span className="text-[var(--color-text-muted)]">{item.day}</span>
                       <span className={item.closed ? "text-[var(--color-error)] font-medium" : "text-[var(--color-text-primary)] font-medium"}>
-                        {item.hours}
+                        {item.value}
                       </span>
                     </div>
                   ))}
@@ -368,7 +366,7 @@ export default function AboutPage() {
 
               <Button variant="premium" size="lg" className="w-full" asChild>
                 <a
-                  href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+vim+pelo+site+da+Shark+Smokehouse!"
+                  href={contact.waLink("Olá, vim pelo site da Shark Smokehouse!")}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -439,7 +437,7 @@ export default function AboutPage() {
                 Seguir no Instagram
               </a>
               <a
-                href="https://wa.me/5583999020606?text=Ol%C3%A1%2C+quero+saber+mais+sobre+a+Shark+Smokehouse!"
+                href={contact.waLink("Olá, quero saber mais sobre a Shark Smokehouse!")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[var(--color-success)]/30 bg-emerald-500/10 text-sm font-medium text-emerald-400 hover:bg-emerald-500/20 hover:border-[var(--color-success)] transition-all"

@@ -8,11 +8,14 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 }
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, label, error, icon, ...props }, ref) => {
+  ({ className, type, label, error, icon, id, ...props }, ref) => {
+    // Associa <label> ↔ <input> (leitores de tela e toque no rótulo focam o campo).
+    const autoId = React.useId();
+    const inputId = id ?? autoId;
     return (
       <div className="flex flex-col gap-1.5">
         {label && (
-          <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+          <label htmlFor={inputId} className="text-sm font-medium text-[var(--color-text-secondary)]">
             {label}
           </label>
         )}
@@ -23,7 +26,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             </span>
           )}
           <input
+            id={inputId}
             type={type}
+            aria-invalid={error ? true : undefined}
             className={cn(
               "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)]",
               "px-3 py-3 text-sm text-[var(--color-text-primary)]",

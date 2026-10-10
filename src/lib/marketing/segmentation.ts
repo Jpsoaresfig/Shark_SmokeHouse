@@ -73,7 +73,8 @@ export function pointsExpiringInDays(
 }
 
 export interface ContactInput {
-  users: UserProfile[];
+  /** `marketingOptOut` (LGPD) é lido do perfil quando presente. */
+  users: (UserProfile & { marketingOptOut?: boolean })[];
   orders: Order[];
   sales: Sale[];
   /** Opcional — produtos para resolver categoria/nome de itens de pedidos. */
@@ -227,6 +228,7 @@ export function buildContacts(
       ...(city ? { city } : {}),
       ...(neighborhood ? { neighborhood } : {}),
       ...(u.referredBy ? { referredBy: u.referredBy } : {}),
+      ...(u.marketingOptOut === true ? { marketingOptOut: true } : {}),
       createdAt: createdAt ?? "",
     });
   }

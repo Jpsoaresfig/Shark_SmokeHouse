@@ -27,6 +27,12 @@ describe("isCouponExpired", () => {
     expect(isCouponExpired("2026-06-12", now)).toBe(true);
     expect(isCouponExpired(undefined, now)).toBe(false);
   });
+  it("usa o fuso da loja (UTC-3), não o relógio UTC do servidor", () => {
+    // 01:30 UTC do dia 14 = 22:30 do dia 13 em João Pessoa → ainda vale.
+    expect(isCouponExpired("2026-06-13", new Date("2026-06-14T01:30:00Z"))).toBe(false);
+    // 03:30 UTC do dia 14 = 00:30 do dia 14 em João Pessoa → expirou.
+    expect(isCouponExpired("2026-06-13", new Date("2026-06-14T03:30:00Z"))).toBe(true);
+  });
 });
 
 describe("evaluateCoupon — desconto", () => {

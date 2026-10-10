@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { LegalDoc, P, UL, B, type LegalSection } from "@/components/legal/LegalDoc";
 
 export const metadata: Metadata = {
-  title: "Política de Privacidade — Shark SmokeHouse",
+  title: "Política de Privacidade", // o template do layout já acrescenta "| Shark SmokeHouse"
   description:
     "Como a Shark SmokeHouse coleta, usa, compartilha e protege seus dados pessoais, em conformidade com a LGPD (Lei nº 13.709/2018).",
 };

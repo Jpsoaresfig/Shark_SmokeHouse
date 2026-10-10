@@ -32,7 +32,11 @@ export function PromoPopup() {
     if (!active) return;
     // Já fechou esta promoção nesta sessão?
     const key = dismissKey(promoPopup.title, promoPopup.message);
-    if (typeof window !== "undefined" && sessionStorage.getItem(key)) return;
+    try {
+      if (sessionStorage.getItem(key)) return;
+    } catch {
+      // Storage indisponível: segue mostrando.
+    }
     // Pequeno atraso para não competir com o carregamento da página / age gate.
     const t = setTimeout(() => setOpen(true), 1500);
     return () => clearTimeout(t);
@@ -40,10 +44,25 @@ export function PromoPopup() {
 
   function dismiss() {
     setOpen(false);
-    if (typeof window !== "undefined") {
+    try {
       sessionStorage.setItem(dismissKey(promoPopup.title, promoPopup.message), "1");
+    } catch {
+      // Storage indisponível: só fecha nesta visita.
     }
   }
+
+  /* Esc fecha o popup (e conta como dispensado nesta sessão). */
+  useEffect(() => {
+    if (!open) return;
+    const key = dismissKey(promoPopup.title, promoPopup.message);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      try { sessionStorage.setItem(key, "1"); } catch { /* storage indisponível */ }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, promoPopup.title, promoPopup.message]);
 
   if (!active) return null;
 
@@ -79,8 +98,9 @@ export function PromoPopup() {
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", damping: 22, stiffness: 240 }}
             role="dialog"
+            aria-modal="true"
             aria-label="Promoção"
-            className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)]"
+            className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)]"
           >
             <button
               type="button"

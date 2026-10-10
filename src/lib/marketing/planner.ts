@@ -19,7 +19,8 @@ import type {
   MarketingContact,
   MarketingSettings,
   MarketingSegment,
-} from "@/types/marketing";import { resolveAudience } from "./segmentation";
+} from "@/types/marketing";
+import { resolveAudience } from "./segmentation";
 import { AUTOMATION_PRIORITY, shouldSend } from "./priorities";
 import { buildMessageVars, renderMessage } from "./placeholders";
 import {
@@ -52,6 +53,9 @@ export interface PlannerContext {
   /** Último envio automático por cliente (ms epoch) — para o intervalo
    *  "máx. 1 campanha automática a cada N dias" (anti-spam). Opcional. */
   lastAutoAtByUser?: Map<string, number>;
+  /** Último envio (ms epoch) por "auto:{automationId}:{uid}" — usado para o
+   *  aniversário sair 1x por ano. Opcional. */
+  lastSentByAutoUser?: Map<string, number>;
   /** Intervalo mínimo entre envios automáticos, em dias. 0/ausente = sem regra. */
   minDaysBetweenAuto?: number;
   maxPerDay: number;
@@ -75,6 +79,16 @@ function autoIntervalOk(ctx: PlannerContext, uid: string): boolean {
 function skippedAutoInterval(ctx: PlannerContext, uid: string): boolean {
   return !autoIntervalOk(ctx, uid);
 }
+
+/** Motivo registrado quando o cliente recusou marketing (LGPD). */
+export const OPT_OUT_REASON = "opt-out (LGPD)";
+
+/**
+ * Aniversário: 1 envio por aniversário. Com `birthdayDaysBefore` = N o cliente
+ * fica elegível por N+1 dias seguidos e a dedup diária deixava a mesma
+ * mensagem (e cupom) sair todos os dias da janela.
+ */
+const BIRTHDAY_RESEND_GUARD_DAYS = 300;
 
 /* ── Campanhas agendadas ───────────────────────────────────── */
 export function planCampaign(opts: {
@@ -104,6 +118,11 @@ export function planCampaign(opts: {
   for (let i = 0; i < limit; i++) {
     const contact = audience[i];
     const dedupKey = campaignExecutionKey(campaign.id, contact.uid);
+
+    if (contact.marketingOptOut) {
+      skipped.push({ userId: contact.uid, reason: OPT_OUT_REASON });
+      continue;
+    }
 
     if (ctx.existing.has(dedupKey)) {
       skipped.push({ userId: contact.uid, reason: "dedup" });
@@ -190,8 +209,12 @@ function candidatesFor(
       return contacts.filter((c) => c.totalSpent >= settings.bigSpenderThreshold);
     case "points_expiring": {
       const days = cfg.pointsExpireInDays ?? 7;
+      // Só avisa quem ainda TEM saldo (quem já gastou tudo não tem o que perder).
       return contacts.filter(
-        (c) => c.pointsExpiringInDays != null && c.pointsExpiringInDays <= days,
+        (c) =>
+          c.loyaltyPoints > 0 &&
+          c.pointsExpiringInDays != null &&
+          c.pointsExpiringInDays <= days,
       );
     }
     case "promo_product": {
@@ -243,6 +266,8 @@ export function planAutomations(opts: {
   settings: MarketingSettings;
   ctx: PlannerContext;
   now: Date;
+  /** Opcional — catálogo para o {{produto}} mostrar o NOME (não o id). */
+  products?: { id: string; name?: string }[];
 }): {
   planned: PlannedMessage[];
   skipped: { userId: string; reason: string }[];
@@ -251,7 +276,9 @@ export function planAutomations(opts: {
    *  diário para automação sem destinatários). */
   couponsNeeded: Set<string>;
 } {
-  const { automations, contacts, sessions, settings, ctx, now } = opts;
+  const { automations, contacts, sessions, settings, ctx, now, products } = opts;
+  const productName = (id?: string): string | undefined =>
+    id ? products?.find((p) => p.id === id)?.name?.trim() || undefined : undefined;
   const planned: PlannedMessage[] = [];
   const skipped: { userId: string; reason: string }[] = [];
   const couponsNeeded = new Set<string>();
@@ -274,6 +301,11 @@ export function planAutomations(opts: {
     for (let i = 0; i < limit; i++) {
       const contact = candidates[i];
 
+      if (contact.marketingOptOut) {
+        skipped.push({ userId: contact.uid, reason: OPT_OUT_REASON });
+        continue;
+      }
+
       if (plannedToday.has(contact.uid)) {
         skipped.push({ userId: contact.uid, reason: "já recebeu outra automação hoje" });
         continue;
@@ -290,6 +322,14 @@ export function planAutomations(opts: {
       if (onceEver && ctx.sentAutoUser.has(automationUserKey(automation.id, contact.uid))) {
         skipped.push({ userId: contact.uid, reason: "dedup (envio único)" });
         continue;
+      }
+
+      if (automation.event === "birthday") {
+        const last = ctx.lastSentByAutoUser?.get(automationUserKey(automation.id, contact.uid));
+        if (last != null && now.getTime() - last < BIRTHDAY_RESEND_GUARD_DAYS * DAY_MS) {
+          skipped.push({ userId: contact.uid, reason: "dedup (aniversário já enviado)" });
+          continue;
+        }
       }
 
       if (skippedAutoInterval(ctx, contact.uid)) {
@@ -315,7 +355,11 @@ export function planAutomations(opts: {
         couponValue: automation.coupon?.value,
         couponType: automation.coupon?.type,
         link: automation.link,
-        product: automation.config?.productId,
+        // Nome do produto; sem catálogo/produto, um texto neutro em vez do id
+        // cru (antes a mensagem saía "selecionamos aB3xY9… com desconto").
+        product:
+          productName(automation.config?.productId) ??
+          (automation.event === "promo_product" ? "produtos selecionados" : undefined),
         diasSemComprar: contact.daysSinceActivity,
       });
       planned.push({
@@ -335,6 +379,7 @@ export function planAutomations(opts: {
       ctx.recentByUser.set(contact.uid, (ctx.recentByUser.get(contact.uid) ?? 0) + 1);
       plannedToday.add(contact.uid);
       if (onceEver) ctx.sentAutoUser.add(automationUserKey(automation.id, contact.uid));
+      ctx.lastSentByAutoUser?.set(automationUserKey(automation.id, contact.uid), now.getTime());
     }
   }
 

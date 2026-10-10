@@ -302,6 +302,9 @@ export interface MarketingContact {
   /** Bairro da entrega (último pedido/endereço padrão). */
   neighborhood?: string;
   referredBy?: string;
+  /** LGPD: o cliente recusou comunicações de marketing (opt-out). Nenhuma
+   *  campanha/automação/WhatsApp deve ser enviada a ele. */
+  marketingOptOut?: boolean;
   /** ISO — data do cadastro. */
   createdAt: string;
 }

@@ -2,7 +2,7 @@ import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   query, where, serverTimestamp, addDoc, Timestamp,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { normalizeCouponCode } from "@/lib/coupons";
 import type { Coupon } from "@/types";
@@ -82,11 +82,29 @@ export async function deleteCoupon(id: string): Promise<void> {
   invalidate(COL);
 }
 
-/** Quantas vezes um CPF já usou um cupom (limite por CPF). */
+/** Quantas vezes um CPF já usou um cupom (limite por CPF). A contagem roda no
+ *  servidor (/api/coupons/usage): os resgates guardam CPFs de outros clientes,
+ *  então a coleção não é legível pelo cliente. */
 export async function countCouponUsesForCpf(couponId: string, cpf: string): Promise<number> {
   if (!cpf) return 0;
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Faça login para usar cupons.");
+  const res = await fetch("/api/coupons/usage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ couponId, cpf }),
+  });
+  if (!res.ok) throw new Error("Não foi possível validar o cupom. Tente novamente.");
+  const data = (await res.json()) as { count?: number };
+  return typeof data.count === "number" ? data.count : 0;
+}
+
+/** Quantas vezes uma CONTA já usou um cupom — impede burlar o limite por CPF
+ *  digitando outro CPF no checkout. */
+export async function countCouponUsesForUser(couponId: string, userId: string): Promise<number> {
+  if (!userId) return 0;
   const snap = await getDocs(
-    query(collection(db, REDEMPTIONS), where("couponId", "==", couponId), where("cpf", "==", cpf)),
+    query(collection(db, REDEMPTIONS), where("couponId", "==", couponId), where("userId", "==", userId)),
   );
   return snap.size;
 }

@@ -189,7 +189,10 @@ function OrderCard({ order, index, reviewedRating, onReviewed, onPaid }: {
   const needsMercadoPago =
     pay.method === "mercadopago" &&
     pay.status !== "paid" &&
-    order.status !== "cancelled";
+    // estornado = encerrado (não pode gerar um PIX novo para o mesmo pedido)
+    pay.status !== "refunded" &&
+    order.status !== "cancelled" &&
+    order.status !== "delivered";
 
   return (
     <motion.div

@@ -9,8 +9,7 @@ import {
   confirmPasswordReset,
   type User,
 } from "firebase/auth";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import { createUserProfile, getUserProfile, ensureReferralCode } from "./users";
 import { recordReferral } from "./loyalty";
 import type { UserProfile } from "@/types";
@@ -58,10 +57,10 @@ export async function loginWithEmail(
       email: user.email!,
       displayName: user.displayName ?? (email === ADMIN_EMAIL ? "Admin" : "Usuário"),
     });
-  } else if (email === ADMIN_EMAIL && profile.role !== "admin") {
-    await updateDoc(doc(db, "users", user.uid), { role: "admin", updatedAt: serverTimestamp() });
-    profile = { ...profile, role: "admin" };
   }
+  // Promoção a admin NÃO é feita aqui: as regras do Firestore proíbem o dono de
+  // alterar a própria role (a escrita falharia e travaria o login). A role de
+  // admin é definida na criação do perfil ou por outro admin no painel.
   profile = await ensureReferralCode(profile);
   setSessionCookie(user.uid);
   return profile;

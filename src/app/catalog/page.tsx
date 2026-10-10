@@ -22,8 +22,9 @@ function ProductCard({ product, categoryLabel, added, onSelect, onAdd }: {
   onSelect: () => void;
   onAdd: (e: React.MouseEvent) => void;
 }) {
-  const discount = product.compareAtPrice
-    ? Math.round((1 - product.price / product.compareAtPrice) * 100)
+  const hasCompare = !!product.compareAtPrice && product.compareAtPrice > product.price;
+  const discount = hasCompare
+    ? Math.round((1 - product.price / product.compareAtPrice!) * 100)
     : null;
 
   return (
@@ -53,7 +54,7 @@ function ProductCard({ product, categoryLabel, added, onSelect, onAdd }: {
         )}
 
         <div className="absolute top-2 left-2 flex flex-col gap-1">
-          {discount && <Badge variant="orange" className="text-[10px] px-1.5 py-0.5">-{discount}%</Badge>}
+          {discount != null && discount > 0 && <Badge variant="orange" className="text-[10px] px-1.5 py-0.5">-{discount}%</Badge>}
           {product.storeHighlight && <Badge variant="premium" className="text-[10px] px-1.5 py-0.5">Destaque</Badge>}
           {product.doublePoints && <Badge variant="warning" className="text-[10px] px-1.5 py-0.5">Pontos 2×</Badge>}
           {product.stock === 0 && <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">Esgotado</Badge>}
@@ -88,9 +89,9 @@ function ProductCard({ product, categoryLabel, added, onSelect, onAdd }: {
           <span className="text-sm sm:text-base font-bold text-[var(--color-text-primary)]">
             {formatCurrency(product.price)}
           </span>
-          {product.compareAtPrice && (
+          {hasCompare && (
             <span className="text-[10px] sm:text-xs text-[var(--color-text-muted)] line-through">
-              {formatCurrency(product.compareAtPrice)}
+              {formatCurrency(product.compareAtPrice!)}
             </span>
           )}
         </div>
@@ -136,6 +137,7 @@ function CatalogContent() {
           if (found) setSelectedProduct(found);
         }
       })
+      .catch(() => {})
       .finally(() => setLoading(false));
     getCategories().then(setCats).catch(() => {});
   }, []);
@@ -185,7 +187,7 @@ function CatalogContent() {
 
   return (
     <>
-    <div className="min-h-screen pt-20 sm:pt-24 pb-20 px-3 sm:px-6 lg:px-8">
+    <div className="min-h-screen pt-24 pb-20 px-3 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto">
 
         {/* Header */}
@@ -207,6 +209,8 @@ function CatalogContent() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            type="search"
+            aria-label="Buscar produtos"
             placeholder="Buscar produtos..."
             className="w-full h-11 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] pl-10 pr-10 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-colors"
           />
@@ -350,7 +354,7 @@ function CatalogContent() {
 export default function CatalogPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen pt-20 sm:pt-24 pb-20 px-3 sm:px-6 lg:px-8">
+      <div className="min-h-screen pt-24 pb-20 px-3 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <div className={gridCls}>
             {Array.from({ length: 8 }).map((_, i) => (

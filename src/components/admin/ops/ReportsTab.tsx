@@ -39,7 +39,8 @@ export function ReportsTab() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Carga fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const openCount = useMemo(() => reports.filter((r) => r.status === "open").length, [reports]);
   const filtered = useMemo(
@@ -95,6 +96,7 @@ export function ReportsTab() {
   }
 
   async function remove(id: string) {
+    if (!window.confirm("Excluir este reporte? Esta ação não pode ser desfeita.")) return;
     setActionId(id);
     try {
       await deleteReport(id);

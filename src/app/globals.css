@@ -50,6 +50,12 @@
   --shadow-elevated: 0 8px 40px rgba(0, 0, 0, 0.8);
 }
 
+/* Altura real da MobileNav fixa (linha 1px + bordas 2px + 4rem + safe-area/0.5rem).
+   Usada para reservar espaço no fim da página e posicionar flutuantes acima dela. */
+:root {
+  --mobile-nav-h: calc(4rem + 3px + max(env(safe-area-inset-bottom), 0.5rem));
+}
+
 /* ── Base reset ─────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -275,6 +281,8 @@ a, button, [role="button"], input, textarea, select, label {
 }
 
 /* ── Age gate overlay ───────────────────────────────────── */
+/* Já confirmado nesta sessão (script inline no layout): não mostra o gate do SSR. */
+html[data-age-ok] #age-gate { display: none; }
 #age-gate {
   position: fixed; inset: 0; z-index: 9999;
   background: rgba(4, 4, 10, 0.97);

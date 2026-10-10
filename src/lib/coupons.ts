@@ -10,15 +10,25 @@
  */
 
 import type { Coupon } from "@/types";
+import { STORE_TIMEZONE } from "@/lib/businessHours";
 
 /** Normaliza um código digitado/colado: maiúsculas, sem espaços. */
 export function normalizeCouponCode(raw: string): string {
   return (raw ?? "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
-/** Data local no formato "YYYY-MM-DD" (para comparar expiração de forma inclusiva). */
+/** Data "YYYY-MM-DD" NO FUSO DA LOJA (para comparar expiração de forma inclusiva).
+ *  Usar o relógio local do dispositivo/servidor (UTC na Vercel) fazia o cupom
+ *  expirar às 21h do último dia em João Pessoa, ou valer um dia a mais em
+ *  aparelhos com fuso diferente. */
 function toYMD(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // en-CA formata como YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: STORE_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
 }
 
 function brl(value: number): string {

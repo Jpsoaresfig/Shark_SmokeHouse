@@ -12,6 +12,7 @@ import { DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
 import { useSiteSettingsStore, useSiteSections, useSiteLounge } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { formatCurrency } from "@/lib/utils";
+import { storeTodayISO } from "@/lib/booking";
 
 const features = [
   { icon: "🎵", title: "Música ao Vivo", desc: "Sex & Sáb das 20h às 01h" },
@@ -32,26 +33,27 @@ export default function LoungePage() {
   const flavors = loungeSettings?.flavors ?? [];
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedTime, setSelectedTime] = useState("");
-  const [takenSlots, setTakenSlots] = useState<string[]>([]);
+  const [selectedTimeRaw, setSelectedTime] = useState("");
+  // Horários ocupados, sempre atrelados à data consultada: trocar a data já
+  // "zera" a lista sem precisar de setState dentro de efeito.
+  const [taken, setTaken] = useState<{ date: string; slots: string[] }>({ date: "", slots: [] });
   const [form, setForm] = useState({
     name: "", whatsapp: "", email: "", date: "", guests: "1", notes: "",
   });
+  const takenSlots = form.date && taken.date === form.date ? taken.slots : [];
+  // Se o horário selecionado ficou ocupado (ex.: outra reserva), trata como não selecionado.
+  const selectedTime = selectedTimeRaw && !takenSlots.includes(selectedTimeRaw) ? selectedTimeRaw : "";
 
   // Ao escolher a data, busca os horários já reservados para desabilitá-los.
   useEffect(() => {
-    if (!form.date) { setTakenSlots([]); return; }
+    if (!form.date) return;
+    const date = form.date;
     let active = true;
-    getTakenSlots(form.date)
-      .then((taken) => { if (active) setTakenSlots(taken); })
-      .catch(() => { if (active) setTakenSlots([]); });
+    getTakenSlots(date)
+      .then((slots) => { if (active) setTaken({ date, slots }); })
+      .catch(() => { if (active) setTaken({ date, slots: [] }); });
     return () => { active = false; };
   }, [form.date]);
-
-  // Se o horário selecionado ficou ocupado (ex.: outra reserva), limpa a seleção.
-  useEffect(() => {
-    if (selectedTime && takenSlots.includes(selectedTime)) setSelectedTime("");
-  }, [takenSlots, selectedTime]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +75,8 @@ export default function LoungePage() {
       if (err instanceof Error && err.message === SLOT_TAKEN) {
         toast.error("Esse horário acabou de ser reservado. Escolha outro, por favor.");
         setSelectedTime("");
-        getTakenSlots(form.date).then(setTakenSlots).catch(() => {});
+        const date = form.date;
+        getTakenSlots(date).then((slots) => setTaken({ date, slots })).catch(() => {});
       } else if (err instanceof Error && err.message && !err.message.includes("Firebase")) {
         // Mensagens de validação (data passada, campos obrigatórios) já vêm prontas.
         toast.error(err.message);
@@ -229,7 +232,7 @@ export default function LoungePage() {
             transition={{ delay: 0.2 }}
             className="lg:col-span-3"
           >
-            <div className="glass rounded-2xl border border-[var(--color-border)] p-8">
+            <div className="glass rounded-2xl border border-[var(--color-border)] p-5 sm:p-8">
               <h2 className="text-xl font-bold text-[var(--color-text-primary)] mb-6">Fazer Reserva</h2>
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="grid sm:grid-cols-2 gap-4">
@@ -244,12 +247,13 @@ export default function LoungePage() {
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Input label="Data" type="date" required
                     value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
-                    min={new Date().toISOString().split("T")[0]} />
+                    min={storeTodayISO()} />
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+                    <label htmlFor="lounge-guests" className="text-sm font-medium text-[var(--color-text-secondary)]">
                       Número de pessoas
                     </label>
                     <select
+                      id="lounge-guests"
                       value={form.guests}
                       onChange={(e) => setForm({ ...form, guests: e.target.value })}
                       className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all"
@@ -263,10 +267,10 @@ export default function LoungePage() {
 
                 {/* Time slots */}
                 <div>
-                  <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">
+                  <p id="lounge-time-label" className="text-sm font-medium text-[var(--color-text-secondary)] mb-2 block">
                     Horário
-                  </label>
-                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                  </p>
+                  <div role="group" aria-labelledby="lounge-time-label" className="grid grid-cols-4 sm:grid-cols-5 gap-2">
                     {timeSlots.map((t) => {
                       const taken = takenSlots.includes(t);
                       return (
@@ -276,6 +280,7 @@ export default function LoungePage() {
                           disabled={taken}
                           onClick={() => setSelectedTime(t)}
                           title={taken ? "Horário já reservado" : undefined}
+                          aria-pressed={selectedTime === t}
                           className={`h-11 rounded-lg text-sm font-medium transition-all ${
                             taken
                               ? "border border-[var(--color-border)] text-[var(--color-text-muted)] bg-[var(--color-bg-overlay)] line-through opacity-50 cursor-not-allowed"
@@ -297,10 +302,11 @@ export default function LoungePage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-[var(--color-text-secondary)]">
+                  <label htmlFor="lounge-notes" className="text-sm font-medium text-[var(--color-text-secondary)]">
                     Observações (opcional)
                   </label>
                   <textarea
+                    id="lounge-notes"
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                     placeholder="Aniversário, preferências de essência, etc."

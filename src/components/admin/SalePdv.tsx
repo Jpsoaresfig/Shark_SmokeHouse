@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Minus, Trash2, Search, ShoppingCart,
@@ -20,9 +20,9 @@ import { MiniCalculator } from "@/components/admin/MiniCalculator";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
-import { getSales, createSale, exportSalesCSV, exportProductSalesCSV, aggregateProductSales, markSaleDelivered, registerSalePayment, cancelSale, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
+import { getSales, createSale, SaleStockError, exportSalesCSV, exportProductSalesCSV, aggregateProductSales, markSaleDelivered, registerSalePayment, cancelSale, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleStatus, saleReceivedAmount, saleOutstanding, saleIsRevenue, saleCommission as saleCommissionOf } from "@/lib/sales/helpers";
+import { saleStatus, saleReceivedAmount, saleOutstanding, saleIsRevenue, saleCommission as saleCommissionOf, saleDueDate, parseMoneyInput as parseMoney, CENTS_EPSILON } from "@/lib/sales/helpers";
 import { resetSalesData } from "@/lib/firebase/maintenance";
 import { getAllUsers, createWalkInCustomer } from "@/lib/firebase/users";
 import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
@@ -58,10 +58,12 @@ const CHANNEL_OPTIONS: { value: SaleChannel; label: string; desc: string; icon: 
   { value: "online",   label: "Online",  desc: "Pedido feito pela internet",    icon: Globe },
 ];
 
-/** Converte um valor digitado em reais ("12,50" ou "12.50") para número. */
-function parseMoney(v: string): number {
-  const n = parseFloat(v.replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? n : 0;
+/** "YYYY-MM-DD" (input date) → Date à meia-noite LOCAL. `new Date("YYYY-MM-DD")`
+ *  é meia-noite UTC (21h da véspera em UTC−3), o que deslocava o filtro do
+ *  histórico em um dia (incluía a véspera e excluía o último dia). */
+function localDateFromInput(v: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : undefined;
 }
 
 const inputCls =
@@ -187,8 +189,8 @@ export default function SalePdv({
     try {
       const [all, prods] = await Promise.all([
         getSales(
-          start ? new Date(start) : undefined,
-          end ? new Date(end) : undefined,
+          start ? localDateFromInput(start) : undefined,
+          end ? localDateFromInput(end) : undefined,
           force,
         ),
         getProducts(force),
@@ -210,16 +212,18 @@ export default function SalePdv({
     }
   }, []);
 
-  useEffect(() => { loadProducts(); loadUsers(); }, [loadProducts, loadUsers]);
+  // Cargas disparadas fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (tab === "history") loadHistory(startDate, endDate);
+    void Promise.resolve().then(() => { void loadProducts(); void loadUsers(); });
+  }, [loadProducts, loadUsers]);
+  useEffect(() => {
+    if (tab === "history") void Promise.resolve().then(() => loadHistory(startDate, endDate));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Vendedor responsável começa como o próprio usuário logado.
-  useEffect(() => {
-    if (user?.uid && !sellerId) setSellerId(user.uid);
-  }, [user, sellerId]);
+  // Vendedor responsável: começa como o próprio usuário logado (derivado, sem
+  // efeito copiando `user.uid` para o estado).
+  const effectiveSellerId = sellerId || user?.uid || "";
 
   /* ── Listas derivadas de usuários ── */
   const sellers = useMemo(
@@ -319,11 +323,16 @@ export default function SalePdv({
   // Desconto manual (≠ cupom): % incide sobre os produtos; R$ é abatido direto.
   // Mantido como expressão inline (React Compiler — sem helper importado aqui).
   const manualDiscRaw = parseMoney(manualDiscInput);
-  const manualDiscount = manualDiscType === "percent"
-    ? Math.round(total * Math.min(100, manualDiscRaw) / 100 * 100) / 100
-    : Math.min(manualDiscRaw, Math.max(0, total - discount));
+  // Cupom limitado ao subtotal (nunca abate frete/taxa nem deixa negativo).
+  const couponDiscount = Math.min(discount, total);
+  const manualDiscount = Math.min(
+    manualDiscType === "percent"
+      ? Math.round(total * Math.min(100, manualDiscRaw) / 100 * 100) / 100
+      : manualDiscRaw,
+    Math.max(0, total - couponDiscount),
+  );
   // Produtos líquidos (após cupom e desconto manual) + frete = base da taxa de cartão.
-  const netProducts = Math.max(0, total - discount - manualDiscount);
+  const netProducts = Math.max(0, total - couponDiscount - manualDiscount);
   const cardBase = netProducts + deliveryFeeNum;
   // Valores monetários centrais como expressões inline (React Compiler) — os
   // helpers importados ficam só nas opções do <select> de parcelas.
@@ -366,6 +375,16 @@ export default function SalePdv({
     return product.stock;
   }
 
+  /** O desconto do cupom é calculado sobre o carrinho do momento em que foi
+   *  aplicado — se o carrinho muda, o valor fica errado (ex.: % sobre itens que
+   *  saíram). Remove o cupom e pede para aplicar de novo. */
+  function invalidateCoupon() {
+    if (!appliedCoupon) return;
+    setAppliedCoupon(null);
+    setDiscount(0);
+    setCouponError("Carrinho alterado — aplique o cupom novamente.");
+  }
+
   function addItem(product: Product, variation?: ProductVariation) {
     const vId = variation?.id ?? "";
     const stock = variation ? variation.stock : product.stock;
@@ -375,6 +394,7 @@ export default function SalePdv({
       toast.error(`Estoque insuficiente para "${label}" (disponível: ${stock} un).`);
       return;
     }
+    invalidateCoupon();
     setItems(prev => {
       const existing = prev.find(i => i.productId === product.id && (i.variationId ?? "") === vId);
       if (existing) {
@@ -411,6 +431,7 @@ export default function SalePdv({
         return;
       }
     }
+    invalidateCoupon();
     setItems(prev =>
       prev
         .map(i => {
@@ -424,6 +445,7 @@ export default function SalePdv({
 
   function removeItem(productId: string, variationId?: string) {
     const vId = variationId ?? "";
+    invalidateCoupon();
     setItems(prev => prev.filter(i => !(i.productId === productId && (i.variationId ?? "") === vId)));
   }
 
@@ -515,8 +537,10 @@ export default function SalePdv({
   }
 
   /* ── Save sale ── */
+  // Trava síncrona contra duplo clique (o `disabled` só vale após o re-render).
+  const savingRef = useRef(false);
   async function handleSave() {
-    if (!items.length || !user) return;
+    if (!items.length || !user || savingRef.current) return;
     // Trava final: bloqueia a venda se algum item exceder o estoque atual.
     const over = items.find(i => {
       const p = products.find(pp => pp.id === i.productId);
@@ -543,14 +567,38 @@ export default function SalePdv({
       toast.error("Informe o valor da entrada (sinal) para venda parcial.");
       return;
     }
+    if (payStatus === "partial" && entryAmount >= grandTotal - CENTS_EPSILON) {
+      toast.error("A entrada cobre o total da venda — marque como \"Pago\".");
+      return;
+    }
     // Resolve o vendedor responsável (admin pode atribuir a outro; vendedor é ele mesmo).
-    const seller = sellers.find(s => s.uid === sellerId);
+    const seller = sellers.find(s => s.uid === effectiveSellerId);
     const finalSellerId = isAdmin ? (seller?.uid ?? user.uid) : user.uid;
     const finalSellerName = isAdmin
       ? (seller?.displayName ?? user.displayName ?? "Vendedor")
       : (user.displayName ?? "Vendedor");
+    savingRef.current = true;
     setSaving(true);
     setSavedId(null);
+    // Limpa o formulário após a venda gravada (também quando só a baixa de estoque falhou).
+    const resetForm = () => {
+      setItems([]);
+      setNotes("");
+      setPayment("cash");
+      setChannel("in_store");
+      setDeliveryFee("");
+      setCreditInstallments(1);
+      removeCoupon();
+      setManualDiscType("fixed");
+      setManualDiscInput("");
+      setManualDiscReason("");
+      setPayStatus("paid");
+      setEntryInput("");
+      setDueDate("");
+      setCustomer(null);
+      setCustomerQuery("");
+      setDeliveryLater(false);
+    };
     try {
       /* Pontos do Clube Shark: quando há cliente vinculado COM CPF, a venda pontua
          na conta dele (mesma engine do e-commerce) — vale também no presencial.
@@ -582,6 +630,9 @@ export default function SalePdv({
           }
         : undefined;
 
+      // Se só a baixa de estoque falhar, a venda JÁ existe: segue o fluxo normal
+      // (cupom, pontos, limpar carrinho) e avisa para ajustar o estoque.
+      const stockWarning = { msg: "" };
       const id = await createSale({
         sellerId: finalSellerId,
         sellerName: finalSellerName,
@@ -593,7 +644,7 @@ export default function SalePdv({
         ...(deliveryFeeNum > 0 ? { deliveryFee: deliveryFeeNum } : {}),
         ...(cardFeeAmount > 0 ? { cardFee: cardFeeAmount, cardFeePercent: cardPct } : {}),
         ...(payment === "credit" && creditInstallments > 1 ? { installments: creditInstallments } : {}),
-        ...(appliedCoupon && discount > 0 ? { couponCode: appliedCoupon.code, discount } : {}),
+        ...(appliedCoupon && couponDiscount > 0 ? { couponCode: appliedCoupon.code, discount: couponDiscount } : {}),
         ...(manualDiscountObj ? { manualDiscount: manualDiscountObj } : {}),
         ...(pointsEarned > 0 ? { pointsEarned } : {}),
         notes: notes.trim() || undefined,
@@ -604,17 +655,20 @@ export default function SalePdv({
         amountReceived: receivedNow,
         ...(payStatus !== "paid" && dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
         createdBy: user.uid,
+      }).catch((err: unknown) => {
+        if (err instanceof SaleStockError) { stockWarning.msg = err.message; return err.saleId; }
+        throw err;
       });
 
       /* Registra o uso do cupom (auditoria + limite por CPF) — não bloqueia a venda. */
-      if (appliedCoupon && discount > 0) {
+      if (appliedCoupon && couponDiscount > 0) {
         await recordCouponRedemption({
           couponId: appliedCoupon.id,
           code: appliedCoupon.code,
           cpf: (customer?.cpf ?? "").replace(/\D/g, ""),
           userId: customer?.uid ?? finalSellerId,
           orderId: id,
-          discount,
+          discount: couponDiscount,
         }).catch(err => console.error("Falha ao registrar uso do cupom:", err));
       }
 
@@ -644,22 +698,8 @@ export default function SalePdv({
       if (payStatus === "paid" && customer && pointsEarned > 0) {
         toast.success(`+${pointsEarned.toLocaleString("pt-BR")} pontos creditados para ${customer.displayName}.`);
       }
-      setItems([]);
-      setNotes("");
-      setPayment("cash");
-      setChannel("in_store");
-      setDeliveryFee("");
-      setCreditInstallments(1);
-      removeCoupon();
-      setManualDiscType("fixed");
-      setManualDiscInput("");
-      setManualDiscReason("");
-      setPayStatus("paid");
-      setEntryInput("");
-      setDueDate("");
-      setCustomer(null);
-      setCustomerQuery("");
-      setDeliveryLater(false);
+      if (stockWarning.msg) toast.error(stockWarning.msg);
+      resetForm();
       await loadProducts();
       onDataChanged?.();
     } catch (err) {
@@ -667,6 +707,7 @@ export default function SalePdv({
       console.error("[createSale]", err);
       toast.error(`Erro ao registrar venda: ${msg}`);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
@@ -848,6 +889,7 @@ export default function SalePdv({
                     const thumb = (
                       <div className="w-10 h-10 rounded-lg bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
                         {p.images?.[0]
+                          // eslint-disable-next-line @next/next/no-img-element -- miniatura 40px de URL dinâmica (Cloudinary/externa); next/image exigiria remotePatterns
                           ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
                           : <Package className="w-4 h-4 text-[var(--color-text-muted)]" />
                         }
@@ -1118,7 +1160,7 @@ export default function SalePdv({
                     <div>
                       <label className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide block mb-2">Vendedor</label>
                       <select
-                        value={sellerId}
+                        value={effectiveSellerId}
                         onChange={e => setSellerId(e.target.value)}
                         className={inputCls}
                       >
@@ -1352,10 +1394,10 @@ export default function SalePdv({
                         <span className="text-[var(--color-text-muted)]">Subtotal (produtos)</span>
                         <span className="text-[var(--color-text-secondary)]">{formatCurrency(total)}</span>
                       </div>
-                      {discount > 0 && (
+                      {couponDiscount > 0 && (
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-emerald-400">Desconto{appliedCoupon ? ` · ${appliedCoupon.code}` : ""}</span>
-                          <span className="text-emerald-400">−{formatCurrency(discount)}</span>
+                          <span className="text-emerald-400">−{formatCurrency(couponDiscount)}</span>
                         </div>
                       )}
                       {manualDiscount > 0 && (
@@ -1626,9 +1668,9 @@ export default function SalePdv({
                                       )}
                                     </div>
                                   )}
-                                  {sale.items.map(item => (
+                                  {sale.items.map((item, idx) => (
                                     <div
-                                      key={item.productId}
+                                      key={`${item.productId}:${item.variationId ?? ""}:${idx}`}
                                       className="flex items-center justify-between text-sm"
                                     >
                                       <span className="text-[var(--color-text-secondary)]">
@@ -1722,12 +1764,12 @@ export default function SalePdv({
                                           <span className="text-amber-400">{formatCurrency(saleOutstanding(sale))}</span>
                                         </div>
                                       )}
-                                      {sale.dueDate && saleStatus(sale) !== "cancelled" && (
+                                      {saleDueDate(sale) && saleStatus(sale) !== "cancelled" && (
                                         <div className="flex items-center justify-between text-sm">
                                           <span className="flex items-center gap-1.5 text-[var(--color-text-muted)]">
                                             <CalendarClock className="w-3.5 h-3.5" /> Vencimento
                                           </span>
-                                          <span className="text-[var(--color-text-secondary)]">{toDate(sale.dueDate).toLocaleDateString("pt-BR")}</span>
+                                          <span className="text-[var(--color-text-secondary)]">{saleDueDate(sale)?.toLocaleDateString("pt-BR")}</span>
                                         </div>
                                       )}
                                     </div>

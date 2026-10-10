@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isMercadoPagoConfigured } from "@/lib/payments/mercadopago";
+import { isMercadoPagoConfigured, isValidPaymentId } from "@/lib/payments/mercadopago";
+import { verifyMercadoPagoSignature } from "@/lib/payments/webhookSignature";
 import { syncMercadoPagoPayment } from "@/lib/payments/mercadopago.server";
 import {
   createSystemAlert,
@@ -60,6 +61,24 @@ export async function POST(request: NextRequest) {
     /* corpo vazio/não-JSON — seguimos com os parâmetros da querystring */
   }
 
+  // Assinatura (x-signature): validada quando MERCADOPAGO_WEBHOOK_SECRET está
+  // configurada. Defesa em profundidade — a fonte da verdade continua sendo a API
+  // do MP. Notificações sem o header (formato IPN legado) seguem sem assinatura.
+  const webhookSecret = process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim();
+  const xSignature = request.headers.get("x-signature");
+  if (webhookSecret && xSignature) {
+    const valid = verifyMercadoPagoSignature({
+      xSignature,
+      xRequestId: request.headers.get("x-request-id"),
+      dataId: url.searchParams.get("data.id") ?? paymentId,
+      secret: webhookSecret,
+    });
+    if (!valid) {
+      void logWebhookEvent({ provider: "mercadopago", type: type ?? "payment", status: "failed", statusCode: 401, requestId, error: "assinatura inválida" });
+      return NextResponse.json({ error: "assinatura inválida" }, { status: 401 });
+    }
+  }
+
   // Só tratamos eventos de pagamento.
   if (type && type !== "payment") {
     void logWebhookEvent({ provider: "mercadopago", type, status: "skipped", requestId, error: "tipo não tratado" });
@@ -68,6 +87,12 @@ export async function POST(request: NextRequest) {
   if (!paymentId) {
     void logWebhookEvent({ provider: "mercadopago", type: type ?? "payment", status: "skipped", requestId, error: "sem id de pagamento" });
     return NextResponse.json({ received: true, skipped: "sem id de pagamento" });
+  }
+  // Ids do MP são numéricos — qualquer outra coisa é lixo/forjado (e não pode ir
+  // para a URL da API com o nosso Access Token).
+  if (!isValidPaymentId(paymentId)) {
+    void logWebhookEvent({ provider: "mercadopago", type: type ?? "payment", status: "skipped", requestId, error: "id de pagamento inválido" });
+    return NextResponse.json({ received: true, skipped: "id inválido" });
   }
 
   const started = Date.now();

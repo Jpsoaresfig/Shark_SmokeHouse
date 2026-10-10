@@ -13,12 +13,19 @@ import type { UserProfile, UserRole } from "@/types";
 const COLLECTION = "users";
 const ADMIN_EMAIL = "admin@shark.com";
 
+/** E-mail gravado sempre sem espaços e em minúsculas (o Firebase Auth também
+ *  normaliza), para buscas/deduplicação e para a comparação com ADMIN_EMAIL. */
+function normalizeEmail(email: string | undefined): string {
+  return (email ?? "").trim().toLowerCase();
+}
+
 export async function createUserProfile(
   uid: string,
   data: { email: string; displayName: string; phone?: string; birthDate?: string; cpf?: string }
 ): Promise<UserProfile> {
   const ref = doc(db, COLLECTION, uid);
-  const isAdmin = data.email === ADMIN_EMAIL;
+  const email = normalizeEmail(data.email);
+  const isAdmin = email === ADMIN_EMAIL;
   // CPF é opcional, mas se vier deve ser válido (gate do Clube Shark).
   const cpf = data.cpf ? onlyDigits(data.cpf) : "";
   if (cpf && !isValidCpf(cpf)) throw new Error("CPF inválido.");
@@ -29,7 +36,7 @@ export async function createUserProfile(
     data.birthDate && !isOfLegalAge(data.birthDate) ? legalAgeDate(data.birthDate) : undefined;
   const profile: Omit<UserProfile, "updatedAt"> & { createdAt: unknown; updatedAt: unknown } = {
     uid,
-    email: data.email,
+    email,
     displayName: data.displayName,
     phone: data.phone ?? "",
     role: (isAdmin ? "admin" : "customer") as UserRole,
@@ -82,7 +89,7 @@ export async function createWalkInCustomer(data: {
   const ref = doc(collection(db, COLLECTION));
   const profile = {
     uid: ref.id,
-    email: (data.email ?? "").trim(),
+    email: normalizeEmail(data.email),
     displayName,
     phone,
     role: "customer" as UserRole,
@@ -136,17 +143,22 @@ export async function updateUserProfile(
   uid: string,
   data: Partial<Pick<UserProfile, "displayName" | "phone" | "photoURL" | "addresses" | "cpf">>
 ): Promise<void> {
-  const payload = { ...data };
+  // Firestore rejeita `undefined` — remove campos não informados.
+  const payload: Record<string, unknown> = Object.fromEntries(
+    Object.entries(data).filter(([, v]) => v !== undefined),
+  );
   // CPF é opcional, mas se vier deve ser válido e é gravado só com dígitos.
-  if (payload.cpf !== undefined) {
-    const cpf = onlyDigits(payload.cpf);
+  // CPF vazio remove o campo (mesmo formato do cadastro: só existe quando válido).
+  if (data.cpf !== undefined) {
+    const cpf = onlyDigits(data.cpf);
     if (cpf && !isValidCpf(cpf)) throw new Error("CPF inválido.");
-    payload.cpf = cpf;
+    payload.cpf = cpf || deleteField();
   }
   await updateDoc(doc(db, COLLECTION, uid), {
     ...payload,
     updatedAt: serverTimestamp(),
   });
+  invalidate("users");
 }
 
 export async function getAllUsers(limitCount?: number, force = false): Promise<UserProfile[]> {
@@ -207,6 +219,7 @@ export async function createUserWithRole(
   // CPF é opcional, mas se vier deve ser válido (gate do Clube Shark).
   const cpfDigits = cpf ? onlyDigits(cpf) : "";
   if (cpfDigits && !isValidCpf(cpfDigits)) throw new Error("CPF inválido.");
+  email = normalizeEmail(email);
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY!;
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
@@ -234,8 +247,10 @@ export async function createUserWithRole(
     email,
     displayName,
     phone,
-    role,
-    loyaltyPoints: role === "customer" ? 100 : 0,
+    // As regras só deixam a equipe CRIAR perfis com role "customer" (cadastro
+    // de balcão); o papel real é aplicado logo em seguida via update (admin).
+    role: "customer" as UserRole,
+    loyaltyPoints: role === "customer" ? WELCOME_BONUS_POINTS : 0,
     referralCode,
     addresses: [],
     // Comissão só para vendedor e quando informada (Firestore rejeita undefined).
@@ -246,7 +261,21 @@ export async function createUserWithRole(
     updatedAt: serverTimestamp(),
   };
   await setDoc(ref, profile);
+  if (role !== "customer") {
+    await updateDoc(ref, { role, updatedAt: serverTimestamp() });
+  }
   if (referralCode) await registerReferralCode(uid, referralCode);
+  // Mesmo bônus de boas-vindas (e lote no ledger, p/ a validade de 180 dias)
+  // do cadastro pelo próprio cliente.
+  if (role === "customer" && WELCOME_BONUS_POINTS > 0) {
+    await addDoc(collection(db, "loyaltyTransactions"), {
+      userId: uid,
+      type: "welcome",
+      points: WELCOME_BONUS_POINTS,
+      reason: "Bônus de boas-vindas",
+      createdAt: serverTimestamp(),
+    });
+  }
   invalidate("users");
-  return { ...profile, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as UserProfile;
+  return { ...profile, role, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as UserProfile;
 }

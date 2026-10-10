@@ -2,10 +2,9 @@
 
 import { motion } from "framer-motion";
 import { Clock, MapPin, MessageCircle } from "lucide-react";
-import { useSiteVitrine } from "@/stores/siteSettingsStore";
+import { useSiteVitrine, useStoreContact } from "@/stores/siteSettingsStore";
 
 const MAPS_URL = "https://maps.app.goo.gl/P8ZJh4wtXAMu73et5";
-const WHATSAPP_URL = "https://wa.me/5583999020606";
 
 /**
  * Bloco institucional da vitrine (página inicial): texto da casa, endereço,
@@ -14,6 +13,7 @@ const WHATSAPP_URL = "https://wa.me/5583999020606";
  */
 export function VitrineInfo() {
   const vitrine = useSiteVitrine();
+  const contact = useStoreContact();
   const hourLines = vitrine.hours
     .split("\n")
     .map((l) => l.trim())
@@ -50,7 +50,7 @@ export function VitrineInfo() {
               <span>{vitrine.address}</span>
             </a>
             <a
-              href={WHATSAPP_URL}
+              href={contact.waLink()}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-success)] transition-colors mt-3"

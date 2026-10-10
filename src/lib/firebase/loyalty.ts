@@ -1,11 +1,10 @@
 import {
-  doc, getDoc, setDoc, updateDoc, addDoc, getDocs, collection,
-  query, where, orderBy, serverTimestamp, increment,
+  doc, getDoc, setDoc, updateDoc, getDocs, collection,
+  query, where, orderBy, serverTimestamp, increment, runTransaction, writeBatch,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import { createOrder } from "@/lib/firebase/orders";
+import { db, auth } from "@/lib/firebase";
 import { invalidate } from "@/lib/firebase/cache";
-import { computeOrderPointsForItems } from "@/lib/loyalty/levels";
+import { computeOrderPointsForItems, eligibleOrderPointItems } from "@/lib/loyalty/levels";
 import type { LoyaltyTransaction, LoyaltyReward, Order } from "@/types";
 
 export function generateReferralCode(): string {
@@ -89,37 +88,84 @@ export async function recordReferral(
  * Credita os pontos de uma compra concluída, aplicando a engine do Clube Shark:
  *  - taxa por nível atual do cliente (Baby/Hunter/Predatory/Megalodon);
  *  - identificação obrigatória: sem CPF preenchido, NÃO computa pontos;
- *  - base elegível = preço × quantidade de cada item (frete e resgates não pontuam);
- *  - "Pontos em Dobro" (Task 3.5): cada item aplica seu `pointsMultiplier` (1 ou 2)
- *    congelado na compra.
+ *  - base elegível = preço × quantidade de cada item, limitada ao total cobrado
+ *    em produtos (total − frete; resgates não pontuam);
+ *  - "Pontos em Dobro" (Task 3.5): 2× quando o produto/categoria está em campanha
+ *    no catálogo NA HORA DO CRÉDITO — o pedido é gravado pelo cliente, então o
+ *    `pointsMultiplier`/`pointsEarned` do pedido não é confiável e é ignorado.
  *
  * Recalcula a TAXA no momento do crédito (lê o perfil atual) para refletir o nível
- * vigente; o multiplicador de campanha vem do snapshot do item. Retorna os pontos
+ * vigente. Retorna os pontos
  * efetivamente creditados (0 = sem CPF ou sem base elegível).
  */
 export async function awardPurchasePointsForOrder(order: Order): Promise<number> {
   if (order.isRedemption) return 0;
 
-  const userSnap = await getDoc(doc(db, "users", order.customerId));
-  const user = userSnap.exists() ? userSnap.data() : null;
-  const cpfPresent = !!(user?.cpf && String(user.cpf).trim());
+  const orderRef = doc(db, "orders", order.id);
+  const userRef = doc(db, "users", order.customerId);
 
-  const points = computeOrderPointsForItems({
-    items: order.items.map((i) => ({
-      reais: i.price * i.quantity,
-      multiplier: i.pointsMultiplier,
-    })),
-    currentPoints: (user?.loyaltyPoints as number) ?? 0,
-    cpfPresent,
-  });
-  if (points <= 0) return 0;
-
-  await addLoyaltyPoints(
-    order.customerId,
-    points,
-    `Compra #${order.id.slice(-6).toUpperCase()}`,
-    "earned",
+  // "Pontos em Dobro" pelo catálogo ATUAL (produto ou categoria em campanha).
+  const productIds = [...new Set((order.items ?? []).map((i) => i.productId).filter(Boolean))];
+  const [productSnaps, catSnap] = await Promise.all([
+    Promise.all(productIds.map((id) => getDoc(doc(db, "products", id)))),
+    getDocs(collection(db, "categories")),
+  ]);
+  const doubleCats = new Set(
+    catSnap.docs.filter((c) => c.data().doublePoints === true).map((c) => String(c.data().slug ?? "")),
   );
+  const doubleIds = new Set(
+    productSnaps
+      .filter((s) => s.exists() && (s.data().doublePoints === true || doubleCats.has(String(s.data().category ?? ""))))
+      .map((s) => s.id),
+  );
+
+  // Transação: relê o pedido e só credita se `pointsAwarded` ainda for falso,
+  // marcando-o no MESMO commit. Antes o guard vinha do estado da tela (cópia
+  // local do pedido) e a marcação era uma escrita separada — clique duplo, duas
+  // abas ou "entregar" + "creditar" concorrentes creditavam os pontos 2x.
+  const points = await runTransaction(db, async (tx) => {
+    const orderSnap = await tx.get(orderRef);
+    if (!orderSnap.exists()) return 0;
+    const fresh = orderSnap.data() as Order;
+    if (fresh.pointsAwarded || fresh.isRedemption) return 0;
+
+    const userSnap = await tx.get(userRef);
+    const user = userSnap.exists() ? userSnap.data() : null;
+    const cpfPresent = !!(user?.cpf && String(user.cpf).trim());
+
+    // Base e multiplicador recalculados (não confia em pointsEarned/
+    // pointsMultiplier/preço gravados pelo cliente no pedido).
+    const earned = computeOrderPointsForItems({
+      items: eligibleOrderPointItems({
+        items: fresh.items ?? [],
+        total: fresh.total,
+        deliveryFee: fresh.deliveryFee,
+        isDouble: (id) => doubleIds.has(id),
+      }),
+      currentPoints: (user?.loyaltyPoints as number) ?? 0,
+      cpfPresent,
+    });
+
+    // Marca o pedido mesmo sem pontos (sem CPF), como o fluxo já fazia depois.
+    tx.update(orderRef, { pointsAwarded: true, updatedAt: serverTimestamp() });
+    if (earned <= 0 || !userSnap.exists()) return 0;
+
+    tx.update(userRef, {
+      loyaltyPoints: increment(earned),
+      updatedAt: serverTimestamp(),
+    });
+    tx.set(doc(collection(db, "loyaltyTransactions")), {
+      userId: order.customerId,
+      type: "earned",
+      points: earned,
+      reason: `Compra #${order.id.slice(-6).toUpperCase()}`,
+      createdAt: serverTimestamp(),
+    });
+    return earned;
+  });
+
+  invalidate("orders");
+  invalidate("users");
   return points;
 }
 
@@ -129,17 +175,21 @@ export async function addLoyaltyPoints(
   reason: string,
   type: LoyaltyTransaction["type"] = "earned"
 ): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
+  // Saldo + lançamento no mesmo batch: ou gravam os dois, ou nenhum (antes uma
+  // falha entre as duas escritas deixava saldo sem lastro no ledger/validade).
+  const batch = writeBatch(db);
+  batch.update(doc(db, "users", uid), {
     loyaltyPoints: increment(points),
     updatedAt: serverTimestamp(),
   });
-  await addDoc(collection(db, "loyaltyTransactions"), {
+  batch.set(doc(collection(db, "loyaltyTransactions")), {
     userId: uid,
     type,
     points,
     reason,
     createdAt: serverTimestamp(),
   });
+  await batch.commit();
 }
 
 /**
@@ -156,11 +206,12 @@ export async function adjustLoyaltyPoints(
   by?: string,
 ): Promise<void> {
   if (!points) return;
-  await updateDoc(doc(db, "users", uid), {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "users", uid), {
     loyaltyPoints: increment(points),
     updatedAt: serverTimestamp(),
   });
-  await addDoc(collection(db, "loyaltyTransactions"), {
+  batch.set(doc(collection(db, "loyaltyTransactions")), {
     userId: uid,
     type: "adjustment",
     points,
@@ -168,6 +219,7 @@ export async function adjustLoyaltyPoints(
     ...(by ? { by } : {}),
     createdAt: serverTimestamp(),
   });
+  await batch.commit();
   invalidate("users");
 }
 
@@ -204,77 +256,41 @@ export async function getLoyaltyRewards(): Promise<LoyaltyReward[]> {
   });
 }
 
+/**
+ * Resgata uma recompensa. A operação roda no SERVIDOR (/api/loyalty/redeem):
+ * o servidor relê saldo/estoque e, numa transação, debita os pontos, baixa o
+ * estoque, lança o "redeemed" no ledger e cria o pedido de resgate. Antes tudo
+ * era feito pelo cliente — dava para gerar um pedido de resgate pago sem
+ * debitar pontos, e dois resgates simultâneos deixavam o saldo negativo.
+ * As checagens locais abaixo são só para feedback rápido na UI.
+ *
+ * Retorna o custo efetivamente debitado (o do produto no banco).
+ */
 export async function redeemReward(
   uid: string,
   reward: LoyaltyReward,
   currentPoints: number,
-  customer?: { name?: string; phone?: string },
-): Promise<void> {
+  // Mantido por compatibilidade: nome/telefone agora vêm do perfil no servidor.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _customer?: { name?: string; phone?: string },
+): Promise<number> {
   if (currentPoints < reward.pointsCost) throw new Error("Pontos insuficientes");
   if (reward.stock <= 0) throw new Error("Recompensa indisponível");
 
-  await updateDoc(doc(db, "users", uid), {
-    loyaltyPoints: increment(-reward.pointsCost),
-    updatedAt: serverTimestamp(),
+  const current = auth.currentUser;
+  if (!current || current.uid !== uid) throw new Error("Faça login novamente para resgatar.");
+  const token = await current.getIdToken();
+
+  const res = await fetch("/api/loyalty/redeem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ rewardId: reward.id }),
   });
-  await updateDoc(doc(db, "products", reward.id), {
-    stock: increment(-1),
-    updatedAt: serverTimestamp(),
-  });
-  await addDoc(collection(db, "loyaltyTransactions"), {
-    userId: uid,
-    type: "redeemed",
-    points: -reward.pointsCost,
-    reason: `Resgate: ${reward.name}`,
-    rewardId: reward.id,
-    createdAt: serverTimestamp(),
-  });
+  const data = (await res.json().catch(() => ({}))) as { pointsCost?: number; error?: string };
+  if (!res.ok) throw new Error(data.error || "Não foi possível concluir o resgate.");
+
   invalidate("products"); // estoque da recompensa baixou
   invalidate("users");    // pontos do cliente mudaram
-
-  // Gera um pedido para o admin acompanhar/entregar o resgate — como se fosse uma
-  // compra, mas paga com pontos. Não baixa estoque de novo (isRedemption: true).
-  const rewardImage =
-    reward.image && /^https?:\/\//.test(reward.image) ? reward.image : "";
-  const now = new Date().toISOString();
-  await createOrder({
-    customerId: uid,
-    customerName: customer?.name?.trim() || "Cliente",
-    customerPhone: customer?.phone?.trim() || "",
-    items: [{
-      productId: reward.id,
-      name: reward.name,
-      price: 0,
-      image: rewardImage,
-      quantity: 1,
-    }],
-    subtotal: 0,
-    deliveryFee: 0,
-    total: 0,
-    status: "received",
-    paymentMethod: "loyalty",
-    paymentStatus: "paid",
-    payment: {
-      method: "loyalty",
-      provider: "manual",
-      status: "paid",
-      amount: 0,
-      paidAt: now,
-      history: [{ status: "paid", timestamp: now, note: "Resgate por pontos de fidelidade" }],
-    },
-    deliveryAddress: {
-      id: "pickup",
-      label: "Retirada na loja",
-      street: "", number: "", neighborhood: "", city: "", state: "", zipCode: "",
-    },
-    notes: `Resgate de recompensa — ${reward.pointsCost} pontos`,
-    statusHistory: [{
-      status: "received",
-      timestamp: new Date().toISOString(),
-      note: "Pedido gerado por resgate de pontos",
-    }],
-    pointsEarned: 0,
-    isRedemption: true,
-    pointsRedeemed: reward.pointsCost,
-  });
+  invalidate("orders");   // novo pedido de resgate
+  return typeof data.pointsCost === "number" ? data.pointsCost : reward.pointsCost;
 }

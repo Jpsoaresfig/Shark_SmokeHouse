@@ -115,6 +115,7 @@ export default function AdminAnnouncements() {
   }
 
   async function remove(id: string) {
+    if (!window.confirm("Excluir este aviso? Esta ação não pode ser desfeita.")) return;
     try {
       await deleteAnnouncement(id);
       setList((prev) => prev.filter((x) => x.id !== id));

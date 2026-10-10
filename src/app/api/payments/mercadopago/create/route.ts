@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isMercadoPagoConfigured, createPixPayment } from "@/lib/payments/mercadopago";
-import { getOrderAdmin, setOrderProviderRef } from "@/lib/firebase/orders.server";
+import { getOrderAdmin, setOrderProviderRef, verifyOrderPricingAdmin } from "@/lib/firebase/orders.server";
 import { resolveOrderPayment } from "@/lib/payments";
 import { logSystemError, recordMonitoredRequest } from "@/lib/observability.server";
 import { requestIdFrom } from "@/lib/requestId";
@@ -67,9 +67,48 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Pedido não encontrado." }, { status: 404 });
   }
 
-  if (resolveOrderPayment(order).status === "paid") {
+  const currentPay = resolveOrderPayment(order);
+  if (currentPay.status === "paid") {
     return NextResponse.json({ error: "Este pedido já foi pago." }, { status: 409 });
   }
+  if (currentPay.status === "refunded" || order.status === "cancelled" || order.status === "delivered") {
+    return NextResponse.json({ error: "Este pedido não aceita mais pagamento." }, { status: 409 });
+  }
+  if (currentPay.method !== "mercadopago") {
+    return NextResponse.json({ error: "Este pedido não usa pagamento pelo Mercado Pago." }, { status: 409 });
+  }
+
+  // O pedido é gravado pelo navegador: NÃO confiamos em `order.total`. Recalcula
+  // preços do catálogo, frete do bairro e cupom no servidor antes de cobrar —
+  // senão um cliente poderia gravar total R$ 0,01, pagar e o webhook liberaria.
+  try {
+    const pricing = await verifyOrderPricingAdmin(order);
+    if (!pricing.ok || !(pricing.expectedTotal > 0)) {
+      console.error("[mercadopago-create] valores do pedido não conferem", { orderId, problems: pricing.problems });
+      void logSystemError({
+        type: "payment",
+        message: "Pedido com valores divergentes — cobrança PIX recusada",
+        route: "/api/payments/mercadopago/create",
+        method: "POST",
+        statusCode: 409,
+        userId: typeof order.customerId === "string" ? order.customerId : undefined,
+        requestId,
+        metadata: { orderId, total: order.total, expectedTotal: pricing.expectedTotal, problems: pricing.problems.slice(0, 10) },
+      });
+      return NextResponse.json(
+        { error: "Os valores do pedido não conferem com os preços atuais. Fale com a loja pelo WhatsApp." },
+        { status: 409 },
+      );
+    }
+  } catch (err) {
+    console.error("Erro ao conferir valores do pedido:", err);
+    return NextResponse.json({ error: "Falha ao conferir o pedido no servidor." }, { status: 500 });
+  }
+
+  // Cobrança anterior expirou/foi recusada → gera um PIX NOVO (chave de
+  // idempotência diferente) e volta o status para "pending".
+  const retrying =
+    !!currentPay.providerRef && (currentPay.status === "cancelled" || currentPay.status === "failed");
 
   // O MP exige um e-mail de pagador válido. Usa o informado pelo cliente quando
   // disponível; senão, deriva um placeholder com formato válido (PIX não envia
@@ -93,9 +132,12 @@ export async function POST(request: NextRequest) {
       payerLastName: rest.join(" ") || undefined,
       payerCpf,
       notificationUrl: `${resolveBaseUrl(request)}/api/webhooks/mercadopago`,
+      ...(retrying ? { idempotencyKey: `order-${orderId}-retry-${currentPay.providerRef}` } : {}),
     });
 
-    await setOrderProviderRef(orderId, String(pix.id));
+    await setOrderProviderRef(orderId, String(pix.id), {
+      resetPending: retrying && String(pix.id) !== currentPay.providerRef,
+    });
 
     return NextResponse.json({
       ok: true,

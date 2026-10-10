@@ -1,39 +1,85 @@
 import {
-  collection, getDocs, getDoc, addDoc, updateDoc, onSnapshot, runTransaction,
-  doc, serverTimestamp, query, orderBy, where, arrayUnion, increment, limit,
+  collection, getDocs, updateDoc, onSnapshot, runTransaction,
+  doc, serverTimestamp, query, orderBy, where, arrayUnion, limit,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
 import { cached, invalidate } from "@/lib/firebase/cache";
-import { adjustVariationStock } from "@/lib/firebase/products";
 import { createOrderStatusNotification } from "@/lib/firebase/notifications";
-import type { CartItem, Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent } from "@/types";
+import { findStockShortages, describeShortages } from "@/lib/stock";
+import type { Address, CartItem, Order, OrderStatus, PaymentEvent, PaymentMethod, PaymentStatus, Product, StatusEvent } from "@/types";
 
 const COL = "orders";
 
+/** Estoque insuficiente na hora de fechar o pedido (mensagem pronta para o cliente). */
+export class StockShortageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StockShortageError";
+  }
+}
+
 /**
  * Baixa (`out`) ou estorna (`in`) o estoque dos itens de um pedido, atualizando
- * `products.stock` diretamente. Isso roda no contexto do cliente (checkout), por
- * isso NÃO grava em `stockMovements` (coleção restrita a admin/seller nas regras).
- * As regras do Firestore permitem ao cliente alterar apenas `stock`/`updatedAt`
- * do produto — exatamente o que fazemos aqui. A baixa reflete na quantidade real
- * e dispara o alerta de estoque mínimo.
+ * `products.stock` (e `variations[].stock`) diretamente. Isso roda no contexto do
+ * cliente (checkout), por isso NÃO grava em `stockMovements` (coleção restrita a
+ * admin/seller nas regras). As regras permitem ao cliente alterar apenas
+ * `stock`/`variations`/`updatedAt` do produto — exatamente o que fazemos aqui.
+ *
+ * Tudo numa ÚNICA transação: com `strict`, confere o estoque e baixa de forma
+ * atômica — dois clientes comprando a última unidade ao mesmo tempo não deixam
+ * mais o estoque negativo (antes: checagem fora da transação + `increment`).
  */
 async function applyOrderStock(
-  order: { id: string; items: CartItem[] },
+  order: { items: CartItem[] },
   type: "out" | "in",
+  opts: { strict?: boolean } = {},
 ): Promise<void> {
   const sign = type === "out" ? -1 : 1;
-  await Promise.all(
-    order.items.map((item) =>
-      item.variationId
-        ? adjustVariationStock(item.productId, item.variationId, sign * item.quantity)
-        : updateDoc(doc(db, "products", item.productId), {
-            stock: increment(sign * item.quantity),
-            updatedAt: serverTimestamp(),
-          }),
-    ),
-  );
+  const items = (order.items ?? []).filter((i) => i.productId && Number(i.quantity) > 0);
+  if (!items.length) return;
+  const ids = [...new Set(items.map((i) => i.productId))];
+
+  await runTransaction(db, async (tx) => {
+    const snaps = await Promise.all(ids.map((id) => tx.get(doc(db, "products", id))));
+    const products = snaps
+      .filter((s) => s.exists())
+      .map((s) => ({ id: s.id, ...(s.data() as Omit<Product, "id">) }) as Product);
+
+    if (type === "out" && opts.strict) {
+      const shortages = findStockShortages(items, products);
+      if (shortages.length) {
+        throw new StockShortageError(
+          `Estoque insuficiente — ${describeShortages(shortages)}. Ajuste o carrinho para continuar.`,
+        );
+      }
+    }
+
+    for (const product of products) {
+      const mine = items.filter((i) => i.productId === product.id);
+      let variations = product.variations;
+      let stock = Number(product.stock) || 0;
+      const byVariation = mine.filter((i) => i.variationId);
+      const plain = mine.filter((i) => !i.variationId);
+      if (byVariation.length && variations?.length) {
+        variations = variations.map((v) => {
+          const qty = byVariation
+            .filter((i) => i.variationId === v.id)
+            .reduce((sum, i) => sum + i.quantity, 0);
+          return qty ? { ...v, stock: Math.max(0, (v.stock ?? 0) + sign * qty) } : v;
+        });
+        // Com grade, o estoque do produto é a soma das variações.
+        stock = variations.reduce((sum, v) => sum + (v.stock ?? 0), 0);
+      }
+      const plainQty = plain.reduce((sum, i) => sum + i.quantity, 0);
+      if (plainQty) stock = Math.max(0, stock + sign * plainQty);
+      tx.update(doc(db, "products", product.id), {
+        stock,
+        ...(variations && byVariation.length ? { variations } : {}),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
   invalidate("products"); // o estoque mudou
 }
 
@@ -232,7 +278,13 @@ export function subscribeAvailableDeliveries(
   onChange: (orders: Order[]) => void,
   onError?: (error: Error) => void,
 ): () => void {
-  const q = query(collection(db, COL), where("motoboyId", "==", null));
+  // Só pedidos de ENTREGA entram no pool (retirada na loja não tem motoboy) —
+  // as regras exigem esse filtro para não expor dados de clientes à toa.
+  const q = query(
+    collection(db, COL),
+    where("motoboyId", "==", null),
+    where("deliveryAddress.id", "!=", "pickup"),
+  );
   return onSnapshot(
     q,
     (snap) => {
@@ -270,28 +322,60 @@ export async function claimOrderDelivery(
   invalidate("orders");
 }
 
-export async function createOrder(
-  data: Omit<Order, "id" | "createdAt" | "updatedAt">
-): Promise<string> {
-  // Baixa o estoque já na compra, exceto quando o pedido WhatsApp ainda aguarda
-  // a confirmação do cliente (baixa em confirmWhatsappOrder) ou quando é um
-  // resgate de pontos (o redeemReward já baixou o estoque do produto/recompensa).
-  const applyStock = !data.awaitingConfirmation && !data.isRedemption;
-  const ref = await addDoc(collection(db, COL), {
-    // Nasce sem motoboy para aparecer no pool de entregas disponíveis; um valor
-    // explícito (null) é necessário para a query por igualdade do pool casar.
-    motoboyId: null,
-    motoboyName: null,
-    ...stripUndefined(data),
-    stockApplied: applyStock,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+/** Dados do checkout enviados ao servidor (o resto do pedido é derivado lá). */
+export interface CheckoutOrderInput {
+  customerName: string;
+  customerPhone: string;
+  items: CartItem[];
+  subtotal: number;
+  deliveryFee: number;
+  cardFee: number;
+  discount?: number;
+  total: number;
+  /** Pedido feito fora do horário — entra na fila "reserved". */
+  reserved: boolean;
+  paymentMethod: PaymentMethod;
+  installments?: number;
+  deliveryAddress: Address;
+  notes?: string;
+  pointsEarned?: number;
+  couponCode?: string;
+  couponCpf?: string;
+}
+
+/** Pedido recusado pelo servidor (valores divergentes/dados inválidos) — a
+ *  mensagem já vem pronta para o cliente. */
+export class OrderRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderRejectedError";
+  }
+}
+
+/**
+ * Cria o pedido NO SERVIDOR (/api/orders/create): preços, frete, taxa de cartão,
+ * cupom e total são conferidos lá contra o catálogo, e estoque + pedido + uso do
+ * cupom são gravados numa única transação. O cliente não grava mais o pedido
+ * direto no Firestore (os valores eram adulteráveis pelo navegador).
+ */
+export async function createOrder(data: CheckoutOrderInput): Promise<string> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new OrderRejectedError("Faça login para finalizar o pedido.");
+  const res = await fetch("/api/orders/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(stripUndefined(data)),
   });
-  if (applyStock) {
-    await applyOrderStock({ id: ref.id, items: data.items }, "out");
+  const body = (await res.json().catch(() => ({}))) as { id?: string; error?: string; code?: string };
+  if (!res.ok || !body.id) {
+    const msg = body.error || "Erro ao finalizar pedido. Tente novamente.";
+    if (body.code === "stock") throw new StockShortageError(msg);
+    if (res.status >= 400 && res.status < 500) throw new OrderRejectedError(msg);
+    throw new Error(msg);
   }
   invalidate("orders");
-  return ref.id;
+  invalidate("products"); // o estoque mudou
+  return body.id;
 }
 
 export async function updateOrderStatus(
@@ -307,20 +391,33 @@ export async function updateOrderStatus(
     ...(note ? { note } : {}),
     ...(by ? { updatedBy: by } : {}),
   };
-  await updateDoc(ref, {
-    status,
-    statusHistory: arrayUnion(event),
-    updatedAt: serverTimestamp(),
+
+  // Status + flag de estoque na MESMA escrita (transação): dois cancelamentos
+  // simultâneos (admin + cliente, ou duplo clique) não estornam o estoque em dobro.
+  //  - cancelar com estoque baixado → estorna;
+  //  - reabrir um cancelado (admin) → baixa de novo o que foi estornado.
+  const { order, stockMove } = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.data() as Order | undefined;
+    let move: "in" | "out" | null = null;
+    if (current) {
+      if (status === "cancelled" && current.stockApplied) move = "in";
+      else if (
+        current.status === "cancelled" && status !== "cancelled" &&
+        !current.stockApplied && !current.awaitingConfirmation && !current.isRedemption
+      ) move = "out";
+    }
+    tx.update(ref, {
+      status,
+      statusHistory: arrayUnion(event),
+      ...(move ? { stockApplied: move === "out" } : {}),
+      updatedAt: serverTimestamp(),
+    });
+    return { order: current, stockMove: move };
   });
 
-  // Lê o pedido (uma vez) para o estorno de estoque e a notificação do cliente.
-  const snap = await getDoc(ref);
-  const order = snap.data() as Order | undefined;
-
-  // Ao cancelar, estorna o estoque se ele já havia sido baixado por este pedido.
-  if (status === "cancelled" && order?.stockApplied) {
-    await applyOrderStock({ id, items: order.items }, "in");
-    await updateDoc(ref, { stockApplied: false, updatedAt: serverTimestamp() });
+  if (stockMove && order?.items) {
+    await applyOrderStock({ items: order.items }, stockMove);
   }
 
   // Notifica o cliente sobre a mudança de status (centro de notificações).
@@ -383,33 +480,23 @@ export async function updatePaymentStatus(
   invalidate("orders");
 }
 
-/** Cliente confirmou que efetuou a compra combinada pelo WhatsApp. */
+/** Cliente confirmou que efetuou a compra combinada pelo WhatsApp. Roda no
+ *  servidor (/api/orders/confirm-whatsapp), que baixa o estoque na mesma
+ *  transação — clientes não gravam mais em `products`. */
 export async function confirmWhatsappOrder(id: string): Promise<void> {
-  const ref = doc(db, COL, id);
-  const snap = await getDoc(ref);
-  const order = snap.data() as Order | undefined;
-
-  await updateDoc(ref, {
-    awaitingConfirmation: false,
-    statusHistory: arrayUnion({
-      status: "received",
-      timestamp: new Date().toISOString(),
-      note: "Compra confirmada pelo cliente (WhatsApp)",
-    }),
-    "payment.history": arrayUnion({
-      status: "in_negotiation",
-      timestamp: new Date().toISOString(),
-      note: "Compra confirmada pelo cliente (WhatsApp)",
-    } satisfies PaymentEvent),
-    updatedAt: serverTimestamp(),
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Faça login para confirmar o pedido.");
+  const res = await fetch("/api/orders/confirm-whatsapp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ orderId: id }),
   });
-
-  // Agora que a compra foi confirmada, baixa o estoque (se ainda não baixou).
-  if (order && !order.stockApplied) {
-    await applyOrderStock({ id, items: order.items }, "out");
-    await updateDoc(ref, { stockApplied: true, updatedAt: serverTimestamp() });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error || "Não foi possível confirmar o pedido.");
   }
   invalidate("orders");
+  invalidate("products");
 }
 
 /** Marks an order's purchase points as credited so they're never awarded twice. */

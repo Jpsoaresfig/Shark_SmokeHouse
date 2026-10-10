@@ -226,7 +226,10 @@ export default function AdminProducts() {
     }
   }, []);
 
-  useEffect(() => { load(); loadCategories(); }, [load, loadCategories]);
+  // Cargas fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    void Promise.resolve().then(() => { void load(); void loadCategories(); });
+  }, [load, loadCategories]);
 
   /* Abre o gerenciador de categorias (garante que os padrões virem editáveis). */
   async function openCategories() {
@@ -385,7 +388,9 @@ export default function AdminProducts() {
         taxPercent: taxNum,
       };
       if (editing) {
-        await updateProduct(editing.id, payload);
+        // clearEmpty: campos limpos no formulário (undefined) são removidos do doc —
+        // senão compareAtPrice/loyaltyPoints/redeemDisabled antigos permaneciam.
+        await updateProduct(editing.id, payload, { clearEmpty: true });
         toast.success("Produto atualizado!");
       } else {
         await createProduct(payload);
@@ -500,6 +505,7 @@ export default function AdminProducts() {
                       <div className="flex items-center gap-3 flex-1 min-w-0">
                         <div className="w-12 h-12 rounded-xl bg-[var(--color-bg-overlay)] border border-[var(--color-border)] flex items-center justify-center shrink-0 overflow-hidden">
                           {p.images?.[0]
+                            // eslint-disable-next-line @next/next/no-img-element -- miniatura 48px de URL dinâmica (Cloudinary/externa); next/image exigiria remotePatterns
                             ? <img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" />
                             : <Package className="w-5 h-5 text-[var(--color-text-muted)]" />
                           }

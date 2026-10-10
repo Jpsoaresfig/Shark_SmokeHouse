@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -19,17 +19,16 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { useCartStore } from "@/stores/cartStore";
 import { useAuthStore } from "@/stores/authStore";
-import { useSitePayment, useSiteCart, useBusinessHours } from "@/stores/siteSettingsStore";
+import { useSitePayment, useSiteCart, useBusinessHours, useStoreContact } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { isOpenNow, formatTodayStatus } from "@/lib/businessHours";
-import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus } from "@/lib/firebase/orders";
+import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus, StockShortageError, OrderRejectedError } from "@/lib/firebase/orders";
 import { getProducts } from "@/lib/firebase/products";
 import { getCategories } from "@/lib/firebase/categories";
-import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
+import { getCouponByCode, countCouponUsesForCpf, countCouponUsesForUser } from "@/lib/firebase/coupons";
 import { evaluateCoupon, normalizeCouponCode } from "@/lib/coupons";
 import { findStockShortages, describeShortages } from "@/lib/stock";
 import { updateUserProfile } from "@/lib/firebase/users";
-import { manualGateway, mercadopagoGateway } from "@/lib/payments";
 import { normalizeInstallmentFees, installmentFeePercent, formatFeePercent, cardTotalFor } from "@/lib/payments/installments";
 import { getDeliveryAreas, normalizeArea } from "@/lib/firebase/delivery";
 import { formatCurrency } from "@/lib/utils";
@@ -60,9 +59,6 @@ function maskPhone(v: string) {
   return v.replace(/\D/g, "").replace(/^(\d{2})(\d{5})(\d)/, "($1) $2-$3").slice(0, 15);
 }
 
-/* ── Store contact ───────────────────────────────────────── */
-const STORE_WHATSAPP = "5583999020606"; // número oficial da loja (somente dígitos, com DDI)
-
 /* ── Payment options ─────────────────────────────────────── */
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon: React.ElementType }[] = [
   { value: "mercadopago", label: "Mercado Pago",  desc: "Pague via PIX na hora (confirmação automática)", icon: Wallet        },
@@ -74,7 +70,7 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; desc: string; icon
 ];
 
 /* Monta o link do WhatsApp com o resumo completo do pedido. */
-function buildWaLink(orderId: string, d: {
+function buildWaLink(storeDigits: string, orderId: string, d: {
   items: { name: string; quantity: number; price: number; color?: string }[];
   subtotal: number;
   deliveryFee: number;
@@ -103,16 +99,16 @@ function buildWaLink(orderId: string, d: {
     "",
     "Gostaria de combinar o pagamento. 🙏",
   ];
-  return `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(lines.join("\n"))}`;
+  return `https://wa.me/${storeDigits}?text=${encodeURIComponent(lines.join("\n"))}`;
 }
 
 /* Link do WhatsApp para o cliente enviar o comprovante do PIX. */
-function buildProofLink(orderId: string, total: number) {
+function buildProofLink(storeDigits: string, orderId: string, total: number) {
   const msg = [
     `Olá! Segue o comprovante do PIX do pedido #${orderId.slice(-8).toUpperCase()}.`,
     `Valor: ${formatCurrency(total)}`,
   ].join("\n");
-  return `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(msg)}`;
+  return `https://wa.me/${storeDigits}?text=${encodeURIComponent(msg)}`;
 }
 
 /* ── Success screen ──────────────────────────────────────── */
@@ -120,6 +116,7 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
   const [copied, setCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
+  const storeContact = useStoreContact();
   const { user } = useAuthStore();
 
   const copy = async () => {
@@ -321,7 +318,7 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
               Após o pagamento, envie o comprovante pelo WhatsApp para liberarmos seu pedido.
             </p>
             <Button variant="premium" className="w-full" asChild>
-              <a href={buildProofLink(orderId, total)} target="_blank" rel="noopener noreferrer">
+              <a href={buildProofLink(storeContact.digits, orderId, total)} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-4 h-4" />
                 Enviar comprovante no WhatsApp
               </a>
@@ -392,15 +389,18 @@ export default function CheckoutPage() {
   const { user, setUser } = useAuthStore();
   const cartStore = useCartStore();
   const { items, subtotal, clearCart, closeCart } = cartStore;
-  const { pixKey, pixName, creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
+  const { creditFeePercent, debitFeePercent, creditInstallmentFees } = useSitePayment();
   const { freeShippingEnabled, freeShippingThreshold } = useSiteCart();
+  const storeContact = useStoreContact();
   const { businessHours } = useBusinessHours();
   const hoursStatus = isOpenNow(businessHours);
 
   /* Áreas de entrega (frete por bairro) */
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
   const [selectedAreaId, setSelectedAreaId] = useState("");
-  useEffect(() => { getDeliveryAreas().then(setAreas).catch(() => {}); }, []);
+  // Só bairros ATIVOS: área desativada pelo admin não pode ser escolhida (nem
+  // casada automaticamente pelo CEP/endereço salvo).
+  useEffect(() => { getDeliveryAreas().then((list) => setAreas(list.filter(a => a.active !== false))).catch(() => {}); }, []);
   const selectedArea = areas.find(a => a.id === selectedAreaId) ?? null;
   /** Tenta casar um nome de bairro (CEP/endereço salvo) com uma área cadastrada:
       primeiro exato, depois parcial (um nome contido no outro), preferindo o
@@ -450,6 +450,8 @@ export default function CheckoutPage() {
   /* ui state */
   const [cepLoading, setCepLoading] = useState(false);
   const [placing, setPlacing] = useState(false);
+  /* trava síncrona contra duplo clique/toque (o estado `placing` só vale após o re-render) */
+  const placingRef = useRef(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [waLink, setWaLink] = useState("");
   /* total congelado no momento do pedido (o carrinho é limpo antes da tela de sucesso) */
@@ -520,19 +522,21 @@ export default function CheckoutPage() {
   }
 
   /* Quando as áreas carregam (ou o bairro é preenchido pelo CEP/endereço salvo),
-     tenta selecionar automaticamente a área de entrega correspondente. */
-  useEffect(() => {
-    if (areas.length && neighborhood && !selectedAreaId) {
-      const m = matchArea(neighborhood);
-      if (m) setSelectedAreaId(m.id);
-    }
-  }, [areas, neighborhood, selectedAreaId, matchArea]);
+     tenta selecionar automaticamente a área de entrega correspondente.
+     (Ajuste de estado durante o render — padrão recomendado pelo React para
+     estado derivado; converge porque só roda enquanto não há área escolhida.) */
+  if (areas.length && neighborhood && !selectedAreaId) {
+    const m = matchArea(neighborhood);
+    if (m) setSelectedAreaId(m.id);
+  }
 
-  /* auto-select default address */
-  useEffect(() => {
+  /* auto-select default address (uma única vez, na primeira renderização) */
+  const [defaultAddrApplied, setDefaultAddrApplied] = useState(false);
+  if (!defaultAddrApplied) {
+    setDefaultAddrApplied(true);
     const def = savedAddresses.find((a) => a.isDefault) ?? savedAddresses[0];
     if (def && !selectedSavedId) applySaved(def);
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   /* CEP lookup */
   const handleCep = useCallback(async (raw: string) => {
@@ -605,10 +609,10 @@ export default function CheckoutPage() {
   // Compiler; o helper cardTotalFor é usado só nas opções de parcela do <select>.
   const cardBase = subtotal + effectiveDeliveryFee;
   const cardFeeAmount = Math.round(cardBase * (cardPct / 100) * 100) / 100;
-  const effectiveTotal = Math.max(0, cardBase + cardFeeAmount - discount);
+  const effectiveTotal = Math.max(0, Math.round((cardBase + cardFeeAmount - discount) * 100) / 100);
 
   // Link de WhatsApp para quando o bairro não está na lista de entrega.
-  const areaWaLink = `https://wa.me/${STORE_WHATSAPP}?text=${encodeURIComponent(
+  const areaWaLink = `https://wa.me/${storeContact.digits}?text=${encodeURIComponent(
     `Olá! Gostaria de fazer um pedido para entrega${neighborhood ? ` no bairro ${neighborhood}` : ""}, que não aparece na lista do site. Pode me ajudar com o frete?`,
   )}`;
 
@@ -640,8 +644,12 @@ export default function CheckoutPage() {
         lineTotal: i.price * i.quantity,
       }));
       const cpfDigits = cpf.replace(/\D/g, "") || user.cpf || "";
-      const priorUses = coupon.usageLimitPerCpf != null && cpfDigits
-        ? await countCouponUsesForCpf(coupon.id, cpfDigits)
+      // Limite conta por CPF E por conta (trocar o CPF não "zera" o limite).
+      const priorUses = coupon.usageLimitPerCpf != null
+        ? Math.max(
+            cpfDigits ? await countCouponUsesForCpf(coupon.id, cpfDigits) : 0,
+            await countCouponUsesForUser(coupon.id, user.uid),
+          )
         : 0;
       const result = evaluateCoupon(coupon, {
         items: couponItems,
@@ -671,7 +679,7 @@ export default function CheckoutPage() {
   }
 
   async function handlePlaceOrder() {
-    if (!canSubmit || !user) return;
+    if (!canSubmit || !user || placingRef.current) return;
     // Fora do horário de funcionamento o pedido NÃO é bloqueado: ele é criado
     // como "reservado" e entra na fila de espera — o processamento (preparação,
     // entrega, etc.) continua assim que a loja abrir (automático por cron ou
@@ -682,6 +690,13 @@ export default function CheckoutPage() {
       toast.error("CPF inválido. Confira os números ou deixe o campo em branco.");
       return;
     }
+    // WhatsApp com DDD: 10 (fixo) ou 11 (celular) dígitos.
+    const phoneDigits = (phone.trim() || user.phone || "").replace(/\D/g, "");
+    if (phoneDigits.length < 10 || phoneDigits.length > 13) {
+      toast.error("Informe um WhatsApp válido com DDD.");
+      return;
+    }
+    placingRef.current = true;
     setPlacing(true);
     try {
       /* Revalida o estoque com dados frescos antes de finalizar. O helper soma a
@@ -692,6 +707,48 @@ export default function CheckoutPage() {
       if (shortages.length) {
         toast.error(`Estoque insuficiente — ${describeShortages(shortages)}. Ajuste o carrinho para continuar.`);
         return;
+      }
+
+      /* O carrinho guarda o preço do momento em que o item foi adicionado (e fica
+         salvo no navegador por dias). Se o preço mudou no catálogo, atualiza o
+         carrinho e pede para o cliente conferir — o servidor recusa cobrar um
+         pedido com preço diferente do catálogo. */
+      if (cartStore.refreshPrices(fresh)) {
+        removeCoupon();
+        toast.warning("O preço de alguns itens foi atualizado. Confira o total e confirme novamente.");
+        return;
+      }
+
+      /* Revalida o cupom com dados frescos: o carrinho pode ter mudado depois de
+         aplicar (pedido mínimo/base do desconto), o cupom pode ter expirado ou
+         sido desativado, ou o limite de uso pode ter sido atingido em outra aba. */
+      if (appliedCoupon) {
+        const freshCoupon = await getCouponByCode(appliedCoupon.code);
+        const catOf = new Map(fresh.map((p) => [p.id, p.category]));
+        const cpfForCoupon = cpf.replace(/\D/g, "") || user.cpf || "";
+        const prior = freshCoupon?.usageLimitPerCpf != null
+          ? Math.max(
+              cpfForCoupon ? await countCouponUsesForCpf(freshCoupon.id, cpfForCoupon) : 0,
+              await countCouponUsesForUser(freshCoupon.id, user.uid),
+            )
+          : 0;
+        const check = freshCoupon
+          ? evaluateCoupon(freshCoupon, {
+              items: items.map((i) => ({ categorySlug: catOf.get(i.productId) ?? "", lineTotal: i.price * i.quantity })),
+              cpf: cpfForCoupon || undefined,
+              priorUsesForCpf: prior,
+            })
+          : null;
+        if (!check?.valid) {
+          removeCoupon();
+          toast.error(`Cupom removido: ${check?.message ?? "cupom indisponível."} Confira o total e confirme novamente.`);
+          return;
+        }
+        if (Math.abs(check.discount - discount) >= 0.005) {
+          setDiscount(check.discount);
+          toast.warning("O desconto do cupom foi recalculado. Confira o total e confirme novamente.");
+          return;
+        }
       }
 
       /* "Pontos em Dobro" (Task 3.5): congela o multiplicador de cada item NO
@@ -724,17 +781,9 @@ export default function CheckoutPage() {
             zipCode: zip.trim(),
           };
 
-      const gateway = payment === "mercadopago" ? mercadopagoGateway : manualGateway;
-      const paymentInfo = gateway.createPayment({
-        method: payment,
-        amount: effectiveTotal,
-        pixKey,
-        pixName,
-        ...(payment === "credit" ? { installments: creditInstallments } : {}),
-      });
-
+      // Pagamento, status inicial e histórico são montados no servidor.
+      const cpfDigits = cpf.replace(/\D/g, "");
       const id = await createOrder({
-        customerId: user.uid,
         customerName: user.displayName ?? "Cliente",
         customerPhone: phone.trim() || user.phone || "",
         items: itemsForOrder,
@@ -743,10 +792,9 @@ export default function CheckoutPage() {
         cardFee: cardFeeAmount,
         discount: discount > 0 ? discount : undefined,
         total: effectiveTotal,
-        status: isReserved ? "reserved" : "received",
-        payment: paymentInfo,
-        paymentMethod: payment,            // espelho legado
-        paymentStatus: paymentInfo.status, // espelho legado
+        reserved: isReserved,
+        paymentMethod: payment,
+        ...(payment === "credit" ? { installments: creditInstallments } : {}),
         deliveryAddress: address,
         notes: [
           isPickup ? "Retirada na loja" : "",
@@ -756,19 +804,16 @@ export default function CheckoutPage() {
             : "",
           notes.trim(),
         ].filter(Boolean).join(" — ") || undefined,
-        statusHistory: [{
-          status: isReserved ? "reserved" : "received",
-          timestamp: new Date().toISOString(),
-          note: isReserved ? "Pedido reservado fora do horário — aguardando a loja abrir" : "",
-        }],
         pointsEarned: pointsToEarn,
-        ...(payment === "whatsapp" ? { awaitingConfirmation: true } : {}),
+        // O uso do cupom é registrado pelo servidor na mesma transação do pedido.
+        ...(appliedCoupon && discount > 0
+          ? { couponCode: appliedCoupon.code, couponCpf: cpfDigits || user.cpf || "" }
+          : {}),
       });
 
       /* Atualizações de perfil são secundárias: o pedido já foi criado, então uma
          falha aqui NÃO pode abortar o fluxo (senão o carrinho não zera e o cliente
          vê erro mesmo com o pedido registrado). Por isso não usamos await/throw. */
-      const cpfDigits = cpf.replace(/\D/g, "");
       const profilePatch = {
         ...(phone.trim() && phone.trim() !== user.phone ? { phone: phone.trim() } : {}),
         ...(cpfDigits && cpfDigits !== user.cpf ? { cpf: cpfDigits } : {}),
@@ -779,23 +824,11 @@ export default function CheckoutPage() {
         );
       }
 
-      /* registra o uso do cupom (auditoria + limite por CPF — Task 3.3) */
-      if (appliedCoupon && discount > 0) {
-        await recordCouponRedemption({
-          couponId: appliedCoupon.id,
-          code: appliedCoupon.code,
-          cpf: cpfDigits || user.cpf || "",
-          userId: user.uid,
-          orderId: id,
-          discount,
-        }).catch((err) => console.error("Falha ao registrar uso do cupom:", err));
-      }
-
       /* monta o link do WhatsApp e congela o total antes de limpar o carrinho */
       const addressLine = isPickup
         ? undefined
         : `${address.street}, ${address.number}${address.complement ? `, ${address.complement}` : ""} — ${address.neighborhood}, ${address.city}/${address.state}${address.zipCode ? ` · ${address.zipCode}` : ""}`;
-      setWaLink(buildWaLink(id, {
+      setWaLink(buildWaLink(storeContact.digits, id, {
         items,
         subtotal,
         deliveryFee: effectiveDeliveryFee,
@@ -817,8 +850,13 @@ export default function CheckoutPage() {
       setOrderId(id);
     } catch (err) {
       console.error("[checkout]", err);
-      toast.error("Erro ao finalizar pedido. Tente novamente.");
+      toast.error(
+        err instanceof StockShortageError || err instanceof OrderRejectedError
+          ? err.message
+          : "Erro ao finalizar pedido. Tente novamente.",
+      );
     } finally {
+      placingRef.current = false;
       setPlacing(false);
     }
   }
@@ -1167,7 +1205,7 @@ export default function CheckoutPage() {
                   >
                     <div className="p-3 rounded-xl bg-[var(--color-neon-blue-glow)]/30 border border-[var(--color-neon-blue)]/20 text-xs text-[var(--color-text-muted)]">
                       <span className="font-medium text-[var(--color-neon-blue)]">Mercado Pago: </span>
-                      Após confirmar o pedido, você será levado ao Mercado Pago para pagar via PIX. O pedido é liberado automaticamente assim que o pagamento cair.
+                      Após confirmar o pedido, o QR Code PIX aparece aqui mesmo, já com o valor. O pedido é liberado automaticamente assim que o pagamento cair.
                     </div>
                   </motion.div>
                 )}

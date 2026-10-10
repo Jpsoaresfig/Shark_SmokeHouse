@@ -29,6 +29,20 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
   const [selectedVarId, setSelectedVarId] = useState("");
   const { addItem, openCart } = useCartStore();
 
+  /* Outro produto aberto (o modal fica montado na página): zera a seleção para
+     não herdar quantidade/variação/foto do anterior — um índice de foto fora do
+     alcance deixava o <Image> sem `src` e quebrava a página. */
+  const productId = product?.id ?? null;
+  const [lastProductId, setLastProductId] = useState(productId);
+  if (productId !== lastProductId) {
+    setLastProductId(productId);
+    setQty(1);
+    setAdded(false);
+    setImgIndex(0);
+    setSelectedColor("");
+    setSelectedVarId("");
+  }
+
   /* Trava o scroll de fundo enquanto o modal está aberto e restaura a posição
      exata ao fechar — sem isso o catálogo "volta pro início" no mobile. */
   useEffect(() => {
@@ -42,6 +56,14 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
       window.scrollTo(0, scrollY);
     };
   }, [product]);
+
+  /* Esc fecha o modal (teclado / leitores de tela). */
+  useEffect(() => {
+    if (!product) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [product, onClose]);
 
   if (!product) return null;
 
@@ -67,9 +89,12 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
     ? [...colorImages, ...baseImages.filter(u => !colorImages.includes(u))]
     : baseImages;
   const hasImages = images.length > 0;
+  // Defesa extra: nunca aponta para uma foto inexistente.
+  const currentImg = imgIndex < images.length ? imgIndex : 0;
   const hasMultiple = images.length > 1;
-  const discount = product.compareAtPrice
-    ? Math.round((1 - product.price / product.compareAtPrice) * 100)
+  const hasCompare = !!product.compareAtPrice && product.compareAtPrice > product.price;
+  const discount = hasCompare
+    ? Math.round((1 - product.price / product.compareAtPrice!) * 100)
     : null;
 
   // Estoque disponível depende da variação escolhida (quando há grade).
@@ -129,13 +154,17 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
             className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
             <div
-              className="relative w-full max-w-3xl max-h-[90vh] rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)] overflow-hidden flex flex-col md:flex-row pointer-events-auto"
+              role="dialog"
+              aria-modal="true"
+              aria-label={product.name}
+              className="relative w-full max-w-3xl max-h-[90dvh] rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-elevated)] overflow-hidden flex flex-col md:flex-row pointer-events-auto"
               onClick={e => e.stopPropagation()}
             >
               {/* Close */}
               <button
                 onClick={onClose}
-                className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center text-white transition-colors"
+                aria-label="Fechar"
+                className="absolute top-3 right-3 z-10 w-10 h-10 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center text-white transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -146,7 +175,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                   {hasImages ? (
                     <>
                       <Image
-                        src={images[imgIndex]}
+                        src={images[currentImg]}
                         alt={product.name}
                         fill
                         sizes="(max-width: 768px) 100vw, 420px"
@@ -159,12 +188,14 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                         <>
                           <button
                             onClick={prevImg}
+                            aria-label="Foto anterior"
                             className="absolute left-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors"
                           >
                             <ChevronLeft className="w-4 h-4" />
                           </button>
                           <button
                             onClick={nextImg}
+                            aria-label="Próxima foto"
                             className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 flex items-center justify-center text-white transition-colors"
                           >
                             <ChevronRight className="w-4 h-4" />
@@ -176,8 +207,9 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                               <button
                                 key={i}
                                 onClick={() => setImgIndex(i)}
+                                aria-label={`Foto ${i + 1}`}
                                 className={`w-1.5 h-1.5 rounded-full transition-all ${
-                                  i === imgIndex
+                                  i === currentImg
                                     ? "bg-white w-4"
                                     : "bg-white/50"
                                 }`}
@@ -194,8 +226,9 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                             <button
                               key={i}
                               onClick={() => setImgIndex(i)}
+                              aria-label={`Foto ${i + 1}`}
                               className={`w-10 h-10 rounded-lg overflow-hidden border-2 transition-all shrink-0 ${
-                                i === imgIndex
+                                i === currentImg
                                   ? "border-[var(--color-neon-blue)] shadow-[var(--shadow-neon-sm)]"
                                   : "border-transparent opacity-60 hover:opacity-100"
                               }`}
@@ -215,7 +248,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
 
                   {/* Badges overlay */}
                   <div className="absolute top-3 left-3 flex flex-col gap-1.5">
-                    {discount && (
+                    {discount != null && discount > 0 && (
                       <Badge
                         variant="orange"
                         className="border-0 bg-orange-500 text-white shadow-md shadow-black/30"
@@ -263,9 +296,9 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                   <span className="text-3xl font-black text-[var(--color-neon-blue)]">
                     {formatCurrency(product.price)}
                   </span>
-                  {product.compareAtPrice && (
+                  {hasCompare && (
                     <span className="text-base text-[var(--color-text-muted)] line-through mb-0.5">
-                      {formatCurrency(product.compareAtPrice)}
+                      {formatCurrency(product.compareAtPrice!)}
                     </span>
                   )}
                 </div>
@@ -395,6 +428,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                     <div className="flex items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] overflow-hidden">
                       <button
                         onClick={() => setQty(q => Math.max(1, q - 1))}
+                        aria-label="Diminuir quantidade"
                         className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                       >
                         <Minus className="w-3.5 h-3.5" />
@@ -404,6 +438,7 @@ export function ProductModal({ product, onClose }: ProductModalProps) {
                       </span>
                       <button
                         onClick={() => setQty(q => Math.max(1, Math.min(availableStock || 1, q + 1)))}
+                        aria-label="Aumentar quantidade"
                         className="w-10 h-10 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
                       >
                         <Plus className="w-3.5 h-3.5" />

@@ -5,13 +5,14 @@ import Link from "next/link";
 import { MessageCircle, MapPin, Phone, Clock } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Logo } from "@/components/ui/Logo";
-import { useSiteSections, useSiteVitrine } from "@/stores/siteSettingsStore";
+import { useSiteSections, useSiteVitrine, useStoreContact } from "@/stores/siteSettingsStore";
 import { getCategories } from "@/lib/firebase/categories";
 import type { Category } from "@/types";
 
 export function Footer() {
   const sections = useSiteSections();
   const vitrine = useSiteVitrine();
+  const contact = useStoreContact();
 
   // Categorias reais cadastradas no admin — os links da coluna "Loja" nunca
   // ficam quebrados quando as categorias mudam.
@@ -104,9 +105,10 @@ export function Footer() {
                 <span className="text-xs font-bold">IG</span>
               </a>
               <a
-                href="https://wa.me/5583999020606"
+                href={contact.waLink()}
                 target="_blank"
                 rel="noopener noreferrer"
+                aria-label="WhatsApp da Shark Smokehouse"
                 className="w-9 h-9 rounded-lg border border-[var(--color-border)] flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-success)] hover:border-[var(--color-success)] hover:bg-emerald-500/10 transition-all"
               >
                 <MessageCircle className="w-4 h-4" />
@@ -140,7 +142,8 @@ export function Footer() {
 
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[var(--color-text-muted)]">
           <p className="flex items-center gap-3 flex-wrap justify-center">
-            <span>© {new Date().getFullYear()} Shark SmokeHouse. Todos os direitos reservados.</span>
+            {/* Ano pode divergir servidor (UTC) × cliente na virada do ano. */}
+            <span suppressHydrationWarning>© {new Date().getFullYear()} Shark SmokeHouse. Todos os direitos reservados.</span>
             <Link href="/privacy" className="hover:text-[var(--color-neon-blue)] transition-colors">Privacidade</Link>
             <Link href="/terms" className="hover:text-[var(--color-neon-blue)] transition-colors">Termos de Uso</Link>
           </p>

@@ -1,5 +1,5 @@
 import {
-  collection, getDocs, updateDoc, deleteDoc, deleteField,
+  collection, getDocs, getDoc, updateDoc, deleteDoc, deleteField,
   doc, serverTimestamp, query, orderBy, where, runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -62,6 +62,8 @@ export async function createLoungeBooking(
   // Admin pode já criar a reserva confirmada — atualiza logo após (update é admin-only).
   if (opts.status && opts.status !== "pending") {
     await updateDoc(bookingRef, { status: opts.status, updatedAt: serverTimestamp() });
+    // Reserva já nascida cancelada não ocupa horário — libera a trava recém-criada.
+    if (opts.status === "cancelled") await releaseSlot(data.date, data.time);
   }
 
   return bookingRef.id;
@@ -137,8 +139,15 @@ export async function updateLoungeBookingStatus(
     return;
   }
 
-  await updateDoc(ref, { status, updatedAt: serverTimestamp() });
+  // Só libera a trava se a reserva ainda a detinha: uma reserva JÁ cancelada não
+  // ocupa o horário, e o slot pode pertencer agora a outra reserva.
+  let wasCancelled = false;
   if (status === "cancelled" && opts.date && opts.time) {
+    const snap = await getDoc(ref);
+    wasCancelled = snap.exists() && snap.data().status === "cancelled";
+  }
+  await updateDoc(ref, { status, updatedAt: serverTimestamp() });
+  if (status === "cancelled" && opts.date && opts.time && !wasCancelled) {
     await releaseSlot(opts.date, opts.time);
   }
 }
@@ -148,6 +157,11 @@ export async function deleteLoungeBooking(
   id: string,
   opts: { date?: string; time?: string } = {}
 ): Promise<void> {
-  await deleteDoc(doc(db, COL, id));
-  if (opts.date && opts.time) await releaseSlot(opts.date, opts.time);
+  const ref = doc(db, COL, id);
+  // Reserva cancelada já liberou o horário — que pode ter sido reservado por
+  // outra pessoa depois. Apagar a trava nesse caso abriria brecha p/ conflito.
+  const snap = await getDoc(ref);
+  const holdsSlot = !snap.exists() || snap.data().status !== "cancelled";
+  await deleteDoc(ref);
+  if (opts.date && opts.time && holdsSlot) await releaseSlot(opts.date, opts.time);
 }

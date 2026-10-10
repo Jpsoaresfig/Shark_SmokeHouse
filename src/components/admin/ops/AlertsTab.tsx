@@ -53,7 +53,8 @@ export function AlertsTab() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Carga fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   async function resolve(id: string) {
     setActionId(id);

@@ -20,7 +20,7 @@ import {
 } from "@/lib/firebase/sales";
 import { getProducts } from "@/lib/firebase/products";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
-import { saleReceivedAmount, saleOutstanding, saleStatus, internalProductIdsOf, filterNormalSales } from "@/lib/sales/helpers";
+import { saleReceivedAmount, saleOutstanding, saleStatus, internalProductIdsOf, filterNormalSales, saleDueDate, parseMoneyInput as parseMoney } from "@/lib/sales/helpers";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { Sale, SalePaymentMethod } from "@/types";
@@ -33,10 +33,6 @@ function toDate(v: any): Date {
   return new Date(0);
 }
 
-function parseMoney(v: string): number {
-  const n = parseFloat(v.replace(/\./g, "").replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
 
 /** Vencida? Date.now() fica encapsulado aqui (fora do render) para o React Compiler. */
 function isOverdue(due: Date | null): boolean {
@@ -92,7 +88,8 @@ export default function AdminReceivables() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Carga inicial fora do corpo síncrono do efeito (react-hooks/set-state-in-effect).
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const filtered = useMemo(() => {
     const q = queryText.trim().toLowerCase();
@@ -136,6 +133,7 @@ export default function AdminReceivables() {
 
   async function handleSettle(sale: Sale) {
     if (!user) return;
+    if (!window.confirm(`Quitar o saldo de ${formatCurrency(saleOutstanding(sale))} de ${sale.customerName || "este cliente"}? Será registrado como recebido.`)) return;
     setSettlingId(sale.id);
     try {
       await markSalePaid(sale.id, user.uid);
@@ -262,7 +260,7 @@ export default function AdminReceivables() {
           <motion.div className="space-y-2" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             {filtered.map((sale, i) => {
               const isOpen = expanded === sale.id;
-              const due = sale.dueDate ? toDate(sale.dueDate) : null;
+              const due = saleDueDate(sale);
               const overdue = isOverdue(due);
               return (
                 <motion.div

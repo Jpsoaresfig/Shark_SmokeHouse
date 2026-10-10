@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ShoppingBag, Minus, Plus, Trash2, ArrowRight, ArrowLeft, Package,
@@ -15,6 +15,8 @@ import { Separator } from "@/components/ui/separator";
 import { CartPerks } from "@/components/shop/CartPerks";
 import { formatCurrency } from "@/lib/utils";
 
+const subscribeNoop = () => () => {};
+
 export default function CartPage() {
   const cartStore = useCartStore();
   const { items, removeItem, updateQuantity, clearCart, subtotal, total, itemCount } = cartStore;
@@ -23,8 +25,7 @@ export default function CartPage() {
 
   /* Evita mismatch de hidratação: o carrinho vem do localStorage (persist), então
      só renderizamos o conteúdo dependente dos itens depois de montar no cliente. */
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(subscribeNoop, () => true, () => false);
 
   if (mounted && items.length === 0) {
     return (

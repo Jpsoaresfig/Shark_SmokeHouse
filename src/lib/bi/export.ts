@@ -22,8 +22,11 @@ export function downloadCsv(filename: string, rows: (string | number)[][]): void
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // Revogar logo após o click pode cancelar o download em alguns navegadores.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 const money = (n: number) => n.toFixed(2).replace(".", ",");

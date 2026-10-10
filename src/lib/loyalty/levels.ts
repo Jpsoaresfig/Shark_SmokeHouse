@@ -113,6 +113,40 @@ export function computeOrderPointsForItems(opts: {
   return Math.round(total);
 }
 
+/**
+ * Base de pontos de um pedido ONLINE, sem confiar nos valores gravados pelo
+ * cliente no pedido (o pedido é criado no navegador):
+ *  - multiplicador: 2 só quando o produto (ou a categoria) está em "Pontos em
+ *    Dobro" segundo o catálogo lido na hora do crédito — o `pointsMultiplier`
+ *    do item é ignorado (qualquer valor podia ser gravado, ex.: 1000);
+ *  - valor: preço × quantidade de cada item, mas a soma é limitada ao que foi
+ *    efetivamente cobrado em produtos (total − frete, ≥ 0). Assim um preço
+ *    inflado no item não gera pontos, e cupons de desconto reduzem a base.
+ */
+export function eligibleOrderPointItems(opts: {
+  items: { productId: string; price: number; quantity: number }[];
+  /** Total cobrado do pedido (R$). */
+  total: number;
+  /** Frete (R$) — não pontua. */
+  deliveryFee?: number;
+  /** Produto (ou sua categoria) está em "Pontos em Dobro" agora? */
+  isDouble: (productId: string) => boolean;
+}): { reais: number; multiplier: number }[] {
+  const raw = opts.items.map((i) => {
+    const price = Number(i.price);
+    const qty = Number(i.quantity);
+    const reais = Number.isFinite(price) && Number.isFinite(qty) && price > 0 && qty > 0 ? price * qty : 0;
+    return { reais, multiplier: opts.isDouble(i.productId) ? 2 : 1 };
+  });
+  const sum = raw.reduce((s, i) => s + i.reais, 0);
+  const total = Number(opts.total);
+  const fee = Number(opts.deliveryFee) || 0;
+  const paidProducts = Number.isFinite(total) ? Math.max(0, total - Math.max(0, fee)) : 0;
+  if (sum <= 0) return raw;
+  const scale = sum > paidProducts ? paidProducts / sum : 1;
+  return raw.map((i) => ({ reais: i.reais * scale, multiplier: i.multiplier }));
+}
+
 /** Bônus de aniversário do nível atual (0 nos níveis sem bônus). */
 export function birthdayBonusFor(points: number): number {
   return getLevel(points).birthdayBonus;
@@ -164,21 +198,33 @@ export interface ExpiryPlan {
  * deixar o saldo negativo. Debita do lote mais antigo para o mais novo, limitado
  * ao saldo atual — o excedente já foi consumido por resgates anteriores, então só
  * marcamos os lotes como vencidos (para não reprocessar) sem debitar além do saldo.
+ *
+ * `consumed` (FIFO): total já debitado do cliente em toda a história (resgates,
+ * expirações anteriores, débitos manuais — valor absoluto). Os débitos consomem
+ * primeiro os lotes mais antigos, então essa quantidade é abatida dos lotes
+ * vencidos antes de expirar. Para isso `grants` deve conter TODOS os lotes
+ * positivos do cliente (inclusive os já marcados como expirados). Sem
+ * `consumed` (0), o comportamento é o antigo (limitado só ao saldo) — que
+ * expirava pontos NOVOS de quem já tinha gasto os antigos.
  */
 export function planExpiry(
   grants: PointGrant[],
   currentBalance: number,
   now: Date = new Date(),
+  consumed = 0,
 ): ExpiryPlan {
   const matured = grants
     .filter((g) => g.points > 0 && isExpired(g.createdAt, now))
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
   let remaining = Math.max(0, currentBalance);
+  let toSkip = Math.max(0, consumed);
   const items: ExpiryPlanItem[] = [];
   let totalExpire = 0;
   for (const g of matured) {
-    const expiredPoints = Math.min(g.points, remaining);
+    const alreadyUsed = Math.min(g.points, toSkip);
+    toSkip -= alreadyUsed;
+    const expiredPoints = Math.min(g.points - alreadyUsed, remaining);
     if (expiredPoints > 0) {
       items.push({ id: g.id, expiredPoints });
       remaining -= expiredPoints;

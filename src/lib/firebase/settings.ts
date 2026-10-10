@@ -60,6 +60,7 @@ const DEFAULT_SETTINGS: SiteSettings = {
     days: [null, null, null, null, null, null, null],
     closedMessage: "",
   },
+  vitrine: DEFAULT_VITRINE,
 };
 
 export async function getSiteSettings(): Promise<SiteSettings> {

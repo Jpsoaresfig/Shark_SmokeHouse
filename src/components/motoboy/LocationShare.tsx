@@ -41,11 +41,27 @@ export function LocationShare({ orderId, phone, enabled }: Props) {
     }
   }
 
-  function start() {
-    if (!("geolocation" in navigator)) {
-      toast.error("Seu navegador não suporta localização.");
-      return;
+  /** Encerra o watch do GPS (sem mexer em estado — seguro em cleanup). */
+  const clearGeoWatch = useCallback(() => {
+    if (watchId.current !== null) {
+      navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
     }
+  }, []);
+
+  const stop = useCallback(() => {
+    clearGeoWatch();
+    setSharing(false);
+  }, [clearGeoWatch]);
+
+  /** Inicia o watch. Retorna false se não houver suporte a geolocalização. */
+  function start(): boolean {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      toast.error("Seu navegador não suporta localização.");
+      return false;
+    }
+    clearGeoWatch(); // nunca deixa dois watches ativos
+    lastSent.current = 0; // envia o primeiro ponto já
     watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
         send(pos);
@@ -57,53 +73,52 @@ export function LocationShare({ orderId, phone, enabled }: Props) {
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
           toast.error("Permissão de localização negada. Libere o GPS nas configurações do navegador.");
-        } else {
+          stop();
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
           toast.error("Não foi possível obter sua localização.");
+          stop();
         }
-        stop();
+        // TIMEOUT: sinal de GPS fraco momentâneo — o watch continua tentando.
       },
       { enableHighAccuracy: true, timeout: 20_000, maximumAge: 5_000 },
     );
+    return true;
   }
 
-  const stop = useCallback(() => {
-    if (watchId.current !== null) {
-      navigator.geolocation.clearWatch(watchId.current);
-      watchId.current = null;
-    }
-    setSharing(false);
-  }, []);
+  // Só aparece como ligado enquanto o pedido está em rota.
+  const active = sharing && enabled;
 
   function toggle() {
-    if (sharing) {
+    if (active) {
       stop();
       toast.success("Localização compartilhada desligada.");
-    } else {
+    } else if (start()) {
       setSharing(true);
-      start();
       toast.success("Compartilhando sua localização. O cliente vê onde você está. 📡");
     }
   }
 
-  // Para de compartilhar quando o pedido sai de rota / o componente sai da tela.
+  // Pedido saiu de rota: encerra o GPS. (Antes, o cleanup deste efeito rodava a
+  // cada mudança de `sharing` e matava o watch recém-criado ao ligar.)
   useEffect(() => {
-    if (!enabled && sharing) stop();
-    return () => {
-      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
-    };
-  }, [enabled, sharing, stop]);
+    if (!enabled) clearGeoWatch();
+  }, [enabled, clearGeoWatch]);
+
+  // Componente saiu da tela: encerra o GPS.
+  useEffect(() => clearGeoWatch, [clearGeoWatch]);
 
   return (
     <button
       type="button"
       onClick={toggle}
+      aria-pressed={active}
       className={`flex items-center justify-center gap-2 flex-1 h-11 rounded-xl text-sm font-bold transition-all ${
-        sharing
+        active
           ? "bg-[var(--color-success)]/15 text-[var(--color-success)] border border-[var(--color-success)]/40"
           : "bg-[var(--color-bg-overlay)] text-[var(--color-text-secondary)] border border-[var(--color-border)] hover:border-[var(--color-neon-blue)] hover:text-[var(--color-neon-blue)]"
       }`}
     >
-      {sharing ? (
+      {active ? (
         <>
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--color-success)] opacity-75 animate-ping" />

@@ -83,6 +83,10 @@ export interface CreatePixPaymentInput {
   payerCpf?: string;
   /** URL pública do webhook (notification_url). */
   notificationUrl: string;
+  /** Chave de idempotência. Padrão `order-<orderId>`; uma nova tentativa (após o
+   *  PIX anterior expirar/ser recusado) precisa de chave nova, senão o MP devolve
+   *  a MESMA cobrança morta. */
+  idempotencyKey?: string;
 }
 
 export interface MercadoPagoPixPayment {
@@ -121,7 +125,7 @@ export async function createPixPayment(
 ): Promise<MercadoPagoPixPayment> {
   const data = await mpFetch<MpPaymentResponse>("/v1/payments", {
     method: "POST",
-    headers: { "X-Idempotency-Key": `order-${input.orderId}` },
+    headers: { "X-Idempotency-Key": input.idempotencyKey ?? `order-${input.orderId}` },
     body: JSON.stringify({
       transaction_amount: Math.round(input.amount * 100) / 100,
       description: input.description,
@@ -154,10 +158,22 @@ export interface MercadoPagoPayment {
   id: number;
   status: string;
   external_reference?: string;
+  /** Valor cobrado (R$). */
+  transaction_amount?: number;
+  currency_id?: string;
+}
+
+/** Id de pagamento do MP válido (só dígitos). Evita path traversal na URL da API
+ *  (ex.: "../users/me" chamaria outro endpoint com o NOSSO Access Token). */
+export function isValidPaymentId(id: unknown): id is string {
+  return typeof id === "string" && /^\d{1,20}$/.test(id);
 }
 
 /** Busca um pagamento na API do MP (fonte da verdade para o webhook). */
 export async function getPayment(paymentId: string): Promise<MercadoPagoPayment> {
+  if (!isValidPaymentId(paymentId)) {
+    throw new MercadoPagoError(`id de pagamento inválido: ${String(paymentId).slice(0, 40)}`, 400);
+  }
   return mpFetch<MercadoPagoPayment>(`/v1/payments/${paymentId}`, { method: "GET" });
 }
 
