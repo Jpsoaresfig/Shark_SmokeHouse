@@ -13,8 +13,10 @@ const DAY_MS = 86400000;
 export interface CampaignStats {
   /** Execuções persistidas (mensagens enviadas). */
   sent: number;
-  /** Execuções com status "error". */
+  /** Execuções com status "error"/"failed". */
   errored: number;
+  /** Envios bloqueados (anti-spam/opt-out) — NÃO contam como enviados. */
+  skipped: number;
   /** Toques reais na notificação/link (eventos "campaign_clicked", um por
    *  notificação, deduplicado no servidor pelo doc id `click:<notifId>`). */
   clicks: number;
@@ -27,12 +29,17 @@ export function campaignStats(
   executions: MarketingExecution[],
   events: MarketingEvent[],
 ): CampaignStats {
-  const sent = executions.length;
-  const errored = executions.filter((e) => e.status === "error").length;
+  // Só "processed" é mensagem entregue. Registros de bloqueio (skipped_spam —
+  // anti-spam/opt-out), cancelados e erros também ficam em marketingExecutions
+  // com o campaignId e antes inflavam "Enviadas" (e derrubavam o CTR).
+  const sent = executions.filter((e) => e.status === "processed").length;
+  const errored = executions.filter((e) => e.status === "error" || e.status === "failed").length;
+  const skipped = executions.filter((e) => e.status === "skipped_spam").length;
   const clicks = events.filter((e) => e.type === "campaign_clicked").length;
   return {
     sent,
     errored,
+    skipped,
     clicks,
     ctr: sent > 0 ? Math.round((clicks / sent) * 1000) / 10 : 0,
   };

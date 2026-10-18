@@ -47,12 +47,12 @@ export const AUTOMATION_EVENT_DESCRIPTIONS: Record<MarketingAutomationEvent, str
   welcome: "Novo cadastro (primeiros dias). Envia uma única vez.",
   first_purchase: "Logo após a 1ª compra paga. Envia uma única vez.",
   birthday: "No aniversário do cliente (X dias antes, configurável).",
-  abandoned_cart: "Carrinho com itens abandonado há X horas (configurável).",
+  abandoned_cart: "Carrinho com itens parado há pelo menos X horas (configurável). Um lembrete por carrinho.",
   points_expiring: "Pontos do Clube Shark prestes a expirar (X dias, configurável).",
-  big_spender: "Gasto total acima do limite configurado (VIP).",
-  inactive_30: "Sem compra há X dias (configurável).",
-  inactive_60: "Sem compra há muito tempo (60+ dias).",
-  promo_product: "Promoção de produto/categoria para um público-alvo.",
+  big_spender: "Gasto total acima do limite configurado (VIP). No máx. 1 envio a cada 180 dias.",
+  inactive_30: "Sem compra há X dias (configurável). Uma vez por período sem compra.",
+  inactive_60: "Sem compra há muito tempo (60+ dias). Uma vez por período sem compra.",
+  promo_product: "Promoção de produto/categoria para um público-alvo. No máx. 1 envio a cada 30 dias por cliente.",
 };
 
 export const CAMPAIGN_STATUS_LABELS: Record<MarketingCampaignStatus, string> = {

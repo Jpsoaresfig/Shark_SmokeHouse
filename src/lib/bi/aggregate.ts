@@ -16,7 +16,7 @@
  *    usa os ITENS do filtro (subtotais), mantendo coerência com o ranking.
  */
 import {
-  saleStatus, saleCost, saleGrossProfit, saleCommission,
+  saleStatus, saleCost, saleGrossProfit, saleCommission, saleNetProducts,
 } from "@/lib/sales/helpers";
 import { DAY_LABELS } from "@/lib/businessHours";
 import { inRange, previousRange, storeParts, monthStoreKey, rangeLengthDays } from "./periods";
@@ -67,8 +67,10 @@ function orderPayment(order: Order): { method: string; status: string } {
 
 /** Pedido online FINALIZADO: entregue e com pagamento confirmado. Pedidos em
  *  andamento (aguardando comprovante, em rota, preparando, etc.) ou que foram
- *  cancelados/estornados não contam como venda no BI. */
+ *  cancelados/estornados não contam como venda no BI. Resgates por pontos
+ *  (total 0, `isRedemption`) também não são venda. */
 function isFinalizedOrder(order: Order): boolean {
+  if (order.isRedemption) return false;
   if (order.status !== "delivered") return false;
   return orderPayment(order).status === "paid";
 }
@@ -197,20 +199,25 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
     if (!inRange(d, range)) continue;
 
     let revenue: number;
+    let profitBase: number;
     let cost: number;
     let units: number;
     if (hasItemFilter) {
       const match = s.items.filter((it) => matchesItemFilter({ ...it, brand: productMap.get(it.productId)?.brand }, filters));
       if (match.length === 0) continue;
       revenue = match.reduce((a, it) => a + (it.subtotal ?? it.price * it.quantity), 0);
+      profitBase = revenue;
       cost = match.reduce((a, it) => a + (it.costPrice ?? costMap.get(it.productId) ?? 0) * it.quantity, 0);
       units = match.reduce((a, it) => a + it.quantity, 0);
     } else {
       revenue = s.total ?? 0;
+      // Lucro = produtos líquidos (sem frete/taxa de cartão, após descontos) −
+      // custo — mesma definição do Financeiro (saleGrossProfit).
+      profitBase = saleNetProducts(s);
       cost = saleCost(s, costMap);
       units = s.items.reduce((a, it) => a + it.quantity, 0);
     }
-    rows.push({ transactionId: s.id, source: "pdv", date: d, revenue, cost, units, sellerId: s.sellerId, sellerName: s.sellerName, paymentMethod: s.paymentMethod });
+    rows.push({ transactionId: s.id, source: "pdv", date: d, revenue, profitBase, cost, units, sellerId: s.sellerId, sellerName: s.sellerName, paymentMethod: s.paymentMethod });
   }
 
   for (const o of source.orders) {
@@ -224,6 +231,7 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
     if (!inRange(d, range)) continue;
 
     let revenue: number;
+    let profitBase: number;
     let cost: number;
     let units: number;
     if (hasItemFilter) {
@@ -233,14 +241,17 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
       });
       if (match.length === 0) continue;
       revenue = match.reduce((a, it) => a + it.price * it.quantity, 0);
+      profitBase = revenue;
       cost = match.reduce((a, it) => a + (productMap.get(it.productId)?.costPrice ?? 0) * it.quantity, 0);
       units = match.reduce((a, it) => a + it.quantity, 0);
     } else {
       revenue = o.total ?? 0;
+      // Frete e taxa de cartão não são margem de produto (mesma regra do PDV).
+      profitBase = Math.max(0, revenue - (Number(o.deliveryFee) || 0) - (Number(o.cardFee) || 0));
       cost = o.items.reduce((a, it) => a + (productMap.get(it.productId)?.costPrice ?? 0) * it.quantity, 0);
       units = o.items.reduce((a, it) => a + it.quantity, 0);
     }
-    rows.push({ transactionId: o.id, source: "online", date: d, revenue, cost, units, paymentMethod: pay.method, neighborhood: o.deliveryAddress?.neighborhood });
+    rows.push({ transactionId: o.id, source: "online", date: d, revenue, profitBase, cost, units, paymentMethod: pay.method, neighborhood: o.deliveryAddress?.neighborhood });
   }
   return rows;
 }
@@ -249,13 +260,14 @@ export function buildTxnRows(source: BiSource, range: { start: Date; end: Date }
 
 export function computeSummary(source: BiSource, range: { start: Date; end: Date }, filters: BiFilters): BiSummary {
   const rows = buildTxnRows(source, range, filters);
-  let revenue = 0, cost = 0, units = 0;
+  let revenue = 0, profitBase = 0, cost = 0, units = 0;
   for (const r of rows) {
     revenue += r.revenue;
+    profitBase += r.profitBase;
     cost += r.cost;
     units += r.units;
   }
-  const profit = revenue - cost;
+  const profit = profitBase - cost;
   return {
     revenue,
     cost,
@@ -275,7 +287,9 @@ export function computePeriodComparison(
 ): BiPeriodComparison {
   const current = computeSummary(source, range, filters);
   const previous = computeSummary(source, previousRange(range), filters);
-  const pct = (cur: number, prev: number): number | null => (prev !== 0 ? ((cur - prev) / prev) * 100 : null);
+  // |prev| no denominador: com anterior negativo (prejuízo), melhorar de −100
+  // para −50 é +50% (antes o sinal invertia e aparecia como queda).
+  const pct = (cur: number, prev: number): number | null => (prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null);
   return {
     current,
     previous,
@@ -516,7 +530,7 @@ export function evolution(
     }
     const value =
       metric === "revenue" ? r.revenue :
-      metric === "profit" ? r.revenue - r.cost :
+      metric === "profit" ? r.profitBase - r.cost :
       metric === "transactions" ? 1 :
       r.units;
     bucket.value += value;

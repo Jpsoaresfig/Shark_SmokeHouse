@@ -18,6 +18,15 @@ import type { DeliveryArea } from "@/types";
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
+/** Frete digitado → número (R$, 2 casas). Vazio, não numérico ou negativo → null. */
+function parseFee(raw: string): number | null {
+  const v = raw.trim().replace(",", ".");
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 export default function AdminDelivery() {
   const [areas, setAreas] = useState<DeliveryArea[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,13 +82,18 @@ export default function AdminDelivery() {
       toast.error("Informe o bairro e o valor do frete.");
       return;
     }
+    const feeNum = parseFee(fee);
+    if (feeNum === null) {
+      toast.error("Valor do frete inválido. Use um número maior ou igual a zero (ex.: 7,50).");
+      return;
+    }
     if (areas.some(a => normalizeArea(a.name) === normalizeArea(n))) {
       toast.error("Esse bairro já está na lista.");
       return;
     }
     setSaving(true);
     try {
-      await createDeliveryArea(n, Number(fee), region.trim() || undefined);
+      await createDeliveryArea(n, feeNum, region.trim() || undefined);
       setName(""); setFee("");
       setAreas(await getDeliveryAreas(true));
       toast.success("Bairro adicionado!");
@@ -91,8 +105,14 @@ export default function AdminDelivery() {
   }
 
   async function saveFee(area: DeliveryArea) {
+    // Valor inválido/vazio NÃO vira R$ 0 (frete grátis) silenciosamente.
+    const feeNum = parseFee(editFee);
+    if (feeNum === null) {
+      toast.error("Valor do frete inválido. Use um número maior ou igual a zero (ex.: 7,50).");
+      return;
+    }
     try {
-      await updateDeliveryArea(area.id, { fee: Number(editFee) || 0 });
+      await updateDeliveryArea(area.id, { fee: feeNum });
       setEditId(null);
       setAreas(await getDeliveryAreas(true));
     } catch {

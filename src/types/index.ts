@@ -297,6 +297,10 @@ export interface Order {
   awaitingConfirmation?: boolean;
   /** Guard: estoque já foi baixado por este pedido (evita baixa/estorno em dobro). */
   stockApplied?: boolean;
+  /** "server" = valores calculados por /api/orders/create (total confiável). */
+  pricedBy?: "server";
+  /** Guard: pontos de um resgate cancelado já foram devolvidos. */
+  pointsRefunded?: boolean;
   /** Pedido gerado por resgate de pontos (não baixa estoque — o resgate já baixa). */
   isRedemption?: boolean;
   /** Pontos gastos no resgate (quando isRedemption). */

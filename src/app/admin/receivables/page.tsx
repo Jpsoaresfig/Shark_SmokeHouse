@@ -119,8 +119,9 @@ export default function AdminReceivables() {
     if (!(amount > 0)) { toast.error("Informe um valor válido."); return; }
     setPaySaving(true);
     try {
-      await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
+      const res = await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
       toast.success("Recebimento registrado.");
+      if (res.pointsError) toast.warning(`Pontos não creditados: ${res.pointsError}. Ajuste manualmente.`);
       setPayTarget(null);
       setPayAmount("");
       await load(true);
@@ -136,8 +137,9 @@ export default function AdminReceivables() {
     if (!window.confirm(`Quitar o saldo de ${formatCurrency(saleOutstanding(sale))} de ${sale.customerName || "este cliente"}? Será registrado como recebido.`)) return;
     setSettlingId(sale.id);
     try {
-      await markSalePaid(sale.id, user.uid);
+      const res = await markSalePaid(sale.id, user.uid);
       toast.success("Cobrança quitada.");
+      if (res.pointsError) toast.warning(`Pontos não creditados: ${res.pointsError}. Ajuste manualmente.`);
       await load(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Não foi possível quitar.");

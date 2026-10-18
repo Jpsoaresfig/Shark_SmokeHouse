@@ -16,12 +16,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { formatCurrency } from "@/lib/utils";
-import { getOrders, subscribeOrders } from "@/lib/firebase/orders";
+import { subscribeOrders } from "@/lib/firebase/orders";
+import { collection, getDocs, orderBy, query, Timestamp, where } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
 import { getAllUsers } from "@/lib/firebase/users";
 import { getProducts } from "@/lib/firebase/products";
 import { getSales } from "@/lib/firebase/sales";
-import { saleStatus, saleReceivedAmount, saleOutstanding, internalProductIdsOf, filterNormalSales } from "@/lib/sales/helpers";
+import { saleStatus, saleOutstanding, internalProductIdsOf, filterNormalSales, cashEntriesForSale } from "@/lib/sales/helpers";
+import { storeParts, storeMidnight, ymdStoreKey, monthStoreKey } from "@/lib/bi/periods";
 import { resolveOrderPayment } from "@/lib/payments";
 import { toast } from "@/stores/toastStore";
 import { useBusinessHours } from "@/stores/siteSettingsStore";
@@ -45,6 +48,17 @@ function toDate(value: any): Date {
   if (typeof value === "string") return new Date(value);
   if (typeof value.toDate === "function") return value.toDate();
   return new Date(0);
+}
+
+/** Pedidos criados a partir de `since` (sem o teto de 200 da lista recente —
+ *  num mês movimentado o teto cortava pedidos e subestimava a receita). */
+async function getOrdersSince(since: Date): Promise<Order[]> {
+  const snap = await getDocs(query(
+    collection(db, "orders"),
+    where("createdAt", ">=", Timestamp.fromDate(since)),
+    orderBy("createdAt", "desc"),
+  ));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
 }
 
 function timeAgo(date: Date): string {
@@ -99,9 +113,16 @@ export default function AdminDashboard() {
   const load = useCallback(async (force = false) => {
     setLoading(true);
     try {
-        // Dashboard only needs recent data — limit to avoid fetching entire collections
+        // Datas no fuso da LOJA (não do aparelho): mês atual/anterior e hoje/ontem.
+        const t = storeParts(new Date());
+        const prevMonthStart = storeMidnight(t.y, t.m - 1, 1);
+        const thisMonthKey = monthStoreKey(new Date());
+        const prevMonthKey = monthStoreKey(prevMonthStart);
+        const todayKey = t.iso;
+        const yesterdayKey = ymdStoreKey(storeMidnight(t.y, t.m, t.d - 1));
+
         const [orders, allSales, users, products] = await Promise.all([
-          getOrders(200, force),       // last 200 orders covers months of stats
+          getOrdersSince(prevMonthStart), // todos os pedidos do mês atual e anterior
           getSales(undefined, undefined, force), // all PDV sales for revenue calculation
           getAllUsers(500, force),     // last 500 users enough for customer count
           getProducts(force),          // all products needed for low-stock calculation
@@ -109,24 +130,19 @@ export default function AdminDashboard() {
         // Vendas com produto interno ficam só na área interna (vendas separadas).
         const sales = filterNormalSales(allSales, internalProductIdsOf(products));
 
-
-        const now = new Date();
-        const thisMonth = now.getMonth();
-        const thisYear = now.getFullYear();
-        const prevMonth = thisMonth === 0 ? 11 : thisMonth - 1;
-        const prevYear = thisMonth === 0 ? thisYear - 1 : thisYear;
-
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const yesterdayStart = new Date(todayStart);
-        yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-
         let monthRevenue = 0;
         let prevMonthRevenue = 0;
         let todayOrders = 0;
         let yesterdayOrders = 0;
         let pdvSold = 0, pdvReceived = 0, pdvPending = 0, pdvDiscounts = 0;
         let countPaid = 0, countPending = 0, countCancelled = 0;
+        // Hoje/ontem contados por dia (independe do mês — no dia 1, "ontem" é
+        // o último dia do mês anterior e antes ficava sempre 0).
+        const countDay = (d: Date) => {
+          const k = ymdStoreKey(d);
+          if (k === todayKey) todayOrders++;
+          else if (k === yesterdayKey) yesterdayOrders++;
+        };
 
         // Online orders: só entram na RECEITA quando o pagamento foi confirmado
         // (admin clicou em "Confirmar pagamento" → paid). Pagamentos cancelados
@@ -135,42 +151,38 @@ export default function AdminDashboard() {
           if (order.status === "cancelled") continue;
           const isPaid = resolveOrderPayment(order).status === "paid";
           const d = toDate(order.createdAt);
-          const m = d.getMonth();
-          const y = d.getFullYear();
-          if (m === thisMonth && y === thisYear) {
+          const mk = monthStoreKey(d);
+          countDay(d);
+          if (mk === thisMonthKey) {
             if (isPaid) monthRevenue += order.total ?? 0;
-            if (d >= todayStart) todayOrders++;
-            else if (d >= yesterdayStart) yesterdayOrders++;
-          } else if (m === prevMonth && y === prevYear) {
+          } else if (mk === prevMonthKey) {
             if (isPaid) prevMonthRevenue += order.total ?? 0;
           }
         }
 
-        // PDV sales — a RECEITA (caixa) considera apenas o valor efetivamente
-        // recebido; vendas pendentes/parciais entram só como "a receber".
-        // Canceladas não contam como venda nem receita.
+        // PDV sales — a RECEITA (caixa) considera o valor efetivamente recebido
+        // NA DATA DO RECEBIMENTO (histórico `payments`): fiado vendido no mês
+        // passado e quitado neste mês entra neste mês. Vendas pendentes/parciais
+        // entram só como "a receber". Canceladas não contam como venda nem receita.
         for (const sale of sales) {
+          for (const entry of cashEntriesForSale(sale)) {
+            const mk = monthStoreKey(toDate(entry.at));
+            if (mk === thisMonthKey) { monthRevenue += entry.amount; pdvReceived += entry.amount; }
+            else if (mk === prevMonthKey) prevMonthRevenue += entry.amount;
+          }
           const d = toDate(sale.createdAt);
-          const m = d.getMonth();
-          const y = d.getFullYear();
-          const inThisMonth = m === thisMonth && y === thisYear;
+          const inThisMonth = monthStoreKey(d) === thisMonthKey;
           const st = saleStatus(sale);
           if (st === "cancelled") {
             if (inThisMonth) countCancelled++;
             continue;
           }
+          countDay(d);
           if (inThisMonth) {
-            const received = saleReceivedAmount(sale);
-            monthRevenue += received;            // caixa
-            pdvReceived += received;
             pdvSold += sale.total ?? 0;          // competência (exclui canceladas)
             pdvPending += saleOutstanding(sale);
             pdvDiscounts += (sale.discount ?? 0) + (sale.manualDiscount?.amount ?? 0);
             if (st === "paid") countPaid++; else countPending++;
-            if (d >= todayStart) todayOrders++;
-            else if (d >= yesterdayStart) yesterdayOrders++;
-          } else if (m === prevMonth && y === prevYear) {
-            prevMonthRevenue += saleReceivedAmount(sale);
           }
         }
 
@@ -230,18 +242,15 @@ export default function AdminDashboard() {
   /* ── Chart data — daily (last 30 days) or monthly (last 12 months) ── */
   const dailyChart: ChartPoint[] = useMemo(() => {
     const days = 30;
+    // Chaves "y-m(0-based)-d" no fuso da LOJA (não do aparelho).
     const buckets = new Map<string, number>();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const t = storeParts(new Date());
+    const keyOf = (d: Date) => { const p = storeParts(d); return `${p.y}-${p.m - 1}-${p.d}`; };
     for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      buckets.set(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`, 0);
+      buckets.set(keyOf(storeMidnight(t.y, t.m, t.d - i)), 0);
     }
     const addToDay = (createdAt: unknown, amount: number) => {
-      const d = toDate(createdAt);
-      d.setHours(0, 0, 0, 0);
-      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const key = keyOf(toDate(createdAt));
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
@@ -250,7 +259,8 @@ export default function AdminDashboard() {
       addToDay(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
-      addToDay(sale.createdAt, saleReceivedAmount(sale)); // caixa (cancelada/pendente não infla)
+      // Caixa: cada recebimento na sua data (cancelada/pendente não infla).
+      for (const entry of cashEntriesForSale(sale)) addToDay(entry.at, entry.amount);
     }
     return Array.from(buckets.entries()).map(([key, value]) => {
       const [y, m, d] = key.split("-").map(Number);
@@ -266,14 +276,13 @@ export default function AdminDashboard() {
   const monthlyChart: ChartPoint[] = useMemo(() => {
     const months = 12;
     const buckets = new Map<string, number>();
-    const now = new Date();
+    const t = storeParts(new Date());
+    const keyOf = (d: Date) => { const p = storeParts(d); return `${p.y}-${p.m - 1}`; };
     for (let i = months - 1; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      buckets.set(`${d.getFullYear()}-${d.getMonth()}`, 0);
+      buckets.set(keyOf(storeMidnight(t.y, t.m - i, 1)), 0);
     }
     const addToMonth = (createdAt: unknown, amount: number) => {
-      const d = toDate(createdAt);
-      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const key = keyOf(toDate(createdAt));
       if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + amount);
     };
     for (const order of allOrders) {
@@ -282,7 +291,7 @@ export default function AdminDashboard() {
       addToMonth(order.createdAt, order.total ?? 0);
     }
     for (const sale of allSales) {
-      addToMonth(sale.createdAt, saleReceivedAmount(sale)); // caixa
+      for (const entry of cashEntriesForSale(sale)) addToMonth(entry.at, entry.amount); // caixa
     }
     return Array.from(buckets.entries()).map(([key, value]) => {
       const [y, m] = key.split("-").map(Number);

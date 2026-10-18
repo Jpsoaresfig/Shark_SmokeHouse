@@ -3,10 +3,13 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { checkOrderPricing, type PricingProduct } from "@/lib/payments/pricing";
 import { installmentFeePercent, DEFAULT_INSTALLMENT_FEES } from "@/lib/payments/installments";
 import { manualGateway } from "@/lib/payments/manual";
-import { mercadopagoGateway } from "@/lib/payments/mercadopago";
+import { mercadopagoGateway, isMercadoPagoConfigured } from "@/lib/payments/mercadopago";
 import { DEFAULT_DELIVERY_AREAS } from "@/lib/firebase/delivery.defaults";
 import { normalizeCouponCode } from "@/lib/coupons";
 import { findStockShortages, describeShortages } from "@/lib/stock";
+import { isOpenNow, zonedClock, STORE_TIMEZONE } from "@/lib/businessHours";
+import { parseBusinessHours } from "@/lib/orderStatusPlan";
+import { maybeProcessReservedQueue } from "@/lib/firebase/orders.server";
 import type { Address, CartItem, Coupon, InstallmentFee, PaymentMethod, Product } from "@/types";
 
 /**
@@ -125,9 +128,11 @@ function sanitizeAddress(raw: unknown): Address {
   return addr;
 }
 
-/** Aplica a baixa de estoque nos dados do produto (mesma regra do client: com
- *  grade, o estoque do produto é a soma das variações). */
-function stockUpdateFor(product: Product, items: CartItem[]) {
+/** Aplica a baixa (`sign` -1) ou o estorno (+1) de estoque nos dados do produto
+ *  (mesma regra do client: com grade, o estoque do produto é a soma das variações).
+ *  Sem travar em 0: baixa e estorno precisam ser simétricos, senão o estorno cria
+ *  estoque fantasma (a falta de estoque já é barrada antes, na transação). */
+export function stockUpdateFor(product: Product, items: CartItem[], sign: 1 | -1 = -1) {
   const mine = items.filter((i) => i.productId === product.id);
   let variations = product.variations;
   let stock = Number(product.stock) || 0;
@@ -136,12 +141,12 @@ function stockUpdateFor(product: Product, items: CartItem[]) {
   if (byVariation.length && variations?.length) {
     variations = variations.map((v) => {
       const qty = byVariation.filter((i) => i.variationId === v.id).reduce((s, i) => s + i.quantity, 0);
-      return qty ? { ...v, stock: Math.max(0, (v.stock ?? 0) - qty) } : v;
+      return qty ? { ...v, stock: (v.stock ?? 0) + sign * qty } : v;
     });
     stock = variations.reduce((s, v) => s + (v.stock ?? 0), 0);
   }
   const plainQty = plain.reduce((s, i) => s + i.quantity, 0);
-  if (plainQty) stock = Math.max(0, stock - plainQty);
+  if (plainQty) stock += sign * plainQty;
   return { stock, ...(variations && byVariation.length ? { variations } : {}) };
 }
 
@@ -151,9 +156,19 @@ export async function createOrderAdmin(
 ): Promise<{ id: string; total: number }> {
   const db = getAdminDb();
 
+  // Disparo oportunista da fila de reservados (o cron é diário): throttled em
+  // 5 min e sem bloquear/derrubar a criação do pedido.
+  void maybeProcessReservedQueue().catch((err) => console.error("[orders-queue] disparo oportunista", err));
+
   const method = str(input.paymentMethod, 32) as PaymentMethod;
   if (!CHECKOUT_METHODS.includes(method)) {
     throw new OrderCreateError("Forma de pagamento inválida.", "invalid");
+  }
+  if (method === "mercadopago" && !isMercadoPagoConfigured()) {
+    throw new OrderCreateError(
+      "Pagamento pelo Mercado Pago indisponível no momento. Escolha outra forma de pagamento.",
+      "invalid",
+    );
   }
   const items = sanitizeItems(input.items);
   const deliveryAddress = sanitizeAddress(input.deliveryAddress);
@@ -261,6 +276,12 @@ export async function createOrderAdmin(
 
   /* ── Pagamento e metadados montados pelo servidor ── */
   const total = pricing.expectedTotal;
+  if (method === "mercadopago" && total <= 0) {
+    throw new OrderCreateError(
+      "Pedido com total R$ 0,00 não precisa de PIX — escolha outra forma de pagamento.",
+      "invalid",
+    );
+  }
   const gateway = method === "mercadopago" ? mercadopagoGateway : manualGateway;
   const payment = gateway.createPayment({
     method,
@@ -269,7 +290,9 @@ export async function createOrderAdmin(
     pixName: pay.pixName,
     ...(installments ? { installments } : {}),
   });
-  const reserved = input.reserved === true;
+  // Fila de reservados decidida pelo SERVIDOR (o flag `reserved` do navegador é
+  // ignorado): mesmo cálculo de processReservedQueue, no fuso da loja.
+  const reserved = !isOpenNow(parseBusinessHours(settings.businessHours), zonedClock(STORE_TIMEZONE)).open;
   const status = reserved ? "reserved" : "received";
   const awaitingConfirmation = method === "whatsapp";
   const applyStock = !awaitingConfirmation;
@@ -307,6 +330,8 @@ export async function createOrderAdmin(
     motoboyId: null,
     motoboyName: null,
     stockApplied: applyStock,
+    // Valores conferidos aqui (checkOrderPricing): o total gravado é confiável.
+    pricedBy: "server",
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -395,5 +420,75 @@ export async function confirmWhatsappOrderAdmin(uid: string, orderId: string): P
       const product = { id: s.id, ...(s.data() as Omit<Product, "id">) } as Product;
       tx.update(s.ref, { ...stockUpdateFor(product, items), updatedAt: FieldValue.serverTimestamp() });
     }
+  });
+}
+
+/**
+ * Cliente responde "Não concluí" à pergunta "A compra foi efetuada?" (fluxo
+ * WhatsApp): cancela o próprio pedido no servidor, numa transação — inclusive
+ * quando ele ainda está na fila de reservados (loja fechada), o que a regra do
+ * Firestore para o cliente não cobria. Também libera o uso do cupom do pedido
+ * (apaga `couponRedemptions`) e estorna o estoque se ele chegou a ser baixado.
+ * Idempotente: pedido já cancelado não é tocado de novo.
+ */
+export async function declineWhatsappOrderAdmin(uid: string, orderId: string): Promise<void> {
+  const db = getAdminDb();
+  const ref = db.collection("orders").doc(orderId);
+  const redemptionsQuery = db.collection("couponRedemptions").where("orderId", "==", orderId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = snap.data() as
+      | {
+          customerId?: string; status?: string; awaitingConfirmation?: boolean;
+          stockApplied?: boolean; items?: CartItem[]; paymentMethod?: string;
+          paymentStatus?: string; payment?: { method?: string; status?: string };
+        }
+      | undefined;
+    if (!current || current.customerId !== uid) {
+      throw new OrderCreateError("Pedido não encontrado.", "invalid");
+    }
+    if (current.status === "cancelled") return;
+    const isWhatsapp = (current.payment?.method ?? current.paymentMethod) === "whatsapp";
+    if (!isWhatsapp || current.awaitingConfirmation !== true
+        || !["reserved", "received"].includes(String(current.status))) {
+      throw new OrderCreateError("Este pedido não pode mais ser cancelado por aqui. Fale com a loja.", "invalid");
+    }
+
+    const items = (current.items ?? []).filter((i) => i.productId && Number(i.quantity) > 0);
+    const productRefs = current.stockApplied
+      ? [...new Set(items.map((i) => i.productId))].map((id) => db.collection("products").doc(id))
+      : [];
+    // Todas as leituras antes das escritas (exigência das transações).
+    const productSnaps = productRefs.length ? await tx.getAll(...productRefs) : [];
+    const redemptions = await tx.get(redemptionsQuery);
+
+    const now = new Date().toISOString();
+    const note = "Cliente não concluiu a compra pelo WhatsApp";
+    const paymentStatus = current.payment?.status ?? current.paymentStatus;
+    const cancelPayment = paymentStatus !== "paid" && paymentStatus !== "refunded";
+    tx.update(ref, {
+      status: "cancelled",
+      statusHistory: FieldValue.arrayUnion({ status: "cancelled", timestamp: now, note, updatedBy: uid }),
+      ...(cancelPayment
+        ? {
+            "payment.status": "cancelled",
+            "payment.history": FieldValue.arrayUnion({
+              status: "cancelled",
+              timestamp: now,
+              note: "Compra não concluída pelo cliente (WhatsApp)",
+            }),
+            paymentStatus: "cancelled", // espelho legado
+          }
+        : {}),
+      ...(current.stockApplied ? { stockApplied: false } : {}),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    for (const s of productSnaps) {
+      if (!s.exists) continue;
+      const product = { id: s.id, ...(s.data() as Omit<Product, "id">) } as Product;
+      tx.update(s.ref, { ...stockUpdateFor(product, items, 1), updatedAt: FieldValue.serverTimestamp() });
+    }
+    // Pedido cancelado não conta como uso do cupom (libera o limite por CPF/conta).
+    for (const d of redemptions.docs) tx.delete(d.ref);
   });
 }

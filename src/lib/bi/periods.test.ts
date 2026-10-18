@@ -95,13 +95,46 @@ describe("rangeForPreset", () => {
 });
 
 describe("previousRange", () => {
-  it("retorna período de mesma duração imediatamente anterior", () => {
-    const r = rangeForPreset("thisMonth", new Date("2026-03-15T12:00:00Z"));
-    const prev = previousRange(r);
+  it("mês inteiro já encerrado → mês anterior inteiro (alinhado)", () => {
+    const now = new Date("2026-04-10T12:00:00Z");
+    const r = rangeForPreset("lastMonth", now); // março
+    const prev = previousRange(r, now);
     expect(prev.end.getTime()).toBe(r.start.getTime() - 1);
-    expect(prev.end.getTime() - prev.start.getTime()).toBe(r.end.getTime() - r.start.getTime());
-    expect(storeParts(prev.start).iso).toBe("2026-01-29");
+    expect(storeParts(prev.start).iso).toBe("2026-02-01");
     expect(storeParts(prev.end).iso).toBe("2026-02-28");
+    // Setembro (30) → agosto inteiro (31).
+    const sep = rangeForPreset("lastMonth", new Date("2026-10-10T12:00:00Z"));
+    const prevSep = previousRange(sep, new Date("2026-10-10T12:00:00Z"));
+    expect(storeParts(prevSep.start).iso).toBe("2026-08-01");
+    expect(storeParts(prevSep.end).iso).toBe("2026-08-31");
+  });
+
+  it("este mês compara só os dias decorridos, alinhado ao mês anterior", () => {
+    const now = new Date("2026-03-15T12:00:00Z");
+    const r = rangeForPreset("thisMonth", now);
+    const prev = previousRange(r, now);
+    expect(storeParts(prev.start).iso).toBe("2026-02-01");
+    expect(storeParts(prev.end).iso).toBe("2026-02-15");
+    expect(storeParts(prev.end).hour).toBe(23);
+    // Dia 31 → mês anterior mais curto termina no último dia dele.
+    const now31 = new Date("2026-03-31T12:00:00Z");
+    const prev31 = previousRange(rangeForPreset("thisMonth", now31), now31);
+    expect(storeParts(prev31.end).iso).toBe("2026-02-28");
+  });
+
+  it("este ano compara com o mesmo trecho do ano anterior", () => {
+    const now = new Date("2026-10-18T12:00:00Z");
+    const prev = previousRange(rangeForPreset("thisYear", now), now);
+    expect(storeParts(prev.start).iso).toBe("2025-01-01");
+    expect(storeParts(prev.end).iso).toBe("2025-10-18");
+  });
+
+  it("período com dias futuros (custom) usa só a parte decorrida", () => {
+    const now = new Date("2026-03-15T12:00:00Z");
+    const r = { start: storeMidnight(2026, 3, 10), end: new Date(storeMidnight(2026, 3, 20).getTime() - 1) };
+    const prev = previousRange(r, now);
+    expect(prev.end.getTime()).toBe(r.start.getTime() - 1);
+    expect(storeParts(prev.start).iso).toBe("2026-03-04"); // 6 dias (10–15) antes
   });
 
   it("períodos curtos (1 dia) têm anterior com 1 dia", () => {

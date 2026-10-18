@@ -77,8 +77,8 @@ export async function POST(request: NextRequest) {
         orderId: orderRef.id,
         createdAt: FieldValue.serverTimestamp(),
       });
-      // Mesmo formato do createOrder do cliente (pedido pago com pontos, sem
-      // nova baixa de estoque — já baixado acima).
+      // Mesmo formato do createOrder do cliente (pedido pago com pontos; a baixa
+      // de estoque já foi feita acima).
       tx.set(orderRef, {
         motoboyId: null,
         motoboyName: null,
@@ -110,7 +110,9 @@ export async function POST(request: NextRequest) {
         pointsEarned: 0,
         isRedemption: true,
         pointsRedeemed: cost,
-        stockApplied: false,
+        // O estoque foi baixado acima: cancelar o resgate estorna (e devolve os
+        // pontos — ver updateOrderStatusAdmin / flag pointsRefunded).
+        stockApplied: true,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });

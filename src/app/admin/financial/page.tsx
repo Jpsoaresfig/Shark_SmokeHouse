@@ -29,7 +29,7 @@ import {
 } from "@/lib/sales/helpers";
 import { toast } from "@/stores/toastStore";
 import { DEFAULT_BI_FILTERS, type BiFilters, type BiSource } from "@/lib/bi/types";
-import { storeMidnight } from "@/lib/bi/periods";
+import { storeMidnight, storeParts, ymdStoreKey } from "@/lib/bi/periods";
 import type { Category, Order, Product, Sale, SalePaymentMethod, UserProfile } from "@/types";
 
 const MONTH_NAMES_FULL = [
@@ -53,9 +53,11 @@ function ymd(d: Date): string {
  *  carregamento do módulo — fora do render, para não chamar `new Date()` durante
  *  a renderização (regra de pureza do React Compiler). */
 function defaultRange(): { start: string; end: string } {
-  const now = new Date();
-  const first = new Date(now.getFullYear(), now.getMonth(), 1);
-  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  // Mês atual no fuso da LOJA (não do aparelho). `new Date(y, m, d)` aqui só
+  // serve de calendário para o ymd() — os números já vêm do relógio da loja.
+  const t = storeParts(new Date());
+  const first = new Date(t.y, t.m - 1, 1);
+  const last = new Date(t.y, t.m, 0);
   return { start: ymd(first), end: ymd(last) };
 }
 const DEFAULT_RANGE = defaultRange();
@@ -207,9 +209,13 @@ export default function AdminFinancial() {
   /* FLUXO DE CAIXA por data do RECEBIMENTO (inclui pagamentos de vendas antigas). */
   const { cashTotal, cashByMethod, cashChart } = useMemo(() => {
     const buckets = new Map<string, number>();
-    // pré-popula cada dia do período (mantém zeros visíveis no gráfico)
-    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
-      buckets.set(ymd(new Date(d)), 0);
+    // pré-popula cada dia do período (mantém zeros visíveis no gráfico) —
+    // dias no fuso da LOJA, mesma base dos limites do intervalo.
+    const s0 = storeParts(rangeStart);
+    for (let i = 0; i < 1500; i++) {
+      const d = storeMidnight(s0.y, s0.m, s0.d + i);
+      if (d > rangeEnd) break;
+      buckets.set(ymdStoreKey(d), 0);
     }
     const byMethod = new Map<SalePaymentMethod, number>();
     let total = 0;
@@ -219,7 +225,7 @@ export default function AdminFinancial() {
         if (when < rangeStart || when > rangeEnd) continue;
         total += e.amount;
         byMethod.set(e.method, (byMethod.get(e.method) ?? 0) + e.amount);
-        const key = ymd(when);
+        const key = ymdStoreKey(when);
         if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + e.amount);
       }
     }
@@ -249,17 +255,18 @@ export default function AdminFinancial() {
     setDonutKeys((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
   const setPreset = (preset: "thisMonth" | "lastMonth" | "last30") => {
-    const now = new Date();
+    // Calendário da LOJA: os números vêm de storeParts; `new Date(y, m, d)` só
+    // normaliza o calendário para o ymd().
+    const t = storeParts(new Date());
     if (preset === "thisMonth") {
-      setStartDate(ymd(new Date(now.getFullYear(), now.getMonth(), 1)));
-      setEndDate(ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)));
+      setStartDate(ymd(new Date(t.y, t.m - 1, 1)));
+      setEndDate(ymd(new Date(t.y, t.m, 0)));
     } else if (preset === "lastMonth") {
-      setStartDate(ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
-      setEndDate(ymd(new Date(now.getFullYear(), now.getMonth(), 0)));
+      setStartDate(ymd(new Date(t.y, t.m - 2, 1)));
+      setEndDate(ymd(new Date(t.y, t.m - 1, 0)));
     } else {
-      const from = new Date(now); from.setDate(from.getDate() - 29);
-      setStartDate(ymd(from));
-      setEndDate(ymd(now));
+      setStartDate(ymd(new Date(t.y, t.m - 1, t.d - 29)));
+      setEndDate(ymd(new Date(t.y, t.m - 1, t.d)));
     }
   };
 

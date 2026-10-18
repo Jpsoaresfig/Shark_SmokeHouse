@@ -129,9 +129,16 @@ service cloud.firestore {
       // Admin SDK), que confere preços/frete/cupom/total e baixa o estoque na
       // mesma transação — o navegador não cria pedido direto.
       allow create: if false;
+      // Mudança de STATUS (com estoque, cupom e pontos de resgate) é feita no
+      // servidor (/api/orders/status, Admin SDK). O motoboy dono da entrega só
+      // grava, pelo navegador, a localização/telefone da rota — antes podia
+      // alterar qualquer campo do pedido (inclusive total/pricedBy).
       allow update: if isAdmin()
         || isSeller()
-        || (isMotoboy() && resource.data.motoboyId == request.auth.uid)
+        || (isMotoboy() && resource.data.motoboyId == request.auth.uid
+            && request.resource.data.motoboyId == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['motoboyLocation', 'motoboyPhone', 'motoboyName', 'motoboyId', 'updatedAt']))
         // Motoboy "pega" uma entrega sem dono, atribuindo-a a si mesmo. Só pode
         // mexer em motoboyId/motoboyName/updatedAt e quando ainda não há dono.
         || (isMotoboy()
@@ -149,11 +156,16 @@ service cloud.firestore {
         // marcar o próprio pedido como PAGO (e liberar o bônus de indicação).
         // Após cancelar, a 2ª escrita (updatePaymentStatus "cancelled") também
         // precisa passar, por isso aceita resource.status == 'cancelled'.
+        // O app atual faz isso no servidor (/api/orders/decline-whatsapp, que
+        // também libera o cupom); a regra fica por compatibilidade e aceita o
+        // pedido ainda "reserved" (feito com a loja fechada).
+        // Nenhum ramo de cliente/motoboy inclui `total`, `pricedBy`, itens ou
+        // preços: esses campos só mudam pelo servidor ou pela equipe.
         || (isAuth() && resource.data.customerId == request.auth.uid
             && (resource.data.get('paymentMethod', '') == 'whatsapp'
                 || resource.data.get('payment', {}).get('method', '') == 'whatsapp')
             && resource.data.get('awaitingConfirmation', false) == true
-            && resource.data.status in ['received', 'cancelled']
+            && resource.data.status in ['reserved', 'received', 'cancelled']
             && request.resource.data.status == 'cancelled'
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['status', 'statusHistory', 'payment', 'paymentStatus', 'updatedAt'])
@@ -245,7 +257,8 @@ service cloud.firestore {
       allow read: if isSeller()
                   || (isAuth() && resource.data.userId == request.auth.uid);
       // Vendedor/admin registram o uso feito no PDV; no checkout online o uso é
-      // gravado pelo servidor na mesma transação do pedido.
+      // gravado pelo servidor na mesma transação do pedido. Ao cancelar o pedido,
+      // o servidor (Admin SDK) apaga o uso — por isso o delete segue só admin.
       allow create: if isSeller();
       allow update, delete: if isAdmin();
     }
@@ -270,7 +283,7 @@ service cloud.firestore {
       allow create, update: if isAuth()
                             && request.auth.uid == uid
                             && request.resource.data.userId == request.auth.uid;
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || isOwner(uid);
     }
 
     // ── Lounge Bookings ───────────────────────────────────────

@@ -73,6 +73,9 @@ export interface BiTxnRow {
   date: Date;
   /** Faturamento da transação (total) OU soma dos itens do filtro. */
   revenue: number;
+  /** Base do lucro: receita de produtos sem frete/taxa de cartão (após
+   *  descontos) — mesma definição do Financeiro. Com filtro de item = revenue. */
+  profitBase: number;
   cost: number;
   units: number;
   sellerId?: string;

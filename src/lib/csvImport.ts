@@ -127,6 +127,7 @@ function firstNonEmptyRow(rows: string[][]): string[] | undefined {
 
 /**
  * "R$ 1.234,56" → 1234.56 · "12,5" → 12.5 · "12.5" → 12.5 · "1.500" → 1500 ·
+ * "1,500" → 1500 · "1,500.00" → 1500 · "1.500,00" → 1500 · "0,500" → 0.5 ·
  * "R$ 1,234.56" → 1234.56 (texto formatado do .xlsx sai no padrão en-US, pois os
  * códigos de formato do Excel não dependem do idioma) · "" → undefined
  */
@@ -142,9 +143,12 @@ export function parseBrNumber(raw: string | undefined): number | undefined {
       ? s.replace(/\./g, "").replace(",", ".")
       : s.replace(/,/g, "");
   } else if (lastComma >= 0) {
-    s = s.replace(",", ".");
-  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
-    // Só pontos em grupos de 3 ("1.500", "12.345.678") = milhar pt-BR.
+    // Só vírgulas em grupos de 3 ("1,500", "12,345,678") = milhar en-US (texto
+    // formatado do .xlsx); senão a vírgula é o decimal pt-BR ("12,5", "0,500").
+    s = /^-?[1-9]\d{0,2}(,\d{3})+$/.test(s) ? s.replace(/,/g, "") : s.replace(",", ".");
+  } else if (/^-?[1-9]\d{0,2}(\.\d{3})+$/.test(s)) {
+    // Só pontos em grupos de 3 ("1.500", "12.345.678") = milhar pt-BR
+    // ("0.500" continua decimal).
     s = s.replace(/\./g, "");
   }
   const n = Number(s);

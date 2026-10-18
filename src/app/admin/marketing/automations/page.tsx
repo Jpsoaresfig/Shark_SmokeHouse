@@ -347,15 +347,41 @@ function SettingsTab({ settings, onSaved }: { settings: NonNullable<ReturnType<t
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
+    // Vazio = padrão; valor explícito é respeitado (inclusive 0 onde faz
+    // sentido). Antes `Number(x) || padrão` transformava 0 em 7/2/… e era
+    // impossível desligar o intervalo entre automáticas.
+    //  - intervalo entre automáticas: 0 = sem intervalo;
+    //  - limite VIP: 0 = qualquer valor gasto;
+    //  - máx. por janela / janela / destinatários: mínimo 1 (para PAUSAR os
+    //    envios use o "Marketing ativo" — 0 aqui só geraria bloqueios).
+    const parse = (raw: string, fallback: number, min: number): number | null => {
+      const t = raw.trim();
+      if (!t) return fallback;
+      const n = Number(t);
+      return Number.isFinite(n) && n >= min ? n : null;
+    };
+    const maxPerDay = parse(form.maxPerDay, 2, 1);
+    const windowHours = parse(form.windowHours, 24, 1);
+    const minDaysBetweenAuto = parse(form.minDaysBetweenAuto, 7, 0);
+    const bigSpenderThreshold = parse(form.bigSpenderThreshold, 400, 0);
+    const maxAudiencePerCampaign = parse(form.maxAudiencePerCampaign, 200, 1);
+    if (maxPerDay == null || windowHours == null || maxAudiencePerCampaign == null) {
+      toast.warning("Máx. mensagens, janela e destinatários precisam ser 1 ou mais. Para pausar, desligue \"Marketing ativo\".");
+      return;
+    }
+    if (minDaysBetweenAuto == null || bigSpenderThreshold == null) {
+      toast.warning("Intervalo e limite VIP não podem ser negativos.");
+      return;
+    }
     setSaving(true);
     try {
       await saveMarketingSettings({
         active: form.active,
-        maxPerDay: Number(form.maxPerDay) || 2,
-        windowHours: Number(form.windowHours) || 24,
-        minDaysBetweenAuto: Number(form.minDaysBetweenAuto) || 7,
-        bigSpenderThreshold: Number(form.bigSpenderThreshold) || 400,
-        maxAudiencePerCampaign: Number(form.maxAudiencePerCampaign) || 200,
+        maxPerDay,
+        windowHours,
+        minDaysBetweenAuto,
+        bigSpenderThreshold,
+        maxAudiencePerCampaign,
       });
       toast.success("Configurações salvas.");
       onSaved();
@@ -371,7 +397,7 @@ function SettingsTab({ settings, onSaved }: { settings: NonNullable<ReturnType<t
       <div className="flex items-start gap-3 rounded-xl border border-[var(--color-neon-blue)]/30 bg-[var(--color-neon-blue-glow)] px-4 py-3">
         <Info className="w-5 h-5 text-[var(--color-neon-blue)] shrink-0 mt-0.5" />
         <p className="text-sm text-[var(--color-text-secondary)]">
-          O cron roda <strong>uma vez por dia</strong> (16h no horário de Brasília). As execuções são idempotentes
+          O cron roda <strong>uma vez por dia</strong> (por volta das 13h no horário de Brasília). As execuções são idempotentes
           (doc id = chave) — rodar de novo no mesmo dia não duplica mensagens nem cupons.
         </p>
       </div>
@@ -385,11 +411,11 @@ function SettingsTab({ settings, onSaved }: { settings: NonNullable<ReturnType<t
             </div>
             <Switch checked={form.active} onCheckedChange={(v) => setForm((f) => ({ ...f, active: v }))} />
           </label>
-          <Input label="Máx. mensagens por cliente na janela" type="number" min={1}
+          <Input label="Máx. mensagens por cliente na janela (mín. 1)" type="number" min={1}
             value={form.maxPerDay} onChange={(e) => setForm((f) => ({ ...f, maxPerDay: e.target.value }))} />
           <Input label="Janela anti-spam (horas)" type="number" min={1}
             value={form.windowHours} onChange={(e) => setForm((f) => ({ ...f, windowHours: e.target.value }))} />
-          <Input label="Intervalo entre automáticas (dias)" type="number" min={0}
+          <Input label="Intervalo entre automáticas (dias — 0 = sem intervalo)" type="number" min={0}
             value={form.minDaysBetweenAuto} onChange={(e) => setForm((f) => ({ ...f, minDaysBetweenAuto: e.target.value }))} />
           <Input label="Limite de VIP / grandes compradores (R$)" type="number" min={0}
             value={form.bigSpenderThreshold} onChange={(e) => setForm((f) => ({ ...f, bigSpenderThreshold: e.target.value }))} />

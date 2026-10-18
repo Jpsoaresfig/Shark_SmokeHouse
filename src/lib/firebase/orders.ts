@@ -6,8 +6,7 @@ import { auth, db } from "@/lib/firebase";
 import { toDate } from "@/lib/utils";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { createOrderStatusNotification } from "@/lib/firebase/notifications";
-import { findStockShortages, describeShortages } from "@/lib/stock";
-import type { Address, CartItem, Order, OrderStatus, PaymentEvent, PaymentMethod, PaymentStatus, Product, StatusEvent } from "@/types";
+import type { Address, CartItem, Order, OrderStatus, PaymentEvent, PaymentMethod, PaymentStatus } from "@/types";
 
 const COL = "orders";
 
@@ -17,70 +16,6 @@ export class StockShortageError extends Error {
     super(message);
     this.name = "StockShortageError";
   }
-}
-
-/**
- * Baixa (`out`) ou estorna (`in`) o estoque dos itens de um pedido, atualizando
- * `products.stock` (e `variations[].stock`) diretamente. Isso roda no contexto do
- * cliente (checkout), por isso NÃO grava em `stockMovements` (coleção restrita a
- * admin/seller nas regras). As regras permitem ao cliente alterar apenas
- * `stock`/`variations`/`updatedAt` do produto — exatamente o que fazemos aqui.
- *
- * Tudo numa ÚNICA transação: com `strict`, confere o estoque e baixa de forma
- * atômica — dois clientes comprando a última unidade ao mesmo tempo não deixam
- * mais o estoque negativo (antes: checagem fora da transação + `increment`).
- */
-async function applyOrderStock(
-  order: { items: CartItem[] },
-  type: "out" | "in",
-  opts: { strict?: boolean } = {},
-): Promise<void> {
-  const sign = type === "out" ? -1 : 1;
-  const items = (order.items ?? []).filter((i) => i.productId && Number(i.quantity) > 0);
-  if (!items.length) return;
-  const ids = [...new Set(items.map((i) => i.productId))];
-
-  await runTransaction(db, async (tx) => {
-    const snaps = await Promise.all(ids.map((id) => tx.get(doc(db, "products", id))));
-    const products = snaps
-      .filter((s) => s.exists())
-      .map((s) => ({ id: s.id, ...(s.data() as Omit<Product, "id">) }) as Product);
-
-    if (type === "out" && opts.strict) {
-      const shortages = findStockShortages(items, products);
-      if (shortages.length) {
-        throw new StockShortageError(
-          `Estoque insuficiente — ${describeShortages(shortages)}. Ajuste o carrinho para continuar.`,
-        );
-      }
-    }
-
-    for (const product of products) {
-      const mine = items.filter((i) => i.productId === product.id);
-      let variations = product.variations;
-      let stock = Number(product.stock) || 0;
-      const byVariation = mine.filter((i) => i.variationId);
-      const plain = mine.filter((i) => !i.variationId);
-      if (byVariation.length && variations?.length) {
-        variations = variations.map((v) => {
-          const qty = byVariation
-            .filter((i) => i.variationId === v.id)
-            .reduce((sum, i) => sum + i.quantity, 0);
-          return qty ? { ...v, stock: Math.max(0, (v.stock ?? 0) + sign * qty) } : v;
-        });
-        // Com grade, o estoque do produto é a soma das variações.
-        stock = variations.reduce((sum, v) => sum + (v.stock ?? 0), 0);
-      }
-      const plainQty = plain.reduce((sum, i) => sum + i.quantity, 0);
-      if (plainQty) stock = Math.max(0, stock + sign * plainQty);
-      tx.update(doc(db, "products", product.id), {
-        stock,
-        ...(variations && byVariation.length ? { variations } : {}),
-        updatedAt: serverTimestamp(),
-      });
-    }
-  });
-  invalidate("products"); // o estoque mudou
 }
 
 /* Firestore rejeita qualquer valor `undefined`, inclusive aninhado em objetos
@@ -378,59 +313,69 @@ export async function createOrder(data: CheckoutOrderInput): Promise<string> {
   return body.id;
 }
 
+/** Chama uma rota de pedidos do servidor com o ID token do usuário logado. */
+async function postOrderApi<T = Record<string, unknown>>(
+  path: string,
+  body: Record<string, unknown>,
+  fallbackError: string,
+): Promise<T> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) throw new Error("Faça login para continuar.");
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new Error(data.error || fallbackError);
+  return data;
+}
+
+/**
+ * Muda o status do pedido (equipe: admin, vendedor, motoboy). Roda no servidor
+ * (/api/orders/status): status, estoque (flag `stockApplied`), cupom liberado e
+ * pontos de resgate devolvidos no cancelamento vão numa única transação — antes
+ * eram escritas separadas no navegador, e parte delas as regras não permitiam.
+ * `by` é mantido na assinatura por compatibilidade: o servidor grava o uid do token.
+ */
 export async function updateOrderStatus(
   id: string,
   status: OrderStatus,
   note?: string,
-  by?: string,
+  _by?: string,
 ): Promise<void> {
-  const ref = doc(db, COL, id);
-  const event: StatusEvent = {
-    status,
-    timestamp: new Date().toISOString(),
-    ...(note ? { note } : {}),
-    ...(by ? { updatedBy: by } : {}),
-  };
-
-  // Status + flag de estoque na MESMA escrita (transação): dois cancelamentos
-  // simultâneos (admin + cliente, ou duplo clique) não estornam o estoque em dobro.
-  //  - cancelar com estoque baixado → estorna;
-  //  - reabrir um cancelado (admin) → baixa de novo o que foi estornado.
-  const { order, stockMove } = await runTransaction(db, async (tx) => {
-    const snap = await tx.get(ref);
-    const current = snap.data() as Order | undefined;
-    let move: "in" | "out" | null = null;
-    if (current) {
-      if (status === "cancelled" && current.stockApplied) move = "in";
-      else if (
-        current.status === "cancelled" && status !== "cancelled" &&
-        !current.stockApplied && !current.awaitingConfirmation && !current.isRedemption
-      ) move = "out";
-    }
-    tx.update(ref, {
-      status,
-      statusHistory: arrayUnion(event),
-      ...(move ? { stockApplied: move === "out" } : {}),
-      updatedAt: serverTimestamp(),
-    });
-    return { order: current, stockMove: move };
-  });
-
-  if (stockMove && order?.items) {
-    await applyOrderStock({ items: order.items }, stockMove);
-  }
+  void _by;
+  const { customerId } = await postOrderApi<{ customerId?: string | null }>(
+    "/api/orders/status",
+    { orderId: id, status, ...(note ? { note } : {}) },
+    "Não foi possível atualizar o pedido.",
+  );
+  invalidate("orders");
+  invalidate("products"); // o estoque pode ter mudado
 
   // Notifica o cliente sobre a mudança de status (centro de notificações).
   // Falha aqui não pode derrubar a atualização do pedido.
-  if (order?.customerId) {
+  if (customerId) {
     try {
-      await createOrderStatusNotification(order.customerId, id, status);
+      await createOrderStatusNotification(customerId, id, status);
     } catch (e) {
       console.error("[notif] order status", e);
     }
   }
+}
 
-  invalidate("orders");
+/**
+ * Dispara (sem bloquear) a liberação da fila de pedidos reservados no servidor.
+ * Chamado quando a equipe abre o painel — o cron da Vercel roda só 1x por dia.
+ * O servidor limita a 1 execução a cada 5 min; falhas são ignoradas.
+ */
+export async function triggerReservedQueue(): Promise<void> {
+  try {
+    await postOrderApi("/api/orders/process-queue", {}, "Falha ao processar a fila.");
+    invalidate("orders");
+  } catch (err) {
+    console.warn("[orders-queue] disparo oportunista falhou", err);
+  }
 }
 
 /**
@@ -495,6 +440,15 @@ export async function confirmWhatsappOrder(id: string): Promise<void> {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error || "Não foi possível confirmar o pedido.");
   }
+  invalidate("orders");
+  invalidate("products");
+}
+
+/** Cliente respondeu que NÃO concluiu a compra combinada pelo WhatsApp. Roda no
+ *  servidor (/api/orders/decline-whatsapp): cancela o pedido (mesmo reservado),
+ *  libera o cupom e estorna o estoque numa transação. */
+export async function declineWhatsappOrder(id: string): Promise<void> {
+  await postOrderApi("/api/orders/decline-whatsapp", { orderId: id }, "Não foi possível registrar sua resposta.");
   invalidate("orders");
   invalidate("products");
 }

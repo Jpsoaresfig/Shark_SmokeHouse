@@ -24,11 +24,15 @@ function isStaffSession(): boolean {
   return role === "admin" || role === "seller";
 }
 
-/** Separa os campos de custo do restante dos dados do produto. */
+/** Separa os campos de custo do restante dos dados do produto. `costs` só
+ *  contém as chaves PRESENTES em `data` (chave ausente = "não mexer"). */
 function splitCosts<T extends Partial<Product>>(data: T): { rest: Omit<T, "costPrice" | "taxPercent">; costs: CostFields; hasCosts: boolean } {
   const { costPrice, taxPercent, ...rest } = data;
+  const costs: CostFields = {};
+  if ("costPrice" in data) costs.costPrice = costPrice;
+  if ("taxPercent" in data) costs.taxPercent = taxPercent;
   const hasCosts = COST_KEYS.some((k) => k in data);
-  return { rest, costs: { costPrice, taxPercent }, hasCosts };
+  return { rest, costs, hasCosts };
 }
 
 async function getProductCosts(force = false): Promise<Map<string, CostFields>> {
@@ -70,6 +74,11 @@ async function migrateLegacyCosts(products: Product[], costs: Map<string, CostFi
  * Ajusta o estoque de uma variação (delta) e recomputa o `stock` agregado do
  * produto, atomicamente (transação). Usado na baixa/estorno de pedidos online e
  * vendas do PDV quando o item é de uma variação específica.
+ *
+ * SEM clamp em 0 (mesma regra do estoque simples): baixa e estorno precisam ser
+ * simétricos. Com `Math.max(0, …)` na baixa, uma venda acima do saldo (ex.: duas
+ * vendas simultâneas) "perdia" a diferença e o estorno completo no cancelamento
+ * criava estoque fantasma. Saldo negativo sinaliza venda acima do estoque.
  */
 export async function adjustVariationStock(
   productId: string,
@@ -79,10 +88,13 @@ export async function adjustVariationStock(
   const ref = doc(db, COL, productId);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) return;
+    if (!snap.exists()) throw new Error("Produto não encontrado.");
     const data = snap.data() as Product;
+    if (!(data.variations ?? []).some(v => v.id === variationId)) {
+      throw new Error("Variação não encontrada.");
+    }
     const variations = (data.variations ?? []).map(v =>
-      v.id === variationId ? { ...v, stock: Math.max(0, (v.stock ?? 0) + delta) } : v
+      v.id === variationId ? { ...v, stock: (v.stock ?? 0) + delta } : v
     );
     const stock = variations.reduce((s, v) => s + (v.stock ?? 0), 0);
     tx.update(ref, { variations, stock, updatedAt: serverTimestamp() });
@@ -131,6 +143,7 @@ export async function getProducts(force = false): Promise<Product[]> {
 async function writeProductCosts(id: string, costs: CostFields, clearEmpty: boolean): Promise<string[]> {
   const payload: Record<string, unknown> = {};
   for (const k of COST_KEYS) {
+    if (!(k in costs)) continue; // chave ausente: mantém o valor atual
     const v = costs[k];
     if (v !== undefined && !Number.isNaN(v)) payload[k] = v;
     else if (clearEmpty) payload[k] = deleteField();
@@ -167,6 +180,43 @@ export async function createProduct(
   return ref.id;
 }
 
+/** Estoque que o formulário de edição carregou (cache de até 45 s). */
+export interface StockBaseline {
+  stock: number;
+  /** variationId → estoque carregado no formulário. */
+  variations?: Record<string, number>;
+}
+
+/**
+ * Edição do produto × estoque vivo: o formulário parte de um cache de até 45 s,
+ * e vendas/pedidos feitos nesse meio-tempo baixam o estoque. Campo de estoque
+ * que o admin NÃO alterou (igual ao carregado) assume o valor ATUAL do banco;
+ * só o que ele alterou é gravado. Puro (testável).
+ */
+export function mergeLiveStock(
+  payload: Record<string, unknown>,
+  live: Pick<Product, "stock" | "variations">,
+  baseline: StockBaseline,
+): Record<string, unknown> {
+  const out = { ...payload };
+  const vars = out.variations as Product["variations"] | undefined;
+  if (Array.isArray(vars) && vars.length) {
+    const merged = vars.map((v) => {
+      const base = baseline.variations?.[v.id];
+      const liveVar = live.variations?.find((lv) => lv.id === v.id);
+      return base !== undefined && liveVar && (Number(v.stock) || 0) === base
+        ? { ...v, stock: liveVar.stock ?? 0 }
+        : v;
+    });
+    out.variations = merged;
+    // Com grade, o estoque do produto é a soma das variações.
+    out.stock = merged.reduce((n, v) => n + (Number(v.stock) || 0), 0);
+  } else if ("stock" in out && Number(out.stock) === baseline.stock) {
+    out.stock = Number(live.stock) || 0;
+  }
+  return out;
+}
+
 /**
  * Atualiza um produto. Por padrão, campos `undefined`/"" são IGNORADOS (não
  * alteram o documento — usado na importação de planilha, onde coluna ausente
@@ -178,7 +228,7 @@ export async function createProduct(
 export async function updateProduct(
   id: string,
   data: Partial<Omit<Product, "id" | "createdAt">>,
-  opts: { clearEmpty?: boolean } = {},
+  opts: { clearEmpty?: boolean; stockBaseline?: StockBaseline } = {},
 ): Promise<void> {
   const { rest, costs, hasCosts } = splitCosts(data);
   const payload: Record<string, unknown> = opts.clearEmpty
@@ -190,7 +240,20 @@ export async function updateProduct(
     // Garante que o custo gravado não fique (ou volte) no documento público.
     for (const k of await writeProductCosts(id, costs, !!opts.clearEmpty)) payload[k] = deleteField();
   }
-  await updateDoc(doc(db, COL, id), { ...payload, updatedAt: serverTimestamp() });
+  const ref = doc(db, COL, id);
+  const baseline = opts.stockBaseline;
+  if (baseline && ("stock" in payload || "variations" in payload)) {
+    // Relê o estoque atual na transação: não sobrescreve baixas feitas depois
+    // que o formulário foi aberto (ver mergeLiveStock).
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error("Produto não encontrado.");
+      const live = snap.data() as Product;
+      tx.update(ref, { ...mergeLiveStock(payload, live, baseline), updatedAt: serverTimestamp() });
+    });
+  } else {
+    await updateDoc(ref, { ...payload, updatedAt: serverTimestamp() });
+  }
   invalidate("products");
 }
 

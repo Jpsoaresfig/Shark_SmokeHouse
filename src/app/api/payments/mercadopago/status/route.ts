@@ -29,8 +29,9 @@ export async function GET(request: NextRequest) {
   void recordMonitoredRequest("payments-status");
 
   const orderId = new URL(request.url).searchParams.get("orderId")?.trim();
-  if (!orderId) {
-    return NextResponse.json({ error: "orderId é obrigatório." }, { status: 400 });
+  // Id de documento do Firestore: sem "/" (senão `doc()` estoura como 500).
+  if (!orderId || orderId.length > 128 || orderId.includes("/")) {
+    return NextResponse.json({ error: "orderId inválido." }, { status: 400 });
   }
 
   let order = await getOrderAdmin(orderId);

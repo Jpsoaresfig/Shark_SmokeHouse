@@ -174,12 +174,14 @@ export function BiFiltersBar({
 export function BiComparison({ source, range, filters }: BiViewProps) {
   const comparison = useMemo(() => computePeriodComparison(source, range, filters), [source, range, filters]);
   const cmpCards = [
-    { label: "Faturamento", cur: comparison.current.revenue, prev: comparison.previous.revenue, delta: comparison.deltas.revenue },
-    { label: "Lucro", cur: comparison.current.profit, prev: comparison.previous.profit, delta: comparison.deltas.profit },
-    { label: "Vendas", cur: comparison.current.transactions, prev: comparison.previous.transactions, delta: comparison.deltas.transactions },
-    { label: "Unidades", cur: comparison.current.unitsSold, prev: comparison.previous.unitsSold, delta: comparison.deltas.unitsSold },
-    { label: "Ticket médio", cur: comparison.current.ticketAvg, prev: comparison.previous.ticketAvg, delta: comparison.deltas.ticketAvg },
+    { label: "Faturamento", cur: comparison.current.revenue, prev: comparison.previous.revenue, delta: comparison.deltas.revenue, money: true },
+    { label: "Lucro", cur: comparison.current.profit, prev: comparison.previous.profit, delta: comparison.deltas.profit, money: true },
+    // Contagens (vendas/unidades) não são valores em R$.
+    { label: "Vendas", cur: comparison.current.transactions, prev: comparison.previous.transactions, delta: comparison.deltas.transactions, money: false },
+    { label: "Unidades", cur: comparison.current.unitsSold, prev: comparison.previous.unitsSold, delta: comparison.deltas.unitsSold, money: false },
+    { label: "Ticket médio", cur: comparison.current.ticketAvg, prev: comparison.previous.ticketAvg, delta: comparison.deltas.ticketAvg, money: true },
   ];
+  const fmt = (v: number, money: boolean) => (money ? formatCurrency(v) : v.toLocaleString("pt-BR"));
 
   return (
     <Card>
@@ -194,9 +196,9 @@ export function BiComparison({ source, range, filters }: BiViewProps) {
           {cmpCards.map((c) => (
             <div key={c.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-overlay)] p-3">
               <p className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] mb-1">{c.label}</p>
-              <p className="text-lg font-black text-[var(--color-text-primary)] truncate">{formatCurrency(c.cur)}</p>
+              <p className="text-lg font-black text-[var(--color-text-primary)] truncate">{fmt(c.cur, c.money)}</p>
               <div className="flex items-center justify-between mt-1.5">
-                <span className="text-[10px] text-[var(--color-text-muted)]">ant.: {formatCurrency(c.prev)}</span>
+                <span className="text-[10px] text-[var(--color-text-muted)]">ant.: {fmt(c.prev, c.money)}</span>
                 <span className={`text-xs font-bold tabular-nums ${c.delta == null ? "text-[var(--color-text-muted)]" : c.delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                   {pctStr(c.delta)}
                 </span>

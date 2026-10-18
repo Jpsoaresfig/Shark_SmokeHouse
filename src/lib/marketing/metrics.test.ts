@@ -38,6 +38,19 @@ describe("campaignStats — métricas honestas", () => {
     expect(stats.ctr).toBe(0);
   });
 
+  it("bloqueados (skipped_spam) não contam como enviados", () => {
+    const stats = campaignStats(
+      [
+        execution(),
+        execution({ id: "s1", dedupKey: "skip:campaign:c1:u2:2026-08-08", userId: "u2", status: "skipped_spam" }),
+      ],
+      [event()],
+    );
+    expect(stats.sent).toBe(1);
+    expect(stats.skipped).toBe(1);
+    expect(stats.ctr).toBe(100);
+  });
+
   it("conta erros separadamente", () => {
     const stats = campaignStats([execution(), execution({ id: "e2", dedupKey: "campaign:c1:u2", userId: "u2", status: "error" })], []);
     expect(stats.errored).toBe(1);

@@ -22,13 +22,29 @@ function GoogleIcon() {
   );
 }
 
+/**
+ * Só aceita caminhos internos ("/orders"): bloqueia open redirect ("https://evil",
+ * "//evil", "/\evil") e XSS via "javascript:" no window.location. Rejeita
+ * caracteres de controle/espaços: o navegador REMOVE tab/quebra de linha da URL,
+ * então "/%09/evil.com" passava no regex antigo e virava "//evil.com". Por fim
+ * confere que a URL resolvida continua na mesma origem.
+ */
+function safeInternalRedirect(raw: string | null): string | null {
+  if (!raw || typeof window === "undefined") return null;
+  if (/[\u0000-\u001F\u007F\s\\]/.test(raw)) return null;
+  if (!/^\/(?!\/)/.test(raw)) return null;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin !== window.location.origin) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 function LoginForm() {
   const searchParams = useSearchParams();
-  // Só aceita caminhos internos ("/orders"): bloqueia open redirect
-  // ("https://evil", "//evil") e XSS via "javascript:" no window.location.
   const rawRedirect = searchParams.get("redirect");
-  const redirect =
-    rawRedirect && /^\/(?![/\\])/.test(rawRedirect) ? rawRedirect : null;
   const router = useRouter();
 
   const { login, loginGoogle } = useAuth();
@@ -46,7 +62,8 @@ function LoginForm() {
     setLoading(true);
     try {
       await login(email, password);
-      if (redirect) window.location.href = redirect;
+      const target = safeInternalRedirect(rawRedirect);
+      if (target) window.location.href = target;
     } catch (err) {
       const authErr = err as AuthError;
 
@@ -73,7 +90,8 @@ function LoginForm() {
     setGoogleLoading(true);
     try {
       await loginGoogle();
-      if (redirect) window.location.href = redirect;
+      const target = safeInternalRedirect(rawRedirect);
+      if (target) window.location.href = target;
     } catch (err) {
       setError((err as AuthError).message);
     } finally {

@@ -34,6 +34,8 @@ export function MercadoPagoPix({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [paid, setPaid] = useState(false);
+  // PIX expirou/foi recusado: o QR antigo não serve mais, oferece gerar outro.
+  const [expired, setExpired] = useState(false);
   // Incrementado pelo botão "tentar novamente" para refazer a cobrança.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -42,6 +44,15 @@ export function MercadoPagoPix({
   useEffect(() => {
     onPaidRef.current = onPaid;
   }, [onPaid]);
+
+  // Dados do pagador lidos na hora da chamada. O objeto `user` é trocado a cada
+  // atualização do perfil (ex.: o refresh em segundo plano do AuthProvider logo
+  // após o login); se ele fosse dependência do effect, a cobrança seria refeita
+  // em paralelo com a mesma chave de idempotência e a 1ª resposta descartada.
+  const payerRef = useRef({ email: user?.email, cpf: user?.cpf });
+  useEffect(() => {
+    payerRef.current = { email: user?.email, cpf: user?.cpf };
+  }, [user?.email, user?.cpf]);
 
   // Gera a cobrança PIX ao montar (e a cada retry). Os setState só acontecem
   // depois do await, nunca de forma síncrona dentro do effect.
@@ -54,8 +65,8 @@ export function MercadoPagoPix({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             orderId,
-            payerEmail: user?.email,
-            payerCpf: user?.cpf,
+            payerEmail: payerRef.current.email,
+            payerCpf: payerRef.current.cpf,
           }),
         });
         const data = await res.json().catch(() => null);
@@ -79,11 +90,11 @@ export function MercadoPagoPix({
     return () => {
       active = false;
     };
-  }, [orderId, user, reloadKey]);
+  }, [orderId, reloadKey]);
 
   // Enquanto o PIX está aberto e não pago, consulta o status a cada 4s.
   useEffect(() => {
-    if (!pix || paid) return;
+    if (!pix || paid || expired) return;
     let active = true;
     const id = setInterval(async () => {
       try {
@@ -91,9 +102,12 @@ export function MercadoPagoPix({
           `/api/payments/mercadopago/status?orderId=${encodeURIComponent(orderId)}`,
         );
         const data = await res.json().catch(() => null);
-        if (active && data?.status === "paid") {
+        if (!active) return;
+        if (data?.status === "paid") {
           setPaid(true);
           onPaidRef.current?.();
+        } else if (data?.status === "cancelled" || data?.status === "failed") {
+          setExpired(true);
         }
       } catch {
         /* ignora — tenta de novo no próximo tick */
@@ -103,10 +117,11 @@ export function MercadoPagoPix({
       active = false;
       clearInterval(id);
     };
-  }, [pix, paid, orderId]);
+  }, [pix, paid, expired, orderId]);
 
   const retry = () => {
     setError(null);
+    setExpired(false);
     setPix(null);
     setLoading(true);
     setReloadKey((k) => k + 1);
@@ -161,7 +176,18 @@ export function MercadoPagoPix({
         </div>
       )}
 
-      {!loading && !error && pix && (
+      {!loading && !error && pix && expired && (
+        <div className="text-center py-2">
+          <p className="text-xs text-[var(--color-warning)] mb-3">
+            Este PIX expirou. Gere um novo código para pagar.
+          </p>
+          <Button variant="outline" size="sm" onClick={retry}>
+            <RefreshCw className="w-4 h-4" /> Gerar novo PIX
+          </Button>
+        </div>
+      )}
+
+      {!loading && !error && pix && !expired && (
         <>
           {/* QR Code */}
           <div className="flex justify-center mb-4">

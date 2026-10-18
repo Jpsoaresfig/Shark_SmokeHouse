@@ -21,7 +21,9 @@ import {
   automationCouponCode,
   automationUserKey,
   campaignCouponCode,
+  campaignSkipKey,
 } from "@/lib/marketing/ids";
+import { stripUndefinedDeep } from "@/lib/marketing/firestoreData";
 import type {
   MarketingAutomation,
   MarketingCampaign,
@@ -42,6 +44,9 @@ import type {
 } from "@/types";
 
 const PAGE_SIZE = 500;
+
+/** Atalho: toda escrita deste módulo passa por aqui (Admin SDK rejeita undefined). */
+const clean = stripUndefinedDeep;
 
 /* ── Leitura paginada (Firestore) ─────────────────────────── */
 
@@ -297,7 +302,7 @@ async function ensureCoupon(
   const snap = await ref.get();
   if (snap.exists) return input.code;
 
-  await ref.set({
+  await ref.set(clean({
     code: input.code,
     type: input.type,
     value: input.value,
@@ -310,7 +315,7 @@ async function ensureCoupon(
     ...(input.automationId ? { marketingAutomationId: input.automationId } : {}),
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
-  });
+  }));
   return input.code;
 }
 
@@ -322,7 +327,7 @@ async function ensureAutomationCoupon(
   now: Date,
 ): Promise<string | undefined> {
   if (!auto.coupon) return undefined;
-  const code = automationCouponCode(auto.event, dayKey);
+  const code = automationCouponCode(auto.id, auto.event, dayKey);
   return ensureCoupon(db, {
     code,
     type: auto.coupon.type,
@@ -378,7 +383,7 @@ async function persistExecution(db: Firestore, msg: {
     createdAt: new Date().toISOString(),
   };
   try {
-    await db.collection("marketingExecutions").doc(msg.dedupKey).create(docData);
+    await db.collection("marketingExecutions").doc(msg.dedupKey).create(clean(docData));
     return true;
   } catch (err) {
     // 6 = ALREADY_EXISTS (gRPC): outra execução já registrou esta mensagem.
@@ -395,7 +400,7 @@ async function createNotification(db: Firestore, msg: {
   campaignId?: string;
   automationId?: string;
 }): Promise<void> {
-  await db.collection("notifications").add({
+  await db.collection("notifications").add(clean({
     userId: msg.userId,
     category: "promo",
     title: msg.title,
@@ -405,14 +410,15 @@ async function createNotification(db: Firestore, msg: {
     ...(msg.automationId ? { marketingAutomationId: msg.automationId } : {}),
     read: false,
     createdAt: new Date().toISOString(),
-  });
+  }));
 }
 
 async function registerEvent(db: Firestore, input: Omit<MarketingEvent, "id" | "createdAt">): Promise<void> {
-  await db.collection("marketingEvents").add({
+  // `input` chega com link/couponCode/automationId possivelmente undefined.
+  await db.collection("marketingEvents").add(clean({
     ...input,
     createdAt: new Date().toISOString(),
-  });
+  }));
 }
 
 /** Anexa um evento de auditoria à campanha (rastro de quem/quando/o quê). */
@@ -445,11 +451,11 @@ async function seedTemplates(db: Firestore): Promise<number> {
       message: tpl.message,
       ...(tpl.link ? { link: tpl.link } : {}),
     };
-    await db.collection("marketingTemplates").doc(tpl.id).set({
+    await db.collection("marketingTemplates").doc(tpl.id).set(clean({
       ...data,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    });
+    }));
     seeded++;
   }
   return seeded;
@@ -520,7 +526,19 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
 
       let couponCode = campaign.couponCode;
       if (campaign.coupon && !couponCode) {
-        couponCode = campaignCouponCode();
+        // Grava o código na campanha ANTES de criar o cupom/enviar (transação:
+        // reaproveita o código se outra execução já gravou). Antes o código só
+        // era salvo no fim; se o envio falhasse no meio, a próxima execução
+        // gerava OUTRO cupom e parte dos clientes recebia um código diferente.
+        const campaignRef = db.collection("marketingCampaigns").doc(campaign.id);
+        couponCode = await db.runTransaction(async (tx) => {
+          const snap = await tx.get(campaignRef);
+          const saved = snap.get("couponCode");
+          if (typeof saved === "string" && saved) return saved;
+          const generated = campaignCouponCode();
+          tx.update(campaignRef, { couponCode: generated, updatedAt: FieldValue.serverTimestamp() });
+          return generated;
+        });
         await ensureCoupon(db, {
           code: couponCode,
           type: campaign.coupon.type,
@@ -578,8 +596,11 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
         // "dedup" = já existe execução desta campanha para o cliente: gravar o
         // skip por cima apagaria o registro "processed" (histórico/métricas).
         if (s.reason === "dedup") continue;
+        // Registro só de auditoria, com chave PRÓPRIA (skip:…:{dia}): com a chave
+        // de envio (campaign:{id}:{uid}) o skip anti-spam virava um "já enviado"
+        // permanente e o cliente nunca mais recebia esta campanha.
         await persistExecution(db, {
-          dedupKey: `campaign:${campaign.id}:${s.userId}`,
+          dedupKey: campaignSkipKey(campaign.id, s.userId, dayKey),
           userId: s.userId,
           channel: "app",
           title: campaign.title,
@@ -590,7 +611,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
         });
       }
 
-      await db.collection("marketingCampaigns").doc(campaign.id).update({
+      await db.collection("marketingCampaigns").doc(campaign.id).update(clean({
         status: "sent",
         sentAt: now.toISOString(),
         executedBy: "cron",
@@ -598,7 +619,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
         segmentSnapshot: { name: segment.name, size: planned.length + blocked },
         ...(couponCode ? { couponCode } : {}),
         updatedAt: FieldValue.serverTimestamp(),
-      });
+      }));
       await appendCampaignAudit(db, campaign.id, {
         action: "sent",
         by: "cron",
@@ -627,7 +648,7 @@ export async function processMarketingCron(now: Date = new Date()): Promise<Cron
   // pelo menos uma mensagem hoje (evita acumular um cupom não usado por dia).
   for (const auto of activeAutomations) {
     if (!auto.coupon) continue;
-    const code = automationCouponCode(auto.event, dayKey);
+    const code = automationCouponCode(auto.id, auto.event, dayKey);
     if (!couponsNeeded.has(code)) continue;
     try {
       await ensureAutomationCoupon(db, auto, dayKey, now);

@@ -90,6 +90,67 @@ export const OPT_OUT_REASON = "opt-out (LGPD)";
  */
 const BIRTHDAY_RESEND_GUARD_DAYS = 300;
 
+/**
+ * Reenvio das automações "de estado" (o cliente continua elegível dia após dia).
+ * Sem trava, o único freio era o intervalo anti-spam entre automáticas (7 dias
+ * por padrão) e a mesma mensagem — com cupom — saía para sempre a cada 7 dias.
+ *
+ *  - inactive_30 / inactive_60 / abandoned_cart: UMA vez por "episódio" — só
+ *    reenvia se o cliente teve atividade nova (compra/carrinho atualizado)
+ *    DEPOIS do último envio desta automação (ver `episodeAt` dos candidatos);
+ *  - big_spender: no máx. 1 vez a cada 180 dias (reconhecimento periódico do VIP);
+ *  - promo_product: no máx. 1 vez a cada 30 dias por automação (a promoção pode
+ *    ser trocada pelo admin, mas o mesmo cliente não recebe toda semana).
+ *
+ * Usa o mesmo mecanismo do aniversário (`lastSentByAutoUser`, último envio por
+ * automação+cliente, derivado das execuções persistidas).
+ */
+export const AUTOMATION_RESEND_COOLDOWN_DAYS: Partial<Record<MarketingAutomationEvent, number>> = {
+  big_spender: 180,
+  promo_product: 30,
+  // Fallback para inativos sem data de atividade conhecida (episódio indefinido).
+  inactive_30: 30,
+  inactive_60: 60,
+};
+
+/**
+ * Carrinho abandonado: além das N horas de inatividade, o carrinho precisa ter
+ * sido atualizado dentro desta folga extra. O cron roda 1x/dia, então a janela
+ * de seleção precisa cobrir 24h (mais margem para atraso do cron); a trava de
+ * episódio impede o lembrete duplicado do mesmo carrinho.
+ */
+export const ABANDONED_CART_LOOKBACK_EXTRA_HOURS = 36;
+
+/** Candidato de uma automação + início do "episódio" que o tornou elegível. */
+interface Candidate {
+  contact: MarketingContact;
+  /** ms epoch — início do episódio (última compra, carrinho atualizado…). */
+  episodeAt?: number;
+}
+
+/** Ids de produto do Firestore (20 caracteres alfanuméricos) — nunca mostrar ao cliente. */
+const FIRESTORE_ID_RE = /^[A-Za-z0-9]{20}$/;
+
+/**
+ * Resolve o produto em destaque de "promoção de produto" para o NOME. O painel
+ * grava o nome digitado (datalist de nomes) em `config.productId`; dados antigos
+ * podem ter o id. Aceita os dois: id → nome; nome (sem diferenciar maiúsculas)
+ * → nome do catálogo; sem correspondência, o texto digitado (se não for um id).
+ */
+export function resolvePromoProductName(
+  ref: string | undefined,
+  products?: { id: string; name?: string }[],
+): string | undefined {
+  const v = ref?.trim();
+  if (!v) return undefined;
+  const byId = products?.find((p) => p.id === v)?.name?.trim();
+  if (byId) return byId;
+  const lower = v.toLowerCase();
+  const byName = products?.find((p) => p.name?.trim().toLowerCase() === lower)?.name?.trim();
+  if (byName) return byName;
+  return FIRESTORE_ID_RE.test(v) ? undefined : v;
+}
+
 /* ── Campanhas agendadas ───────────────────────────────────── */
 export function planCampaign(opts: {
   campaign: MarketingCampaign;
@@ -113,10 +174,13 @@ export function planCampaign(opts: {
   }
 
   const audience = resolveAudience(segment, contacts);
-  const limit = cap && cap > 0 ? Math.min(audience.length, cap) : audience.length;
+  // O limite vale para quem REALMENTE recebe: aplicado depois dos filtros
+  // (opt-out, dedup, anti-spam). Antes cortava o público bruto e, com muitos
+  // bloqueados entre os primeiros, a campanha saía para bem menos gente.
+  const limit = cap && cap > 0 ? cap : Infinity;
 
-  for (let i = 0; i < limit; i++) {
-    const contact = audience[i];
+  for (const contact of audience) {
+    if (planned.length >= limit) break;
     const dedupKey = campaignExecutionKey(campaign.id, contact.uid);
 
     if (contact.marketingOptOut) {
@@ -178,81 +242,97 @@ function candidatesFor(
   sessions: MarketingCartSession[],
   settings: MarketingSettings,
   now: Date,
-): MarketingContact[] {
+  promoProductName?: string,
+): Candidate[] {
   const event = automation.event;
   const cfg = automation.config ?? {};
+  const plain = (list: MarketingContact[]): Candidate[] => list.map((contact) => ({ contact }));
+  /** Início do episódio de inatividade = última compra (ou o cadastro). */
+  const activityAt = (c: MarketingContact): number | undefined => {
+    const t = new Date(c.lastOrderAt ?? c.createdAt ?? "").getTime();
+    return Number.isFinite(t) ? t : undefined;
+  };
   switch (event) {
     case "welcome": {
       const cutoff = new Date(now.getTime() - TWO_DAYS_MS).getTime();
-      return contacts.filter((c) => c.createdAt && new Date(c.createdAt).getTime() >= cutoff);
+      return plain(contacts.filter((c) => c.createdAt && new Date(c.createdAt).getTime() >= cutoff));
     }
     case "first_purchase": {
       const cutoff = new Date(now.getTime() - TWO_DAYS_MS).getTime();
-      return contacts.filter(
+      return plain(contacts.filter(
         (c) =>
           c.ordersCount === 1 &&
           c.lastOrderAt &&
           new Date(c.lastOrderAt).getTime() >= cutoff,
-      );
+      ));
     }
     case "birthday": {
       const before = cfg.birthdayDaysBefore ?? 0;
-      return contacts.filter((c) => c.birthdayInDays != null && c.birthdayInDays <= before);
+      return plain(contacts.filter((c) => c.birthdayInDays != null && c.birthdayInDays <= before));
     }
     case "inactive_30": {
       const days = cfg.inactiveDays ?? 30;
-      return contacts.filter((c) => c.daysSinceActivity >= days && c.daysSinceActivity < days + 30);
+      return contacts
+        .filter((c) => c.daysSinceActivity >= days && c.daysSinceActivity < days + 30)
+        .map((contact) => ({ contact, episodeAt: activityAt(contact) }));
     }
     case "inactive_60":
-      return contacts.filter((c) => c.daysSinceActivity >= 60);
+      return contacts
+        .filter((c) => c.daysSinceActivity >= 60)
+        .map((contact) => ({ contact, episodeAt: activityAt(contact) }));
     case "big_spender":
-      return contacts.filter((c) => c.totalSpent >= settings.bigSpenderThreshold);
+      return plain(contacts.filter((c) => c.totalSpent >= settings.bigSpenderThreshold));
     case "points_expiring": {
       const days = cfg.pointsExpireInDays ?? 7;
       // Só avisa quem ainda TEM saldo (quem já gastou tudo não tem o que perder).
-      return contacts.filter(
+      return plain(contacts.filter(
         (c) =>
           c.loyaltyPoints > 0 &&
           c.pointsExpiringInDays != null &&
           c.pointsExpiringInDays <= days,
-      );
+      ));
     }
     case "promo_product": {
       const cat = cfg.productCategory;
-      const prod = cfg.productId;
+      // `purchasedProducts` guarda NOMES; compara pelo nome resolvido.
+      const prod = (promoProductName ?? cfg.productId)?.trim().toLowerCase();
       const audience = cfg.promoAudience ?? "previous_buyers";
       const filterBase = (c: MarketingContact): boolean => {
         if (cat && !c.purchasedCategories.includes(cat)) return false;
-        if (prod && !c.purchasedProducts.some((p) => p === prod)) return false;
+        if (prod && !c.purchasedProducts.some((p) => p.trim().toLowerCase() === prod)) return false;
         return true;
       };
       switch (audience) {
         case "previous_buyers":
-          return contacts.filter((c) => c.ordersCount > 0 && filterBase(c));
+          return plain(contacts.filter((c) => c.ordersCount > 0 && filterBase(c)));
         case "vip":
-          return contacts.filter(
+          return plain(contacts.filter(
             (c) => c.totalSpent >= settings.bigSpenderThreshold && filterBase(c),
-          );
+          ));
         case "never_bought":
-          return contacts.filter((c) => c.ordersCount === 0);
+          return plain(contacts.filter((c) => c.ordersCount === 0));
         case "inactive":
-          return contacts.filter(
+          return plain(contacts.filter(
             (c) => c.daysSinceActivity >= (cfg.inactiveDays ?? 30) && filterBase(c),
-          );
+          ));
       }
       return [];
     }
     case "abandoned_cart": {
+      // Carrinho parado há PELO MENOS N horas (e atualizado dentro de N + folga).
+      // Antes exigia "atualizado nas últimas N horas": com o cron 1x/dia e N<24,
+      // carrinhos abandonados à noite nunca entravam na janela.
       const hours = cfg.cartHours ?? 24;
-      const cutoff = new Date(now.getTime() - hours * 3600_000).getTime();
+      const idleCutoff = now.getTime() - hours * 3600_000;
+      const lookback = now.getTime() - (hours + ABANDONED_CART_LOOKBACK_EXTRA_HOURS) * 3600_000;
       const byUid = new Map(contacts.map((c) => [c.uid, c]));
-      const out: MarketingContact[] = [];
+      const out: Candidate[] = [];
       for (const s of sessions) {
         if (!s.itemsCount || s.itemsCount <= 0) continue;
         const updated = new Date(s.updatedAt).getTime();
-        if (!Number.isFinite(updated) || updated < cutoff) continue;
+        if (!Number.isFinite(updated) || updated > idleCutoff || updated < lookback) continue;
         const contact = byUid.get(s.userId);
-        if (contact) out.push(contact);
+        if (contact) out.push({ contact, episodeAt: updated });
       }
       return out;
     }
@@ -277,8 +357,6 @@ export function planAutomations(opts: {
   couponsNeeded: Set<string>;
 } {
   const { automations, contacts, sessions, settings, ctx, now, products } = opts;
-  const productName = (id?: string): string | undefined =>
-    id ? products?.find((p) => p.id === id)?.name?.trim() || undefined : undefined;
   const planned: PlannedMessage[] = [];
   const skipped: { userId: string; reason: string }[] = [];
   const couponsNeeded = new Set<string>();
@@ -292,14 +370,21 @@ export function planAutomations(opts: {
     if (!automation.active) continue;
 
     const couponCode = automation.coupon
-      ? automationCouponCode(automation.event, ctx.dayKey)
+      ? automationCouponCode(automation.id, automation.event, ctx.dayKey)
       : undefined;
 
-    const candidates = candidatesFor(automation, contacts, sessions, settings, now);
-    const limit = Math.min(candidates.length, settings.maxAudiencePerCampaign);
+    const promoProductName = automation.event === "promo_product"
+      ? resolvePromoProductName(automation.config?.productId, products)
+      : undefined;
+    const candidates = candidatesFor(automation, contacts, sessions, settings, now, promoProductName);
+    // Limite aplicado a quem efetivamente recebe (após opt-out/dedup/anti-spam),
+    // igual às campanhas. 0/ausente = sem limite.
+    const cap = settings.maxAudiencePerCampaign > 0 ? settings.maxAudiencePerCampaign : Infinity;
+    let plannedForAutomation = 0;
+    const cooldownDays = AUTOMATION_RESEND_COOLDOWN_DAYS[automation.event];
 
-    for (let i = 0; i < limit; i++) {
-      const contact = candidates[i];
+    for (const { contact, episodeAt } of candidates) {
+      if (plannedForAutomation >= cap) break;
 
       if (contact.marketingOptOut) {
         skipped.push({ userId: contact.uid, reason: OPT_OUT_REASON });
@@ -332,6 +417,21 @@ export function planAutomations(opts: {
         }
       }
 
+      // Automações "de estado": 1 envio por episódio ou por período de carência
+      // (ver AUTOMATION_RESEND_COOLDOWN_DAYS).
+      const lastSent = ctx.lastSentByAutoUser?.get(automationUserKey(automation.id, contact.uid));
+      if (lastSent != null) {
+        if (episodeAt != null) {
+          if (lastSent >= episodeAt) {
+            skipped.push({ userId: contact.uid, reason: "dedup (já enviado neste ciclo)" });
+            continue;
+          }
+        } else if (cooldownDays && now.getTime() - lastSent < cooldownDays * DAY_MS) {
+          skipped.push({ userId: contact.uid, reason: `dedup (reenvio só após ${cooldownDays}d)` });
+          continue;
+        }
+      }
+
       if (skippedAutoInterval(ctx, contact.uid)) {
         skipped.push({
           userId: contact.uid,
@@ -358,7 +458,7 @@ export function planAutomations(opts: {
         // Nome do produto; sem catálogo/produto, um texto neutro em vez do id
         // cru (antes a mensagem saía "selecionamos aB3xY9… com desconto").
         product:
-          productName(automation.config?.productId) ??
+          promoProductName ??
           (automation.event === "promo_product" ? "produtos selecionados" : undefined),
         diasSemComprar: contact.daysSinceActivity,
       });
@@ -374,6 +474,7 @@ export function planAutomations(opts: {
         automationEvent: automation.event,
       });
       if (couponCode) couponsNeeded.add(couponCode);
+      plannedForAutomation++;
 
       ctx.existing.add(dedupKey);
       ctx.recentByUser.set(contact.uid, (ctx.recentByUser.get(contact.uid) ?? 0) + 1);

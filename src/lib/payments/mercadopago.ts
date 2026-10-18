@@ -142,6 +142,10 @@ export async function createPixPayment(
       },
     }),
   });
+  return toPixPayment(data);
+}
+
+function toPixPayment(data: MpPaymentResponse): MercadoPagoPixPayment {
   const tx = data.point_of_interaction?.transaction_data;
   return {
     id: data.id,
@@ -150,6 +154,15 @@ export async function createPixPayment(
     qrCodeBase64: tx?.qr_code_base64 ?? "",
     ticketUrl: tx?.ticket_url,
   };
+}
+
+/** Busca uma cobrança PIX já criada (com o QR), para reexibir a MESMA cobrança
+ *  ao recarregar a página em vez de gerar outra. */
+export async function getPixPayment(paymentId: string): Promise<MercadoPagoPixPayment> {
+  if (!isValidPaymentId(paymentId)) {
+    throw new MercadoPagoError(`id de pagamento inválido: ${String(paymentId).slice(0, 40)}`, 400);
+  }
+  return toPixPayment(await mpFetch<MpPaymentResponse>(`/v1/payments/${paymentId}`, { method: "GET" }));
 }
 
 /* ── Pagamentos ─────────────────────────────────────────────────────── */

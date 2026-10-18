@@ -22,7 +22,7 @@ import {
   createLoungeBooking, updateLoungeBooking, getTakenSlots, SLOT_TAKEN,
 } from "@/lib/firebase/lounge";
 import { getSiteSettings, updateSiteSettings, DEFAULT_LOUNGE_TIME_SLOTS } from "@/lib/firebase/settings";
-import { todayISO } from "@/lib/booking";
+import { storeTodayISO } from "@/lib/booking";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/stores/toastStore";
 import type { LoungeBooking, BookingStatus, LoungeFlavor } from "@/types";
@@ -936,7 +936,9 @@ export default function AdminLoungePage() {
                 label="Data *"
                 type="date"
                 value={form.date}
-                min={todayISO()}
+                // Reserva antiga em edição: mantém a data original válida (o
+                // `min` bloqueava o envio do formulário e a edição de status).
+                min={editing && editing.date < storeTodayISO() ? editing.date : storeTodayISO()}
                 onChange={(e) => setForm({ ...form, date: e.target.value, time: "" })}
               />
               <div className="flex flex-col gap-1.5">

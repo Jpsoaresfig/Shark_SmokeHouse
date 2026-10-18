@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import {
   subscribeOrdersByMotoboy, subscribeAvailableDeliveries,
-  updateOrderStatus, claimOrderDelivery,
+  updateOrderStatus, claimOrderDelivery, triggerReservedQueue,
 } from "@/lib/firebase/orders";
+import { isUnpaidOnlinePayment, motoboyCanSetStatus } from "@/lib/orderStatusPlan";
 import { resolveOrderPayment } from "@/lib/payments";
 import { PAYMENT_METHOD_LABELS } from "@/lib/payments/labels";
 import { useAuthStore } from "@/stores/authStore";
@@ -247,6 +248,13 @@ export default function MotoboyPage() {
     return () => unsub();
   }, [allowed, user?.uid]);
 
+  // Painel aberto → libera a fila de reservados se a loja já abriu (o cron da
+  // Vercel roda só 1x/dia; o servidor limita a 1 execução a cada 5 min).
+  useEffect(() => {
+    if (!allowed) return;
+    void triggerReservedQueue();
+  }, [allowed]);
+
   // Pool de entregas disponíveis (sem motoboy), que qualquer um pode pegar.
   useEffect(() => {
     if (!allowed) return;
@@ -267,8 +275,8 @@ export default function MotoboyPage() {
         user!.uid, // registra quem mudou o status (auditoria da timeline)
       );
       toast.success(status === "delivered" ? "Entrega confirmada! 🛵" : "Boa rota! Pedido em rota de entrega.");
-    } catch {
-      toast.error("Erro ao atualizar o pedido. Tente novamente.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao atualizar o pedido. Tente novamente.");
     } finally {
       setUpdatingId(null);
     }
@@ -311,9 +319,11 @@ export default function MotoboyPage() {
   // de espera (feitos fora do horário) e só saem quando a loja abre.
   const active = orders.filter(o => o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved");
   const done = orders.filter(o => o.status === "delivered" || o.status === "cancelled");
-  // Pool: só entregas de verdade (não retirada) e que ainda estão ativas.
+  // Pool: só entregas de verdade (não retirada), ativas e liberadas para sair —
+  // fora pedido WhatsApp ainda sem confirmação e PIX do Mercado Pago não pago.
   const pool = available.filter(
-    o => !isPickup(o) && o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved",
+    o => !isPickup(o) && o.status !== "delivered" && o.status !== "cancelled" && o.status !== "reserved"
+      && !o.awaitingConfirmation && !isUnpaidOnlinePayment(o),
   );
 
   const tabs: { key: typeof tab; label: string; count: number }[] = [
@@ -424,16 +434,29 @@ export default function MotoboyPage() {
                         order.status !== "delivered" && order.status !== "cancelled" ? (
                           <div className="flex gap-2 pt-1">
                             {order.status !== "out_for_delivery" ? (
-                              <Button
-                                variant="secondary"
-                                className="flex-1"
-                                onClick={() => setStatus(order, "out_for_delivery")}
-                                disabled={busy}
-                              >
-                                {busy
-                                  ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-                                  : <><Truck className="w-4 h-4" /> Saí para entrega</>}
-                              </Button>
+                              // Só sai para entrega depois de "Preparando" (mesmo fluxo do admin)
+                              // e com o pedido confirmado/pago — o servidor confere de novo.
+                              motoboyCanSetStatus(order, user.uid, "out_for_delivery") ? (
+                                <Button
+                                  variant="secondary"
+                                  className="flex-1"
+                                  onClick={() => setStatus(order, "out_for_delivery")}
+                                  disabled={busy}
+                                >
+                                  {busy
+                                    ? <div className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                                    : <><Truck className="w-4 h-4" /> Saí para entrega</>}
+                                </Button>
+                              ) : (
+                                <div className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-[var(--color-bg-overlay)] px-3 py-2.5 text-xs font-medium text-[var(--color-text-muted)]">
+                                  <Clock className="w-4 h-4" />
+                                  {order.awaitingConfirmation
+                                    ? "Aguardando confirmação do cliente"
+                                    : isUnpaidOnlinePayment(order)
+                                      ? "Aguardando pagamento do PIX"
+                                      : "Aguardando a loja preparar o pedido"}
+                                </div>
+                              )
                             ) : (
                               <>
                                 <Button

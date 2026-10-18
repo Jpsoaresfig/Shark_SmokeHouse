@@ -79,7 +79,10 @@ export async function updateLoungeBooking(
   data: Omit<LoungeBooking, "id" | "status" | "createdAt">,
   opts: { oldDate: string; oldTime: string; status?: BookingStatus },
 ): Promise<void> {
-  const invalid = validateBooking(data);
+  // Reserva antiga (data já passou) continua editável se a data NÃO mudar —
+  // ex.: corrigir nome/observações de uma reserva concluída. Mudar para outra
+  // data no passado continua bloqueado, como numa reserva nova.
+  const invalid = validateBooking(data, data.date === opts.oldDate ? data.date : undefined);
   if (invalid) throw new Error(invalid);
 
   const ref = doc(db, COL, id);

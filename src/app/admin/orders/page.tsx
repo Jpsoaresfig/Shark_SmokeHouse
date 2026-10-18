@@ -16,7 +16,7 @@ import {
   DialogDescription, DialogFooter, DialogClose,
 } from "@/components/ui/dialog";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus, assignOrderMotoboy } from "@/lib/firebase/orders";
+import { subscribeOrders, updateOrderStatus, markOrderPointsAwarded, updatePaymentStatus, assignOrderMotoboy, triggerReservedQueue } from "@/lib/firebase/orders";
 import { useBusinessHours } from "@/stores/siteSettingsStore";
 import { isOpenNow } from "@/lib/businessHours";
 import { useNewOrderAlerts } from "@/hooks/useNewOrderAlerts";
@@ -142,6 +142,12 @@ export default function AdminOrders() {
       setProcessingQueue(false);
     }
   }
+
+  // Libera a fila de reservados ao abrir a tela (o cron roda só 1x/dia; a rota
+  // tem trava de 5 min e só libera se a loja estiver aberta).
+  useEffect(() => {
+    void triggerReservedQueue();
+  }, []);
 
   // Escuta os pedidos em tempo real: a lista atualiza sozinha (sem refresh) e
   // cada pedido novo dispara toast + som + notificação do sistema.

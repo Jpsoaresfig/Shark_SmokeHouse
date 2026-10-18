@@ -93,9 +93,15 @@ export default function AdminInventory() {
       toast.error("Informe uma quantidade inteira maior que zero.");
       return;
     }
+    const variation = product.variations?.find(v => v.id === form.variationId);
+    // Saída/perda não pode passar do saldo (a baixa não faz clamp em 0 — ficaria negativo).
+    const available = variation ? (variation.stock ?? 0) : (product.stock ?? 0);
+    if ((form.type === "out" || form.type === "loss") && qty > available) {
+      toast.error(`Quantidade maior que o estoque atual (${available} un).`);
+      return;
+    }
     setSaving(true);
     try {
-      const variation = product.variations?.find(v => v.id === form.variationId);
       await addStockMovement({
         productId: form.productId,
         productName: product.name,

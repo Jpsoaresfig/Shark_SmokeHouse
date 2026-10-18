@@ -82,6 +82,9 @@ function CampaignModal({ editing, preselectSegment, onClose, onSaved }: {
 
   const insertPlaceholder = (token: string) => setMessage((prev) => `${prev}${prev ? " " : ""}${token}`);
 
+  // Campos limpos vão como `undefined` EXPLÍCITO: na edição,
+  // updateMarketingCampaign os apaga do documento. Antes "Sem cupom" (ou link
+  // vazio) mantinha o cupom/link antigo e a campanha saía com ele mesmo assim.
   const buildInput = (status: MarketingCampaign["status"], scheduledFor: string): MarketingCampaignInput => ({
     name: name.trim(),
     description: description.trim() || undefined,
@@ -90,17 +93,22 @@ function CampaignModal({ editing, preselectSegment, onClose, onSaved }: {
     channel,
     title: title.trim(),
     message: message.trim(),
-    ...(link.trim() ? { link: link.trim() } : {}),
-    ...(couponMode === "existing" && existingCode ? { couponCode: existingCode } : {}),
-    ...(couponMode === "generate" ? {
-      coupon: {
-        type: couponType,
-        value: Number(couponValue),
-        ...(minOrder.trim() ? { minOrder: Number(minOrder) } : {}),
-        expiresInDays: Number(expiresInDays) || 7,
-        ...(usageLimit.trim() ? { usageLimitPerCpf: Number(usageLimit) } : {}),
-      },
-    } : {}),
+    link: link.trim() || undefined,
+    // "Gerar no envio": mantém o código já gerado desta mesma configuração (o
+    // envio grava o código antes de disparar); vindo de "existente", descarta.
+    couponCode:
+      couponMode === "existing"
+        ? existingCode || undefined
+        : couponMode === "generate" && editing?.coupon
+          ? editing.couponCode
+          : undefined,
+    coupon: couponMode === "generate" ? {
+      type: couponType,
+      value: Number(couponValue),
+      ...(minOrder.trim() ? { minOrder: Number(minOrder) } : {}),
+      expiresInDays: Number(expiresInDays) || 7,
+      ...(usageLimit.trim() ? { usageLimitPerCpf: Number(usageLimit) } : {}),
+    } : undefined,
     status,
     scheduledFor,
   });
@@ -332,6 +340,13 @@ function CampaignModal({ editing, preselectSegment, onClose, onSaved }: {
             <div>
               <label className="text-sm font-medium text-[var(--color-text-secondary)] block mb-1.5">Agendamento</label>
               <Input type="datetime-local" value={scheduledLocal} onChange={(e) => setScheduledLocal(e.target.value)} />
+              <p className="flex items-start gap-1.5 mt-2 text-xs text-[var(--color-text-muted)]">
+                <CalendarClock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>
+                  Os envios agendados são processados <strong>uma vez por dia, por volta das 13h (horário de Brasília)</strong>:
+                  a campanha sai na primeira execução depois do horário escolhido. Para disparar na hora, use &quot;Enviar agora&quot;.
+                </span>
+              </p>
             </div>
 
             {error && (

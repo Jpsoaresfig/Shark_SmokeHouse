@@ -46,7 +46,9 @@ export default function TrackOrderPage() {
   }, [firebaseReady, user, orderId]);
 
   /* ── Estados de carregamento / acesso ── */
-  if (authLoading || !firebaseReady || order === undefined) {
+  // Sem usuário a escuta nem começa (order fica undefined) — só espera o pedido
+  // quando há sessão; senão cai no aviso de login abaixo.
+  if (authLoading || !firebaseReady || (user && order === undefined)) {
     return (
       <div className="min-h-screen pt-24 pb-20 px-4">
         <div className="max-w-md mx-auto flex justify-center py-24">
@@ -73,7 +75,7 @@ export default function TrackOrderPage() {
     );
   }
 
-  if (order === null || error) {
+  if (!order || error) {
     return (
       <div className="min-h-screen pt-24 flex items-center justify-center px-4">
         <div className="text-center max-w-sm">

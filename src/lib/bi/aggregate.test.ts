@@ -205,6 +205,53 @@ describe("computePeriodComparison — comparação de períodos", () => {
     expect(cmp.previous.revenue).toBe(0);
     expect(cmp.deltas.revenue).toBeNull();
   });
+
+  it("anterior negativo (prejuízo) usa |anterior| — melhora aparece como alta", () => {
+    const s = source(
+      [
+        // Fevereiro: lucro −50 (custo 100 > receita 50).
+        sale({ id: "s-old", items: [item("p1", "Produto A", 50, 1, { costPrice: 100 })], total: 50, createdAt: "2026-02-10T12:00:00Z", paymentMethod: "pix" }),
+        // Março: lucro −25.
+        sale({ id: "s-cur", items: [item("p1", "Produto A", 75, 1, { costPrice: 100 })], total: 75, createdAt: "2026-03-10T12:00:00Z", paymentMethod: "pix" }),
+      ],
+      [],
+      [product({ id: "p1", name: "Produto A", costPrice: 100 })],
+    );
+    const cmp = computePeriodComparison(s, { start: new Date("2026-03-01T03:00:00Z"), end: new Date("2026-04-01T02:59:59.999Z") }, NO_FILTERS);
+    expect(cmp.previous.profit).toBe(-50);
+    expect(cmp.current.profit).toBe(-25);
+    expect(cmp.deltas.profit).toBeCloseTo(50, 5);
+  });
+});
+
+describe("lucro alinhado ao Financeiro e resgates", () => {
+  it("lucro ignora frete e taxa de cartão (PDV e online)", () => {
+    const s = source(
+      [sale({
+        id: "s1", items: [item("p1", "Produto A", 100, 1, { costPrice: 60 })],
+        subtotal: 100, deliveryFee: 10, cardFee: 5, total: 115,
+        createdAt: "2026-03-01T12:00:00Z", paymentMethod: "credit",
+      })],
+      [order({ id: "o1", items: [cartItem("p1", "Produto A", 100, 1)], total: 112, subtotal: 100, deliveryFee: 8, cardFee: 4, createdAt: "2026-03-01T12:00:00Z" })],
+      [product({ id: "p1", name: "Produto A", costPrice: 60 })],
+    );
+    const sum = computeSummary(s, RANGE, NO_FILTERS);
+    expect(sum.revenue).toBe(227); // faturamento continua sendo o total cobrado
+    expect(sum.profit).toBe(80);   // (100 − 60) + (100 − 60)
+  });
+
+  it("pedido de resgate por pontos não conta como venda", () => {
+    const s = source(
+      [],
+      [
+        order({ id: "o1", items: [cartItem("p1", "Produto A", 50, 1)], total: 50, subtotal: 50, createdAt: "2026-03-01T12:00:00Z" }),
+        order({ id: "r1", items: [cartItem("p1", "Produto A", 0, 1)], total: 0, subtotal: 0, isRedemption: true, createdAt: "2026-03-01T12:00:00Z" }),
+      ],
+      [product({ id: "p1", name: "Produto A", costPrice: 20 })],
+    );
+    expect(buildTxnRows(s, RANGE, NO_FILTERS).map((r) => r.transactionId)).toEqual(["o1"]);
+    expect(buildLines(s).map((l) => l.transactionId)).toEqual(["o1"]);
+  });
 });
 
 describe("productRanking", () => {

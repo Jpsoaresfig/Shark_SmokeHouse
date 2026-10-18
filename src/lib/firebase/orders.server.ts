@@ -1,10 +1,12 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { isOpenNow, zonedClock, STORE_TIMEZONE } from "@/lib/businessHours";
+import { parseBusinessHours } from "@/lib/orderStatusPlan";
+import { createSystemAlert } from "@/lib/observability.server";
 import { checkOrderPricing, type PricingCheck, type PricingProduct } from "@/lib/payments/pricing";
 import { DEFAULT_DELIVERY_AREAS } from "@/lib/firebase/delivery.defaults";
 import { toDate } from "@/lib/utils";
-import type { Coupon, Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent, BusinessHours } from "@/types";
+import type { Coupon, Order, OrderStatus, PaymentEvent, PaymentStatus, StatusEvent } from "@/types";
 
 /**
  * Operações de pedido executadas no SERVIDOR via Firebase Admin SDK.
@@ -144,7 +146,10 @@ const STATUS_RANK: Record<OrderStatus, number> = {
  *
  * Seguro:
  *   - nunca retrocede (ignora se o pedido já passou do status alvo);
- *   - nunca mexe em pedido "delivered" ou "cancelled";
+ *   - nunca mexe em pedido "delivered" ou "cancelled" — PIX pago num pedido
+ *     cancelado vira alerta no Centro de Operações para a equipe estornar;
+ *   - pedido "reserved" com a loja FECHADA continua reservado (a fila o libera
+ *     já pago para "Preparando" quando a loja abrir — ver processReservedQueue);
  *   - idempotente: reenvios do webhook não duplicam o avanço.
  * Retorna true se aplicou, false se ignorou.
  */
@@ -155,12 +160,22 @@ export async function advanceOrderStatusAdmin(
 ): Promise<boolean> {
   const db = getAdminDb();
   const ref = db.collection(COL).doc(orderId);
-  return db.runTransaction(async (tx) => {
+  // Horário lido fora da transação (não precisa de consistência com o pedido).
+  const storeOpen = await isStoreOpenAdmin();
+  let paidOnCancelled = false;
+  const applied = await db.runTransaction(async (tx) => {
+    paidOnCancelled = false;
     const snap = await tx.get(ref);
     if (!snap.exists) return false;
 
-    const current = (snap.data()?.status ?? "received") as OrderStatus;
-    if (current === "cancelled" || current === "delivered") return false;
+    const data = snap.data() ?? {};
+    const current = (data.status ?? "received") as OrderStatus;
+    if (current === "cancelled") {
+      paidOnCancelled = (data.payment?.status ?? data.paymentStatus) === "paid";
+      return false;
+    }
+    if (current === "delivered") return false;
+    if (current === "reserved" && !storeOpen) return false; // loja fechada: segue na fila
     if ((STATUS_RANK[current] ?? 0) >= STATUS_RANK[toStatus]) return false; // já igual/à frente
 
     const event: StatusEvent = {
@@ -176,6 +191,18 @@ export async function advanceOrderStatusAdmin(
     });
     return true;
   });
+
+  if (paidOnCancelled) {
+    console.error("[orders] pagamento confirmado em pedido cancelado", { orderId });
+    void createSystemAlert({
+      key: `paid-on-cancelled:${orderId}`,
+      type: "mercadopago_failures",
+      severity: "critical",
+      message: `Pedido #${orderId.slice(-8).toUpperCase()} foi PAGO depois de cancelado — estorne o cliente no Mercado Pago.`,
+      metadata: { orderId },
+    });
+  }
+  return applied;
 }
 
 /**
@@ -260,11 +287,22 @@ export async function verifyOrderPricingAdmin(order: Order): Promise<PricingChec
   });
 }
 
+/** Lê o horário de funcionamento (settings/site) e diz se a loja está aberta
+ *  AGORA no fuso da loja (o servidor roda em UTC — `new Date()` não reflete a
+ *  loja). Sem configuração legível, considera aberta (mesmo padrão do client). */
+export async function isStoreOpenAdmin(now: Date = new Date()): Promise<boolean> {
+  const settings = await getAdminDb().collection("settings").doc("site").get().catch(() => null);
+  return isOpenNow(parseBusinessHours(settings?.data()?.businessHours), zonedClock(STORE_TIMEZONE, now)).open;
+}
+
 /**
  * Processa a fila de pedidos RESERVADOS (feitos fora do horário de funcionamento):
- * quando a loja está ABERTA agora, move cada pedido `reserved` para `received`,
- * entrando na fila normal de processamento. Roda no servidor (cron) e pode ser
- * chamada pelo admin. Idempotente — só mexe em pedidos ainda `reserved`.
+ * quando a loja está ABERTA agora, move cada pedido `reserved` para `received`
+ * (ou direto para `preparing`, se o PIX do Mercado Pago já foi pago), entrando
+ * na fila normal de processamento. Roda no servidor (cron diário + disparo
+ * oportunista — ver maybeProcessReservedQueue). Idempotente: cada pedido é
+ * relido numa transação e só é movido se AINDA estiver `reserved` (um
+ * cancelamento entre a leitura e a escrita não é desfeito).
  * Retorna quantos foram liberados e quantos continuam aguardando a abertura.
  */
 export async function processReservedQueue(
@@ -272,53 +310,69 @@ export async function processReservedQueue(
 ): Promise<{ processed: number; waiting: number }> {
   const db = getAdminDb();
 
-  // Lê o horário de funcionamento (settings/site) e decide se está aberto agora
-  // no fuso da loja (o servidor roda em UTC — `new Date()` não reflete a loja).
-  const settings = await db.collection("settings").doc("site").get().catch(() => null);
-  const raw = settings?.data()?.businessHours as
-    | { enabled?: boolean; days?: Array<{ open?: string; close?: string } | null> }
-    | undefined;
-  const businessHours: BusinessHours | undefined = raw
-    ? {
-        enabled: raw.enabled ?? false,
-        days: (Array.isArray(raw.days) ? raw.days : []).slice(0, 7).map((d) => {
-          if (!d || !/^\d{2}:\d{2}$/.test(d.open ?? "") || !/^\d{2}:\d{2}$/.test(d.close ?? "")) {
-            return null;
-          }
-          return { open: d.open!, close: d.close! };
-        }),
-        closedMessage: "",
-      }
-    : undefined;
-
-  if (!isOpenNow(businessHours, zonedClock(STORE_TIMEZONE, now)).open) {
-    // Ainda fechado — a fila continua aguardando. Conta para informar o admin.
-    const waitingSnap = await db.collection(COL).where("status", "==", "reserved").get();
-    return { processed: 0, waiting: waitingSnap.size };
-  }
-
   const snap = await db.collection(COL).where("status", "==", "reserved").get();
+  if (!(await isStoreOpenAdmin(now))) {
+    // Ainda fechado — a fila continua aguardando. Conta para informar o admin.
+    return { processed: 0, waiting: snap.size };
+  }
   if (snap.empty) return { processed: 0, waiting: 0 };
 
-  const note = "Loja abriu — pedido saiu da fila de espera e entrou no processamento.";
-  const event: StatusEvent = {
-    status: "received",
-    timestamp: now.toISOString(),
-    note,
-    updatedBy: "system",
-  };
-  // Firestore limita o batch em 500 operações — divide em lotes menores.
-  const CHUNK = 400;
-  for (let i = 0; i < snap.docs.length; i += CHUNK) {
-    const batch = db.batch();
-    for (const d of snap.docs.slice(i, i + CHUNK)) {
-      batch.update(d.ref, {
-        status: "received",
+  let processed = 0;
+  for (const d of snap.docs) {
+    const moved = await db.runTransaction(async (tx) => {
+      const fresh = await tx.get(d.ref);
+      const data = fresh.data();
+      if (!fresh.exists || data?.status !== "reserved") return false; // cancelado/mexido no meio
+
+      const paid = (data.payment?.status ?? data.paymentStatus) === "paid";
+      const toStatus: OrderStatus = paid ? "preparing" : "received";
+      const event: StatusEvent = {
+        status: toStatus,
+        timestamp: now.toISOString(),
+        note: paid
+          ? "Loja abriu — pedido já pago saiu da fila de espera e foi para o preparo."
+          : "Loja abriu — pedido saiu da fila de espera e entrou no processamento.",
+        updatedBy: "system",
+      };
+      tx.update(d.ref, {
+        status: toStatus,
         statusHistory: FieldValue.arrayUnion(event),
         updatedAt: FieldValue.serverTimestamp(),
       });
-    }
-    await batch.commit();
+      return true;
+    });
+    if (moved) processed += 1;
   }
-  return { processed: snap.size, waiting: 0 };
+  return { processed, waiting: 0 };
+}
+
+/* Intervalo mínimo entre disparos oportunistas da fila (o cron da Vercel Hobby
+   roda só 1x/dia, então a fila também é processada quando a equipe abre o
+   painel ou quando entra um pedido novo). */
+const QUEUE_THROTTLE_MS = 5 * 60 * 1000;
+let lastQueueRunMs = 0; // atalho em memória (por instância serverless)
+
+/**
+ * Dispara `processReservedQueue` no máximo uma vez a cada 5 minutos, somando
+ * todas as instâncias (trava em `systemLocks/ordersQueue`, só Admin SDK — as
+ * regras negam o acesso de clientes por padrão). Retorna null quando pulou.
+ */
+export async function maybeProcessReservedQueue(
+  now: Date = new Date(),
+): Promise<{ processed: number; waiting: number } | null> {
+  const nowMs = now.getTime();
+  if (nowMs - lastQueueRunMs < QUEUE_THROTTLE_MS) return null;
+  lastQueueRunMs = nowMs;
+
+  const db = getAdminDb();
+  const lockRef = db.collection("systemLocks").doc("ordersQueue");
+  const acquired = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(lockRef);
+    const last = Number(snap.data()?.lastRunMs) || 0;
+    if (nowMs - last < QUEUE_THROTTLE_MS) return false;
+    tx.set(lockRef, { lastRunMs: nowMs, lastRunAt: now.toISOString() }, { merge: true });
+    return true;
+  });
+  if (!acquired) return null;
+  return processReservedQueue(now);
 }

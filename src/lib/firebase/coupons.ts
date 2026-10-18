@@ -1,10 +1,11 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
-  query, where, serverTimestamp, addDoc, Timestamp,
+  query, where, serverTimestamp, addDoc, Timestamp, deleteField,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { normalizeCouponCode } from "@/lib/coupons";
+import { updatePayload } from "@/lib/marketing/firestoreData";
 import type { Coupon } from "@/types";
 
 const COL = "coupons";
@@ -71,9 +72,15 @@ export async function createCoupon(code: string, data: CouponInput): Promise<str
   return id;
 }
 
-/** Atualiza um cupom (código é imutável — é o id). */
+/** Atualiza um cupom (código é imutável — é o id). Campo presente com valor
+ *  `undefined` = APAGAR o campo (validade, pedido mínimo, limite por CPF ou
+ *  categorias limpos no painel). Antes o undefined era ignorado e o valor antigo
+ *  continuava valendo no checkout. */
 export async function updateCoupon(id: string, data: Partial<CouponInput>): Promise<void> {
-  await updateDoc(doc(db, COL, id), { ...stripUndefined(data), updatedAt: serverTimestamp() });
+  await updateDoc(doc(db, COL, id), {
+    ...updatePayload(data as Record<string, unknown>, deleteField),
+    updatedAt: serverTimestamp(),
+  });
   invalidate(COL);
 }
 

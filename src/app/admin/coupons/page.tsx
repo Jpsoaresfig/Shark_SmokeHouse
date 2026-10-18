@@ -17,7 +17,8 @@ import {
   getCoupons, createCoupon, updateCoupon, deleteCoupon, type CouponInput,
 } from "@/lib/firebase/coupons";
 import { getCategories } from "@/lib/firebase/categories";
-import { normalizeCouponCode } from "@/lib/coupons";
+import { normalizeCouponCode, isCouponExpired } from "@/lib/coupons";
+import { storeTodayISO } from "@/lib/booking";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { Coupon, Category, CouponType } from "@/types";
 
@@ -52,6 +53,8 @@ function CouponModal({ editing, categories, onClose, onSaved }: {
     if (type === "percent" && valueNum > 100) { setError("O percentual não pode passar de 100%."); return; }
     if (!editing && !normalizeCouponCode(code)) { setError("Informe o código do cupom."); return; }
 
+    // Campos vazios vão como undefined de propósito: no update, updateCoupon
+    // os APAGA do documento (limpar validade/mínimo/limite/categorias).
     const data: CouponInput = {
       type,
       value: valueNum,
@@ -157,7 +160,8 @@ function CouponModal({ editing, categories, onClose, onSaved }: {
               icon={<CalendarClock className="w-4 h-4" />}
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
-              min={new Date().toISOString().slice(0, 10)}
+              // "Hoje" no fuso da loja (UTC virava o dia seguinte após as 21h).
+              min={storeTodayISO()}
             />
           </div>
 
@@ -321,7 +325,8 @@ export default function AdminCouponsPage() {
           ) : (
             <div className="space-y-3">
               {coupons.map((c) => {
-                const expired = c.expiresAt ? new Date().toISOString().slice(0, 10) > c.expiresAt : false;
+                // Mesma regra (fuso da loja) da validação no checkout.
+                const expired = isCouponExpired(c.expiresAt);
                 return (
                   <Card key={c.id}>
                     <CardContent className="p-4 flex flex-wrap items-center gap-x-4 gap-y-3">

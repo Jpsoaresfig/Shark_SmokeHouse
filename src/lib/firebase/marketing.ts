@@ -1,6 +1,6 @@
 import {
   collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
-  serverTimestamp, Timestamp, runTransaction,
+  serverTimestamp, Timestamp, runTransaction, deleteField,
 } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import { cached, invalidate } from "@/lib/firebase/cache";
@@ -16,6 +16,7 @@ import { storeParts } from "@/lib/bi/periods";
 import { defaultTemplates } from "@/lib/marketing/templates";
 import { campaignCouponCode } from "@/lib/marketing/ids";
 import { isMarketingCoupon } from "@/lib/marketing/analytics";
+import { updatePayload } from "@/lib/marketing/firestoreData";
 import type {
   MarketingAutomation, MarketingCampaign, MarketingCartSession, MarketingContact,
   MarketingEvent, MarketingExecution, MarketingSegment, MarketingSettings,
@@ -87,11 +88,16 @@ export async function createMarketingCampaign(data: MarketingCampaignInput): Pro
   return ref.id;
 }
 
+/** Atualiza a campanha. Campo presente com valor `undefined` = APAGAR o campo
+ *  (ex.: cupom trocado para "Sem cupom", link/descrição limpos). */
 export async function updateMarketingCampaign(
   id: string,
   data: Partial<Omit<MarketingCampaign, "id" | "createdAt" | "updatedAt">>,
 ): Promise<void> {
-  await updateDoc(doc(db, CAMPAIGNS, id), { ...stripUndefined(data), updatedAt: serverTimestamp() });
+  await updateDoc(doc(db, CAMPAIGNS, id), {
+    ...updatePayload(data as Record<string, unknown>, deleteField),
+    updatedAt: serverTimestamp(),
+  });
   invalidate(CAMPAIGNS);
 }
 
@@ -174,11 +180,16 @@ export async function createMarketingAutomation(data: MarketingAutomationInput):
   return ref.id;
 }
 
+/** Atualiza a automação. Campo presente com valor `undefined` = APAGAR o campo
+ *  (ex.: link limpo, cupom desligado). */
 export async function updateMarketingAutomation(
   id: string,
   data: Partial<Omit<MarketingAutomation, "id" | "createdAt" | "updatedAt">>,
 ): Promise<void> {
-  await updateDoc(doc(db, AUTOMATIONS, id), { ...stripUndefined(data), updatedAt: serverTimestamp() });
+  await updateDoc(doc(db, AUTOMATIONS, id), {
+    ...updatePayload(data as Record<string, unknown>, deleteField),
+    updatedAt: serverTimestamp(),
+  });
   invalidate(AUTOMATIONS);
 }
 
@@ -423,7 +434,14 @@ export async function clearMarketingCartSession(uid: string): Promise<void> {
   if (!uid) return;
   lastCartWrite = 0;
   try {
-    await deleteDoc(doc(db, CART_SESSIONS, uid));
+    // Zera a sessão em vez de apagar: as regras atuais só permitem DELETE ao
+    // admin (o dono recebia permission-denied e a sessão ficava com itens).
+    // Sessão com itemsCount 0 é ignorada pela automação e removida pelo cron.
+    await setDoc(
+      doc(db, CART_SESSIONS, uid),
+      { userId: uid, itemsCount: 0, subtotal: 0, updatedAt: serverTimestamp() },
+      { merge: true },
+    );
   } catch (err) {
     console.error("[marketing] falha ao limpar sessão de carrinho:", err);
   }
@@ -516,7 +534,19 @@ export async function executeCampaignNow(campaignId: string, by: string): Promis
   // renderizar as mensagens (mesmo comportamento do cron).
   let couponCode = campaign.couponCode;
   if (campaign.coupon && !couponCode) {
-    couponCode = campaignCouponCode();
+    // Grava o código na campanha ANTES de criar o cupom/enviar (transação —
+    // reaproveita se o cron/outro admin já gravou): sem isso, uma falha no meio
+    // do envio gerava outro código na próxima tentativa.
+    const campaignRef = doc(db, CAMPAIGNS, campaign.id);
+    couponCode = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(campaignRef);
+      const saved = snap.exists() ? snap.data().couponCode : undefined;
+      if (typeof saved === "string" && saved) return saved;
+      const generated = campaignCouponCode();
+      tx.update(campaignRef, { couponCode: generated, updatedAt: serverTimestamp() });
+      return generated;
+    });
+    invalidate(CAMPAIGNS);
     await ensureMarketingCoupon({
       code: couponCode,
       type: campaign.coupon.type,

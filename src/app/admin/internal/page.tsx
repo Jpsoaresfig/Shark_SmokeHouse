@@ -186,7 +186,7 @@ export default function AdminInternalArea() {
       sku: p.sku ?? "",
       category: p.category ?? "",
       price: p.price ? String(p.price).replace(".", ",") : "",
-      costPrice: p.costPrice ? String(p.costPrice).replace(".", ",") : "",
+      costPrice: p.costPrice != null ? String(p.costPrice).replace(".", ",") : "",
       stock: String(p.stock ?? 0),
       minStock: String(p.minStock ?? 5),
       active: p.active,
@@ -201,6 +201,8 @@ export default function AdminInternalArea() {
     if (!(price > 0)) { toast.error("Informe um preço de venda válido."); return; }
     setSaving(true);
     try {
+      // Custo vazio = sem custo (apaga no update); "0" é um custo válido.
+      const hasCost = form.costPrice.trim() !== "";
       const cost = parseMoney(form.costPrice);
       const stock = Math.max(0, parseInt(form.stock || "0", 10) || 0);
       const minStock = Math.max(0, parseInt(form.minStock || "0", 10) || 0);
@@ -213,10 +215,17 @@ export default function AdminInternalArea() {
         active: form.active,
         internal: true as const,
         ...(form.sku.trim() ? { sku: form.sku.trim() } : {}),
-        ...(cost > 0 ? { costPrice: cost } : {}),
+        ...(hasCost ? { costPrice: cost } : {}),
       };
       if (editing) {
-        await updateProduct(editing.id, base);
+        // clearEmpty + chaves explícitas: SKU/custo limpos no formulário são
+        // apagados do documento (antes não dava para remover). stockBaseline:
+        // estoque não alterado no formulário mantém o valor atual do banco.
+        await updateProduct(
+          editing.id,
+          { ...base, sku: form.sku.trim() || undefined, costPrice: hasCost ? cost : undefined },
+          { clearEmpty: true, stockBaseline: { stock: Number(editing.stock) || 0 } },
+        );
         toast.success("Produto interno atualizado.");
       } else {
         await createProduct({
@@ -259,6 +268,11 @@ export default function AdminInternalArea() {
     const product = internalProducts.find(p => p.id === moveForm.productId);
     if (!product) { toast.error("Selecione um produto."); return; }
     if (!moveForm.reason.trim()) { toast.error("Informe o motivo."); return; }
+    // Saída/perda não pode passar do saldo (a baixa não faz clamp em 0 — ficaria negativo).
+    if ((moveForm.type === "out" || moveForm.type === "loss") && qty > (product.stock ?? 0)) {
+      toast.error(`Quantidade maior que o estoque atual (${product.stock ?? 0} un).`);
+      return;
+    }
     setMoveSaving(true);
     try {
       await addStockMovement({
@@ -291,8 +305,10 @@ export default function AdminInternalArea() {
     if (!(amount > 0)) { toast.error("Informe um valor válido."); return; }
     setPaySaving(true);
     try {
-      await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
+      const res = await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
       toast.success("Recebimento registrado.");
+      // O pagamento JÁ foi gravado: falha nos pontos é só um aviso.
+      if (res.pointsError) toast.error("Os pontos do cliente não foram creditados. Ajuste os pontos manualmente.");
       setPayTarget(null); setPayAmount("");
       await loadReceivables(true);
     } catch (err) {
@@ -306,8 +322,9 @@ export default function AdminInternalArea() {
     if (!window.confirm(`Quitar o saldo de ${formatCurrency(saleOutstanding(sale))} de ${sale.customerName || "este cliente"}? Será registrado como recebido.`)) return;
     setSettlingId(sale.id);
     try {
-      await markSalePaid(sale.id, user.uid);
+      const res = await markSalePaid(sale.id, user.uid);
       toast.success("Cobrança quitada.");
+      if (res.pointsError) toast.error("Os pontos do cliente não foram creditados. Ajuste os pontos manualmente.");
       await loadReceivables(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Não foi possível quitar.");

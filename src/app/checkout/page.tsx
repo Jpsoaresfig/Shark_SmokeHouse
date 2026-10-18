@@ -22,7 +22,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { useSitePayment, useSiteCart, useBusinessHours, useStoreContact } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { isOpenNow, formatTodayStatus } from "@/lib/businessHours";
-import { createOrder, confirmWhatsappOrder, updateOrderStatus, updatePaymentStatus, StockShortageError, OrderRejectedError } from "@/lib/firebase/orders";
+import { createOrder, confirmWhatsappOrder, declineWhatsappOrder, StockShortageError, OrderRejectedError } from "@/lib/firebase/orders";
 import { getProducts } from "@/lib/firebase/products";
 import { getCategories } from "@/lib/firebase/categories";
 import { getCouponByCode, countCouponUsesForCpf, countCouponUsesForUser } from "@/lib/firebase/coupons";
@@ -117,7 +117,6 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
   const [confirmState, setConfirmState] = useState<"idle" | "saving" | "confirmed" | "cancelled">("idle");
   const { pixKey, pixName, pixQrPayload } = useSitePayment();
   const storeContact = useStoreContact();
-  const { user } = useAuthStore();
 
   const copy = async () => {
     await navigator.clipboard.writeText(pixKey);
@@ -133,8 +132,8 @@ function SuccessScreen({ orderId, payment, waLink, total, installments, reserved
         await confirmWhatsappOrder(orderId);
         setConfirmState("confirmed");
       } else {
-        await updateOrderStatus(orderId, "cancelled", "Cliente não concluiu a compra pelo WhatsApp", user?.uid);
-        await updatePaymentStatus(orderId, "cancelled", { note: "Compra não concluída pelo cliente (WhatsApp)" });
+        // Servidor cancela (mesmo pedido reservado), libera o cupom e o estoque.
+        await declineWhatsappOrder(orderId);
         setConfirmState("cancelled");
       }
     } catch (err) {
@@ -446,6 +445,17 @@ export default function CheckoutPage() {
   const [changeFor, setChangeFor] = useState("");
   /* Parcelas no cartão de crédito: 1 = à vista (direto), 2+ = parcelado na maquininha. */
   const [creditInstallments, setCreditInstallments] = useState(1);
+  /* PIX automático só aparece quando o Mercado Pago está configurado no servidor. */
+  const [mercadopagoEnabled, setMercadopagoEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/payments/mercadopago/config")
+      .then((r) => r.json())
+      .then((d) => { if (active) setMercadopagoEnabled(d?.enabled === true); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  const paymentOptions = PAYMENT_OPTIONS.filter((o) => o.value !== "mercadopago" || mercadopagoEnabled);
 
   /* ui state */
   const [cepLoading, setCepLoading] = useState(false);
@@ -1177,7 +1187,7 @@ export default function CheckoutPage() {
                 </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  {PAYMENT_OPTIONS.map(({ value, label, desc, icon: Icon }) => (
+                  {paymentOptions.map(({ value, label, desc, icon: Icon }) => (
                     <button
                       key={value}
                       type="button"

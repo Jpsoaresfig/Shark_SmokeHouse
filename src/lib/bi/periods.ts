@@ -146,10 +146,51 @@ export function rangeForPreset(preset: Exclude<BiPeriodPreset, "custom">, now: D
   }
 }
 
-/** Período ANTERIOR EQUIVALENTE: mesma duração, imediatamente antes do início. */
-export function previousRange(range: BiRange): BiRange {
-  const length = Math.max(0, range.end.getTime() - range.start.getTime());
-  const end = range.start.getTime() - 1;
+/** Último dia (1–31) do mês y-m (m pode extrapolar: 0 = dezembro anterior). */
+function daysInStoreMonth(y: number, m: number): number {
+  return storeParts(new Date(storeMidnight(y, m + 1, 1).getTime() - 1)).d;
+}
+
+/**
+ * Período ANTERIOR EQUIVALENTE.
+ *
+ * Só compara o que JÁ PASSOU: o fim do período é limitado ao fim de hoje (sem
+ * isso, "Este mês" no dia 18 comparava 18 dias de vendas com o mês anterior
+ * inteiro e ainda com uma janela desalinhada, ex.: 29/01–28/02).
+ *
+ *  - Período alinhado a meses (começa no dia 1 e termina no fim de um mês, ex.:
+ *    este mês, mês passado, este ano): o anterior é a mesma fatia do(s) mês(es)
+ *    anterior(es) — 01/10–18/10 → 01/09–18/09; março inteiro → fevereiro
+ *    inteiro; ano até hoje → mesmo trecho do ano anterior.
+ *  - Demais períodos: mesma duração, imediatamente antes do início.
+ */
+export function previousRange(range: BiRange, now: Date = new Date()): BiRange {
+  const t = storeParts(now);
+  const endOfToday = storeMidnight(t.y, t.m, t.d + 1).getTime() - 1;
+  const startMs = range.start.getTime();
+  const endMs = Math.max(startMs, Math.min(range.end.getTime(), endOfToday));
+
+  const s = storeParts(range.start);
+  const o = storeParts(range.end);
+  const monthAligned =
+    s.d === 1 &&
+    storeMidnight(s.y, s.m, 1).getTime() === startMs &&
+    storeMidnight(o.y, o.m + 1, 1).getTime() - 1 === range.end.getTime();
+
+  if (monthAligned) {
+    const shift = (o.y - s.y) * 12 + (o.m - s.m) + 1; // meses do período original
+    const e = storeParts(new Date(endMs));
+    const lastDay = e.d === daysInStoreMonth(e.y, e.m);
+    const targetDays = daysInStoreMonth(e.y, e.m - shift);
+    const day = lastDay ? targetDays : Math.min(e.d, targetDays);
+    return {
+      start: storeMidnight(s.y, s.m - shift, 1),
+      end: new Date(storeMidnight(e.y, e.m - shift, day + 1).getTime() - 1),
+    };
+  }
+
+  const length = endMs - startMs;
+  const end = startMs - 1;
   return { start: new Date(end - length), end: new Date(end) };
 }
 

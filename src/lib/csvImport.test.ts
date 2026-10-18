@@ -37,6 +37,18 @@ describe("parseBrNumber", () => {
     expect(parseBrNumber("R$ 3,50")).toBe(3.5);
     expect(parseBrNumber("1.234.567,89")).toBe(1234567.89);
   });
+
+  it("trata separador de milhar pt-BR e en-US", () => {
+    expect(parseBrNumber("1,500")).toBe(1500);
+    expect(parseBrNumber("12,345,678")).toBe(12345678);
+    expect(parseBrNumber("1,500.00")).toBe(1500);
+    expect(parseBrNumber("1.500,00")).toBe(1500);
+    // Zero à esquerda / casas que não são grupos de 3 = decimal.
+    expect(parseBrNumber("0,500")).toBe(0.5);
+    expect(parseBrNumber("0.500")).toBe(0.5);
+    expect(parseBrNumber("1,50")).toBe(1.5);
+    expect(parseBrNumber("1,5000")).toBe(1.5);
+  });
 });
 
 describe("mapHeaders", () => {

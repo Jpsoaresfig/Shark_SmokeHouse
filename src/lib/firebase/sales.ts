@@ -1,15 +1,16 @@
 import {
   collection, getDocs, getDoc, addDoc, updateDoc, doc, query, orderBy,
-  where, serverTimestamp, Timestamp, runTransaction, arrayUnion,
+  where, serverTimestamp, Timestamp, runTransaction, arrayUnion, increment,
   QueryConstraint,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { addStockMovement } from "@/lib/firebase/inventory";
-import { addLoyaltyPoints, adjustLoyaltyPoints } from "@/lib/firebase/loyalty";
 import { cached, invalidate } from "@/lib/firebase/cache";
 import { deriveStatus, saleStatus, saleReceivedAmount, saleOutstanding, saleDueDate, CENTS_EPSILON } from "@/lib/sales/helpers";
 import { SALE_PAYMENT_STATUS_LABELS } from "@/lib/payments/labels";
-import type { Sale, SalePaymentMethod, SaleChannel, SaleAuditEvent } from "@/types";
+import { storeMidnight } from "@/lib/bi/periods";
+import { STORE_TIMEZONE } from "@/lib/businessHours";
+import type { Sale, SalePaymentMethod, SaleChannel, SaleAuditEvent, Product } from "@/types";
 
 const COL = "sales";
 
@@ -78,14 +79,14 @@ export async function getSales(startDate?: Date, endDate?: Date, force = false):
   const key = `sales:${startDate ? localDayKey(startDate) : "-"}:${endDate ? localDayKey(endDate) : "-"}`;
   return cached(key, async () => {
     const constraints: QueryConstraint[] = [];
+    // O dia do calendário escolhido (y-m-d da data recebida) é interpretado no
+    // fuso da LOJA — aparelho em outro fuso não desloca o filtro do histórico.
     if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
+      const start = storeMidnight(startDate.getFullYear(), startDate.getMonth() + 1, startDate.getDate());
       constraints.push(where("createdAt", ">=", Timestamp.fromDate(start)));
     }
     if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
+      const end = new Date(storeMidnight(endDate.getFullYear(), endDate.getMonth() + 1, endDate.getDate() + 1).getTime() - 1);
       constraints.push(where("createdAt", "<=", Timestamp.fromDate(end)));
     }
     constraints.push(orderBy("createdAt", "desc"));
@@ -161,9 +162,11 @@ export async function createSale(
   if (data.createdBy) payload.createdBy = data.createdBy;
   // Guards de idempotência.
   payload.stockReversed = false;
-  // Pontos: creditados apenas quando a venda está quitada (o chamador credita
-  // de fato no fluxo "paid"; pendentes creditam ao quitar via registerSalePayment).
-  payload.pointsAwarded = status === "paid" && !!data.pointsEarned;
+  // Pontos: a venda SEMPRE nasce com `pointsAwarded: false`. Quem marca `true` é
+  // `awardSalePoints`, na mesma transação que credita o saldo — antes o flag era
+  // gravado aqui antes do crédito e, se o crédito falhasse, a venda ficava
+  // "creditada" sem os pontos (e o cancelamento debitava pontos nunca dados).
+  payload.pointsAwarded = false;
   // Trilha de auditoria inicial.
   const audit: SaleAuditEvent[] = [
     { type: "created", at: nowIso(), by: data.createdBy ?? data.sellerId, to: status },
@@ -216,7 +219,7 @@ export async function createSale(
 export async function registerSalePayment(
   id: string,
   input: { amount: number; method: SalePaymentMethod; receivedBy: string; note?: string },
-): Promise<void> {
+): Promise<SalePaymentResult> {
   if (!(input.amount > 0)) throw new Error("Valor do recebimento deve ser maior que zero.");
 
   const ref = doc(db, COL, id);
@@ -271,14 +274,74 @@ export async function registerSalePayment(
 
   invalidate("sales");
 
-  // Crédito de pontos ao quitar — uma única vez (guard pointsAwarded).
+  // Crédito de pontos ao quitar — uma única vez (guard transacional em
+  // awardSalePoints). O recebimento JÁ foi gravado: uma falha no crédito não
+  // pode virar "erro ao registrar recebimento" (o operador registraria de novo).
   if (result.becamePaid && !result.pointsAwarded && result.customerId && result.pointsEarned > 0) {
-    await addLoyaltyPoints(result.customerId, result.pointsEarned, `Compra ${result.saleRef}`, "earned");
-    await updateDoc(ref, {
-      pointsAwarded: true,
-      audit: arrayUnion({ type: "payment", at: nowIso(), by: input.receivedBy, note: "Pontos creditados", amount: result.pointsEarned }),
-    });
+    try {
+      const points = await awardSalePoints(id, input.receivedBy);
+      return { pointsCredited: points };
+    } catch (err) {
+      console.error("[registerSalePayment] falha ao creditar pontos", err);
+      return {
+        pointsCredited: 0,
+        pointsError: err instanceof Error ? err.message : "Falha ao creditar os pontos.",
+      };
+    }
   }
+  return { pointsCredited: 0 };
+}
+
+/** Resultado de um recebimento: o pagamento foi gravado; `pointsError` indica
+ *  que o crédito de pontos (pós-commit) falhou e precisa de ajuste manual. */
+export interface SalePaymentResult {
+  pointsCredited: number;
+  pointsError?: string;
+}
+
+/** Papéis que pontuam no PDV. As regras do Firestore só permitem ao vendedor
+ *  creditar contas "customer" — motoboy/equipe vinculados à venda não pontuam. */
+export function canEarnSalePoints(role: string | undefined | null): boolean {
+  return (role ?? "customer") === "customer";
+}
+
+/**
+ * Credita os pontos do Clube Shark de uma venda QUITADA ao cliente vinculado,
+ * uma única vez. Transação: relê a venda, só credita se `pointsAwarded` ainda
+ * for falso e marca o flag no MESMO commit do saldo + lançamento no ledger —
+ * nunca fica "creditado" sem crédito, nem credita duas vezes.
+ * Retorna os pontos creditados (0 = nada a creditar).
+ */
+export async function awardSalePoints(id: string, by: string): Promise<number> {
+  const ref = doc(db, COL, id);
+  const points = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return 0;
+    const sale = { id, ...snap.data() } as Sale;
+    const earned = sale.pointsEarned ?? 0;
+    if (sale.pointsAwarded || saleStatus(sale) !== "paid" || !sale.customerId || !(earned > 0)) return 0;
+
+    const userRef = doc(db, "users", sale.customerId);
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists() || !canEarnSalePoints(userSnap.data().role)) return 0;
+
+    tx.update(userRef, { loyaltyPoints: increment(earned), updatedAt: serverTimestamp() });
+    tx.set(doc(collection(db, "loyaltyTransactions")), {
+      userId: sale.customerId,
+      type: "earned",
+      points: earned,
+      reason: `Venda PDV #${id.slice(-6).toUpperCase()}`,
+      createdAt: serverTimestamp(),
+    });
+    tx.update(ref, {
+      pointsAwarded: true,
+      audit: arrayUnion({ type: "payment", at: nowIso(), by, note: "Pontos creditados", amount: earned } satisfies SaleAuditEvent),
+    });
+    return earned;
+  });
+  invalidate("sales");
+  invalidate("users");
+  return points;
 }
 
 /** Atalho: quita o saldo restante da venda de uma vez (marca como paga). */
@@ -286,13 +349,13 @@ export async function markSalePaid(
   id: string,
   receivedBy: string,
   method?: SalePaymentMethod,
-): Promise<void> {
+): Promise<SalePaymentResult> {
   const snap = await getDoc(doc(db, COL, id));
   if (!snap.exists()) throw new Error("Venda não encontrada.");
   const sale = { id, ...snap.data() } as Sale;
   const outstanding = saleOutstanding(sale);
-  if (outstanding <= 0) return;
-  await registerSalePayment(id, {
+  if (outstanding <= 0) return { pointsCredited: 0 };
+  return registerSalePayment(id, {
     amount: outstanding,
     method: method ?? sale.paymentMethod,
     receivedBy,
@@ -301,71 +364,134 @@ export async function markSalePaid(
 }
 
 /**
- * Cancela uma venda: marca como cancelada, estorna o estoque (uma única vez via
- * guard `stockReversed`) e reverte os pontos já creditados (uma única vez via
- * `pointsReversed`). Idempotente — reexecutar não duplica estorno.
+ * Cancela uma venda: marca como cancelada, estorna o estoque e reverte os
+ * pontos JÁ creditados — tudo numa ÚNICA transação. O guard (`stockReversed`/
+ * `pointsReversed`) é lido e gravado no mesmo commit do estorno, então dois
+ * cancelamentos simultâneos (duas abas, clique duplo) não devolvem o estoque
+ * duas vezes: o segundo relê a venda já estornada e não faz nada.
+ *
+ * Produto (ou variação) excluído depois da venda é ignorado no estorno e fica
+ * registrado na auditoria. Pontos só são debitados se `pointsAwarded` for true
+ * (crédito efetivamente feito). Idempotente.
  */
 export async function cancelSale(id: string, reason: string, userId: string): Promise<void> {
   const ref = doc(db, COL, id);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new Error("Venda não encontrada.");
-  const sale = { id, ...snap.data() } as Sale;
-  if (saleStatus(sale) === "cancelled" && sale.stockReversed) return; // já cancelada e estornada
-
   const saleRef = `#${id.slice(-6).toUpperCase()}`;
 
-  // 1) Marca a venda como cancelada.
-  if (saleStatus(sale) !== "cancelled") {
-    await updateDoc(ref, {
-      paymentStatus: "cancelled",
-      canceledAt: nowIso(),
-      canceledBy: userId,
-      cancelReason: reason,
-      audit: arrayUnion({
-        type: "cancelled",
-        at: nowIso(),
-        by: userId,
-        note: reason,
-        from: saleStatus(sale),
-        to: "cancelled",
-      } satisfies SaleAuditEvent),
-    });
-  }
+  await runTransaction(db, async (tx) => {
+    // ── Leituras (todas antes das escritas, exigência da transação) ──
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error("Venda não encontrada.");
+    const sale = { id, ...snap.data() } as Sale;
+    const prevStatus = saleStatus(sale);
+    const wasCancelled = prevStatus === "cancelled";
+    const reverseStock = !sale.stockReversed;
+    const reversePoints = !!sale.pointsAwarded && !sale.pointsReversed
+      && !!sale.customerId && (sale.pointsEarned ?? 0) > 0;
+    if (wasCancelled && !reverseStock && !reversePoints) return; // já cancelada e estornada
 
-  // 2) Estorna estoque (guard anti-duplo).
-  if (!sale.stockReversed) {
-    await Promise.all(
-      sale.items.map(item =>
-        addStockMovement({
-          productId: item.productId,
-          productName: item.productName,
-          type: "in",
-          quantity: item.quantity,
-          reason: `Estorno cancelamento PDV ${saleRef}`,
-          userId,
-          ...(item.variationId
-            ? { variationId: item.variationId, variationName: item.variationName }
-            : {}),
-        })
-      )
-    );
-    await updateDoc(ref, {
-      stockReversed: true,
-      audit: arrayUnion({ type: "stock_reversed", at: nowIso(), by: userId } satisfies SaleAuditEvent),
-    });
-  }
+    const productIds = reverseStock ? [...new Set(sale.items.map(i => i.productId))] : [];
+    const productSnaps = await Promise.all(productIds.map(pid => tx.get(doc(db, "products", pid))));
+    const userRef = reversePoints ? doc(db, "users", sale.customerId!) : null;
+    const userSnap = userRef ? await tx.get(userRef) : null;
 
-  // 3) Reverte pontos já creditados (debita mesmo que fique negativo — decisão do negócio).
-  if (sale.pointsAwarded && !sale.pointsReversed && sale.customerId && (sale.pointsEarned ?? 0) > 0) {
-    await adjustLoyaltyPoints(sale.customerId, -(sale.pointsEarned ?? 0), `Estorno venda ${saleRef}`, userId);
-    await updateDoc(ref, {
-      pointsReversed: true,
-      audit: arrayUnion({ type: "points_reversed", at: nowIso(), by: userId, amount: -(sale.pointsEarned ?? 0) } satisfies SaleAuditEvent),
-    });
-  }
+    const at = nowIso();
+    const events: SaleAuditEvent[] = [];
+    const update: Record<string, unknown> = {};
+
+    // 1) Marca a venda como cancelada.
+    if (!wasCancelled) {
+      Object.assign(update, {
+        paymentStatus: "cancelled",
+        canceledAt: at,
+        canceledBy: userId,
+        cancelReason: reason,
+      });
+      events.push({ type: "cancelled", at, by: userId, note: reason, from: prevStatus, to: "cancelled" });
+    }
+
+    // 2) Estorna o estoque (soma exata do que a venda baixou).
+    if (reverseStock) {
+      const skipped: string[] = [];
+      const label = (i: Sale["items"][number]) => (i.variationName ? `${i.productName} - ${i.variationName}` : i.productName);
+      productSnaps.forEach((pSnap, idx) => {
+        const mine = sale.items.filter(i => i.productId === productIds[idx]);
+        if (!pSnap.exists()) { skipped.push(...mine.map(label)); return; } // produto excluído
+        const product = pSnap.data() as Product;
+        let variations = product.variations;
+        let stock = Number(product.stock) || 0;
+        const applied: Sale["items"] = [];
+        const byVariation = mine.filter(i => i.variationId);
+        const knownVar = byVariation.filter(i => variations?.some(v => v.id === i.variationId));
+        skipped.push(...byVariation.filter(i => !knownVar.includes(i)).map(label)); // variação excluída
+        if (knownVar.length && variations?.length) {
+          variations = variations.map(v => {
+            const qty = knownVar.filter(i => i.variationId === v.id).reduce((n, i) => n + i.quantity, 0);
+            return qty ? { ...v, stock: (v.stock ?? 0) + qty } : v;
+          });
+          // Com grade, o estoque do produto é a soma das variações.
+          stock = variations.reduce((n, v) => n + (v.stock ?? 0), 0);
+          applied.push(...knownVar);
+        }
+        const plain = mine.filter(i => !i.variationId);
+        const plainQty = plain.reduce((n, i) => n + i.quantity, 0);
+        if (plainQty) { stock += plainQty; applied.push(...plain); }
+        if (!applied.length) return;
+        tx.update(pSnap.ref, {
+          stock,
+          ...(knownVar.length ? { variations } : {}),
+          updatedAt: serverTimestamp(),
+        });
+        for (const item of applied) {
+          tx.set(doc(collection(db, "stockMovements")), {
+            productId: item.productId,
+            productName: item.productName,
+            type: "in",
+            quantity: item.quantity,
+            reason: `Estorno cancelamento PDV ${saleRef}`,
+            userId,
+            ...(item.variationId ? { variationId: item.variationId, variationName: item.variationName } : {}),
+            createdAt: serverTimestamp(),
+          });
+        }
+      });
+      update.stockReversed = true;
+      events.push({
+        type: "stock_reversed", at, by: userId,
+        ...(skipped.length ? { note: `Sem estorno (produto/variação excluído): ${skipped.join(", ")}` } : {}),
+      });
+    }
+
+    // 3) Reverte os pontos efetivamente creditados (debita mesmo que fique
+    //    negativo — decisão do negócio). Sem `pointsAwarded`, nada a debitar.
+    if (reversePoints) {
+      const pts = sale.pointsEarned ?? 0;
+      const userExists = !!userSnap?.exists();
+      if (userRef && userExists) {
+        tx.update(userRef, { loyaltyPoints: increment(-pts), updatedAt: serverTimestamp() });
+        tx.set(doc(collection(db, "loyaltyTransactions")), {
+          userId: sale.customerId,
+          type: "adjustment",
+          points: -pts,
+          reason: `Estorno venda ${saleRef}`,
+          by: userId,
+          createdAt: serverTimestamp(),
+        });
+      }
+      update.pointsReversed = true;
+      events.push({
+        type: "points_reversed", at, by: userId, amount: -pts,
+        ...(userExists ? {} : { note: "Cliente não encontrado — sem débito" }),
+      });
+    }
+
+    if (events.length) update.audit = arrayUnion(...events);
+    tx.update(ref, update);
+  });
 
   invalidate("sales");
   invalidate("products");
+  invalidate("users");
 }
 
 /**
@@ -410,8 +536,8 @@ export function exportSalesCSV(sales: Sale[], filename?: string): void {
 
   for (const sale of sales) {
     const d = toDate(sale.createdAt);
-    const dateStr = d.toLocaleDateString("pt-BR");
-    const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = d.toLocaleDateString("pt-BR", { timeZone: STORE_TIMEZONE });
+    const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: STORE_TIMEZONE });
     const deliveryStr = sale.deliveryLater
       ? (sale.delivered ? "Entregue" : "Entrega pendente")
       : "Retirada na hora";

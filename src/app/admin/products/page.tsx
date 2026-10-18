@@ -33,6 +33,13 @@ const EMPTY: Omit<Product, "id" | "createdAt" | "updatedAt"> = {
   brand: "", size: "", costPrice: undefined, taxPercent: undefined,
 };
 
+/** Campo numérico opcional do formulário: vazio/inválido → undefined; 0 é válido. */
+function optionalNumber(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 const inputCls =
   "w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-neon-blue)] transition-all";
 
@@ -360,8 +367,9 @@ export default function AdminProducts() {
         })
         .filter((c): c is { name: string; image?: string } => c !== null);
       const priceNum = Number(form.price);
-      const costNum = form.costPrice ? Number(form.costPrice) : undefined;
-      const taxNum = form.taxPercent ? Number(form.taxPercent) : undefined;
+      // Custo/imposto 0 são válidos (ex.: brinde sem custo) — só vazio vira "sem custo".
+      const costNum = optionalNumber(form.costPrice);
+      const taxNum = optionalNumber(form.taxPercent);
       const overrideNum = form.loyaltyPointsOverride ? Number(form.loyaltyPointsOverride) : undefined;
       // Motor de resgate (Task 3.6): deriva o custo EFETIVO em pontos a partir da
       // margem/fórmula/overwrite e persiste só quando elegível, para o cliente não
@@ -390,7 +398,16 @@ export default function AdminProducts() {
       if (editing) {
         // clearEmpty: campos limpos no formulário (undefined) são removidos do doc —
         // senão compareAtPrice/loyaltyPoints/redeemDisabled antigos permaneciam.
-        await updateProduct(editing.id, payload, { clearEmpty: true });
+        // stockBaseline: estoque que o formulário carregou (cache). Campo de
+        // estoque não alterado assume o valor atual do banco — senão a edição
+        // desfazia vendas feitas enquanto o formulário estava aberto.
+        await updateProduct(editing.id, payload, {
+          clearEmpty: true,
+          stockBaseline: {
+            stock: Number(editing.stock) || 0,
+            variations: Object.fromEntries((editing.variations ?? []).map(v => [v.id, Number(v.stock) || 0])),
+          },
+        });
         toast.success("Produto atualizado!");
       } else {
         await createProduct(payload);
@@ -699,8 +716,8 @@ export default function AdminProducts() {
               {(() => {
                 const redemption = computeRedemption({
                   price: Number(form.price) || 0,
-                  costPrice: form.costPrice ? Number(form.costPrice) : undefined,
-                  taxPercent: form.taxPercent ? Number(form.taxPercent) : undefined,
+                  costPrice: optionalNumber(form.costPrice),
+                  taxPercent: optionalNumber(form.taxPercent),
                   redeemDisabled: form.redeemDisabled,
                   loyaltyPointsOverride: form.loyaltyPointsOverride ? Number(form.loyaltyPointsOverride) : undefined,
                 });

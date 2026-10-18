@@ -20,20 +20,20 @@ import { MiniCalculator } from "@/components/admin/MiniCalculator";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { getProducts } from "@/lib/firebase/products";
-import { getSales, createSale, SaleStockError, exportSalesCSV, exportProductSalesCSV, aggregateProductSales, markSaleDelivered, registerSalePayment, cancelSale, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
+import { getSales, createSale, SaleStockError, exportSalesCSV, exportProductSalesCSV, aggregateProductSales, markSaleDelivered, registerSalePayment, cancelSale, awardSalePoints, canEarnSalePoints, SALE_PAYMENT_LABELS as PAYMENT_LABELS, SALE_CHANNEL_LABELS } from "@/lib/firebase/sales";
 import { SALE_PAYMENT_STATUS_LABELS, SALE_PAYMENT_STATUS_BADGE } from "@/lib/payments/labels";
 import { saleStatus, saleReceivedAmount, saleOutstanding, saleIsRevenue, saleCommission as saleCommissionOf, saleDueDate, parseMoneyInput as parseMoney, CENTS_EPSILON } from "@/lib/sales/helpers";
 import { resetSalesData } from "@/lib/firebase/maintenance";
 import { getAllUsers, createWalkInCustomer } from "@/lib/firebase/users";
 import { getCouponByCode, countCouponUsesForCpf, recordCouponRedemption } from "@/lib/firebase/coupons";
 import { getCategories } from "@/lib/firebase/categories";
-import { addLoyaltyPoints } from "@/lib/firebase/loyalty";
-import { computeOrderPoints, computeOrderPointsForItems } from "@/lib/loyalty/levels";
+import { computeOrderPointsForItems, eligibleOrderPointItems } from "@/lib/loyalty/levels";
 import { evaluateCoupon, normalizeCouponCode } from "@/lib/coupons";
 import { useAuthStore } from "@/stores/authStore";
 import { useSitePayment } from "@/stores/siteSettingsStore";
 import { toast } from "@/stores/toastStore";
 import { useBarcodeScanner } from "@/hooks/useBarcodeScanner";
+import { STORE_TIMEZONE } from "@/lib/businessHours";
 import { normalizeInstallmentFees, installmentFeePercent, formatFeePercent, cardTotalFor } from "@/lib/payments/installments";
 import type { Product, ProductVariation, Sale, SaleItem, SalePaymentMethod, SaleChannel, SalePaymentStatus, SaleManualDiscount, Coupon, UserProfile } from "@/types";
 
@@ -296,6 +296,24 @@ export default function SalePdv({
       toast.error(`Nenhum produto com o código ${code}.`);
       return;
     }
+    // Produto COM grade bipado pelo SKU do produto (não da variação): o item
+    // precisa sair de uma variação — senão a baixa ia só no `stock` agregado e
+    // a grade ficava dessincronizada. Única variação com saldo → usa ela;
+    // várias → filtra a busca para o vendedor escolher.
+    if (match.variations?.length) {
+      const available = match.variations.filter(vr => vr.stock > 0);
+      if (available.length === 1) {
+        addItem(match, available[0]);
+        setSearch("");
+        toast.success(`${match.name} - ${available[0].name} adicionado.`);
+      } else if (available.length === 0) {
+        toast.error(`"${match.name}" está sem estoque.`);
+      } else {
+        setSearch(match.name);
+        toast.error(`"${match.name}" tem variações — selecione qual adicionar.`);
+      }
+      return;
+    }
     if (match.stock <= 0) {
       toast.error(`"${match.name}" está sem estoque.`);
       return;
@@ -345,8 +363,21 @@ export default function SalePdv({
   /* Clube Shark: estimativa de pontos para o cliente vinculado (exige CPF no
      cadastro dele). O crédito real é feito no momento de salvar a venda. */
   const customerCpfPresent = !!(customer?.cpf && customer.cpf.trim());
-  const estimatedPoints = customer
-    ? computeOrderPoints({ eligibleReais: total, currentPoints: customer.loyaltyPoints ?? 0, cpfPresent: customerCpfPresent })
+  /* Só conta de CLIENTE pontua (motoboy/equipe vinculados não — as regras do
+     Firestore só deixam o vendedor creditar clientes). */
+  const customerCanEarn = !!customer && canEarnSalePoints(customer.role);
+  /* Base = valor efetivamente cobrado em produtos (após cupom e desconto
+     manual), como no pedido online — frete e taxa de cartão não pontuam. */
+  const pointItems = (catDouble?: Map<string, boolean>) => eligibleOrderPointItems({
+    items: items.map(it => ({ productId: it.productId, price: it.price, quantity: it.quantity })),
+    total: netProducts,
+    isDouble: (pid) => {
+      const p = products.find(pp => pp.id === pid);
+      return !!p?.doublePoints || (!!p && !!catDouble?.get(p.category));
+    },
+  });
+  const estimatedPoints = customer && customerCanEarn
+    ? computeOrderPointsForItems({ items: pointItems(), currentPoints: customer.loyaltyPoints ?? 0, cpfPresent: customerCpfPresent })
     : 0;
 
   /* Totais do histórico: vendido (competência, exclui canceladas), recebido
@@ -605,15 +636,11 @@ export default function SalePdv({
          A taxa vem do nível atual do cliente; o multiplicador "Pontos em Dobro"
          (2×) sai do produto ou da categoria. Sem cliente/CPF, não pontua. */
       let pointsEarned = 0;
-      if (customer && customerCpfPresent) {
+      if (customer && customerCanEarn && customerCpfPresent) {
         const cats = await getCategories();
         const catDouble = new Map(cats.map(c => [c.slug, !!c.doublePoints]));
         pointsEarned = computeOrderPointsForItems({
-          items: items.map(it => {
-            const p = products.find(pp => pp.id === it.productId);
-            const isDouble = !!p?.doublePoints || (!!p && (catDouble.get(p.category) ?? false));
-            return { reais: it.subtotal, multiplier: isDouble ? 2 : 1 };
-          }),
+          items: pointItems(catDouble),
           currentPoints: customer.loyaltyPoints ?? 0,
           cpfPresent: true,
         });
@@ -674,14 +701,18 @@ export default function SalePdv({
 
       /* Credita os pontos na conta do cliente — SOMENTE quando a venda já nasce
          quitada. Em venda pendente/parcial os pontos são creditados ao quitar
-         (registerSalePayment), espelhando o e-commerce. */
+         (registerSalePayment), espelhando o e-commerce. `awardSalePoints` marca
+         `pointsAwarded` na mesma transação do crédito; se falhar, a venda segue
+         registrada e o aviso pede ajuste manual. */
+      let pointsCredited = 0;
+      let pointsFailed = false;
       if (payStatus === "paid" && customer && pointsEarned > 0) {
-        await addLoyaltyPoints(
-          customer.uid,
-          pointsEarned,
-          `Venda PDV #${id.slice(-6).toUpperCase()}`,
-          "earned",
-        ).catch(err => console.error("Falha ao creditar pontos:", err));
+        try {
+          pointsCredited = await awardSalePoints(id, user.uid);
+        } catch (err) {
+          console.error("Falha ao creditar pontos:", err);
+          pointsFailed = true;
+        }
       }
 
       setSavedId(id.slice(-8).toUpperCase());
@@ -695,8 +726,10 @@ export default function SalePdv({
               ? "Venda parcial registrada — saldo em Contas a Receber."
               : "Venda pendente registrada em Contas a Receber.",
       );
-      if (payStatus === "paid" && customer && pointsEarned > 0) {
-        toast.success(`+${pointsEarned.toLocaleString("pt-BR")} pontos creditados para ${customer.displayName}.`);
+      if (customer && pointsCredited > 0) {
+        toast.success(`+${pointsCredited.toLocaleString("pt-BR")} pontos creditados para ${customer.displayName}.`);
+      } else if (customer && pointsFailed) {
+        toast.error(`Venda registrada, mas os pontos de ${customer.displayName} não foram creditados. Ajuste os pontos manualmente.`);
       }
       if (stockWarning.msg) toast.error(stockWarning.msg);
       resetForm();
@@ -742,8 +775,14 @@ export default function SalePdv({
     if (!(amount > 0)) { toast.error("Informe um valor de recebimento válido."); return; }
     setPaySaving(true);
     try {
-      await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
-      toast.success("Recebimento registrado.");
+      const res = await registerSalePayment(payTarget.id, { amount, method: payMethod, receivedBy: user.uid });
+      toast.success(
+        res.pointsCredited > 0
+          ? `Recebimento registrado — +${res.pointsCredited.toLocaleString("pt-BR")} pontos creditados.`
+          : "Recebimento registrado.",
+      );
+      // O pagamento JÁ foi gravado: falha nos pontos é só um aviso.
+      if (res.pointsError) toast.error("Os pontos do cliente não foram creditados. Ajuste os pontos manualmente.");
       setPayTarget(null);
       setPayAmount("");
       await loadHistory(startDate, endDate, true);
@@ -1097,7 +1136,13 @@ export default function SalePdv({
                     ) : null}
 
                     {/* Clube Shark: pontuação vai para a conta do cliente vinculado */}
-                    {customer && (
+                    {customer && !customerCanEarn && (
+                      <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-overlay)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                        <Star className="w-3.5 h-3.5 shrink-0" />
+                        <span>Conta de equipe/motoboy — a venda não pontua no Clube Shark.</span>
+                      </div>
+                    )}
+                    {customer && customerCanEarn && (
                       customerCpfPresent ? (
                         estimatedPoints > 0 && (
                           <div className="mt-2 flex items-center gap-1.5 rounded-lg border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 px-3 py-2 text-xs text-[var(--color-warning)]">
@@ -1587,10 +1632,10 @@ export default function SalePdv({
                           >
                             <div className="text-center shrink-0 w-14">
                               <p className="text-sm font-bold text-[var(--color-text-primary)]">
-                                {date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}
+                                {date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: STORE_TIMEZONE })}
                               </p>
                               <p className="text-xs text-[var(--color-text-muted)]">
-                                {date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                {date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: STORE_TIMEZONE })}
                               </p>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -1735,7 +1780,7 @@ export default function SalePdv({
                                           {sale.pointsReversed
                                             ? "Pontos estornados"
                                             : sale.pointsAwarded === false
-                                              ? "Pontos a creditar (ao quitar)"
+                                              ? (saleStatus(sale) === "paid" ? "Pontos não creditados" : "Pontos a creditar (ao quitar)")
                                               : "Pontos creditados"}
                                         </span>
                                         <span className={`font-semibold ${sale.pointsReversed ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-warning)]"}`}>+{sale.pointsEarned.toLocaleString("pt-BR")}</span>
@@ -1848,7 +1893,7 @@ export default function SalePdv({
                                           return (
                                             <div key={idx} className="flex items-start gap-2 text-[11px]">
                                               <span className="text-[var(--color-text-muted)] shrink-0 w-24 tabular-nums">
-                                                {when.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} {when.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                                                {when.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: STORE_TIMEZONE })} {when.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: STORE_TIMEZONE })}
                                               </span>
                                               <span className="text-[var(--color-text-secondary)] flex-1">
                                                 {label} <span className="text-[var(--color-text-muted)]">· {who}</span>

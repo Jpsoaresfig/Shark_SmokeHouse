@@ -13,6 +13,7 @@ import { type ParsedProduct } from "@/lib/csvImport";
 import { parseProductsFile } from "@/lib/spreadsheetImport";
 import { createProduct, updateProduct } from "@/lib/firebase/products";
 import { createCategory, getCategories } from "@/lib/firebase/categories";
+import { computeRedemption } from "@/lib/loyalty/redemption";
 import { toast } from "@/stores/toastStore";
 import type { Product, Category } from "@/types";
 
@@ -32,6 +33,37 @@ interface PreviewRow {
   existing?: Product;
   /** Categoria resolvida (existente) ou null = será criada. */
   categorySlug: string | null;
+}
+
+/**
+ * Custo de resgate em pontos de uma linha importada, com as MESMAS travas do
+ * formulário de produto (computeRedemption): resgate desativado no cadastro ou
+ * margem < 20% (ou sem custo) bloqueiam o resgate — a planilha não pode liberá-lo.
+ * Elegível: o valor da coluna PONTOS RESGATE vale como custo; sem valor, fica o
+ * custo calculado (fórmula ou override manual já cadastrado, que tem prioridade).
+ */
+function importRedemption(parsed: ParsedProduct, existing?: Product): { loyaltyPoints?: number; blocked: boolean } {
+  const redemption = computeRedemption({
+    price: parsed.price,
+    costPrice: parsed.costPrice ?? existing?.costPrice,
+    taxPercent: parsed.taxPercent ?? existing?.taxPercent,
+    redeemDisabled: existing?.redeemDisabled,
+    loyaltyPointsOverride: existing?.loyaltyPointsOverride,
+  });
+  if (!redemption.eligible) {
+    return { loyaltyPoints: undefined, blocked: (parsed.loyaltyPoints ?? 0) > 0 };
+  }
+  const fromSheet = parsed.loyaltyPoints && parsed.loyaltyPoints > 0 ? Math.round(parsed.loyaltyPoints) : undefined;
+  return {
+    loyaltyPoints: redemption.basis === "override" ? redemption.pointsCost ?? undefined : fromSheet ?? redemption.pointsCost ?? undefined,
+    blocked: false,
+  };
+}
+
+/** Produto existente COM grade e linha da planilha SEM variações: o estoque não
+ *  é alterado (gravar só o `stock` agregado dessincronizaria as variações). */
+function skipsStock(parsed: ParsedProduct, existing?: Product): boolean {
+  return !!existing && (existing.variations?.length ?? 0) > 0 && parsed.variations.length === 0;
 }
 
 const COLUMNS_HINT =
@@ -89,15 +121,23 @@ export function ImportSpreadsheetDialog({
       reset();
       return;
     }
-    setWarnings(result.warnings);
-    setRows(result.products.map(parsed => {
+    const extraWarnings: string[] = [];
+    const preview = result.products.map(parsed => {
       const slug = slugify(parsed.name);
       const existing = products.find(p =>
         p.slug === slug ||
         (parsed.sku && p.sku && p.sku.toLowerCase() === parsed.sku.toLowerCase()),
       );
+      if (skipsStock(parsed, existing)) {
+        extraWarnings.push(`"${parsed.name}": produto tem variações no cadastro — estoque não será alterado (ajuste por variação).`);
+      }
+      if (importRedemption(parsed, existing).blocked) {
+        extraWarnings.push(`"${parsed.name}": resgate por pontos bloqueado (desativado, sem custo ou margem abaixo de 20%) — PONTOS RESGATE ignorado.`);
+      }
       return { parsed, existing, categorySlug: resolveCategory(parsed.category) };
-    }));
+    });
+    setWarnings([...result.warnings, ...extraWarnings]);
+    setRows(preview);
   }
 
   async function handleImport() {
@@ -138,6 +178,8 @@ export function ImportSpreadsheetDialog({
               return old ? { ...old, name: pv.name, sku: pv.sku || old.sku, stock: pv.stock } : pv;
             });
             const usesVariations = mergedVariations.length > 0;
+            const { loyaltyPoints } = importRedemption(parsed, existing);
+            const keepStock = skipsStock(parsed, existing);
             await updateProduct(existing.id, {
               price: parsed.price,
               category: catSlug || existing.category,
@@ -146,13 +188,21 @@ export function ImportSpreadsheetDialog({
               costPrice: parsed.costPrice,
               taxPercent: parsed.taxPercent,
               pointsEarned: parsed.pointsEarned,
-              loyaltyPoints: parsed.loyaltyPoints,
+              loyaltyPoints,
               sku: usesVariations ? existing.sku : (parsed.sku ?? existing.sku),
               variations: usesVariations ? mergedVariations : existing.variations,
-              stock: usesVariations
-                ? mergedVariations.reduce((s, v) => s + v.stock, 0)
-                : parsed.stock,
+              // Grade no cadastro sem variações na planilha: não mexe no estoque.
+              ...(keepStock ? {} : {
+                stock: usesVariations
+                  ? mergedVariations.reduce((s, v) => s + v.stock, 0)
+                  : parsed.stock,
+              }),
             });
+            // Resgate deixou de ser elegível (custo/margem): remove o custo em
+            // pontos antigo (o update acima ignora `undefined`).
+            if (loyaltyPoints === undefined && existing.loyaltyPoints !== undefined) {
+              await updateProduct(existing.id, { loyaltyPoints: undefined }, { clearEmpty: true });
+            }
             updated++;
           } else {
             const usesVariations = parsed.variations.length > 0;
@@ -179,7 +229,7 @@ export function ImportSpreadsheetDialog({
               costPrice: parsed.costPrice,
               taxPercent: parsed.taxPercent,
               pointsEarned: parsed.pointsEarned,
-              loyaltyPoints: parsed.loyaltyPoints,
+              loyaltyPoints: importRedemption(parsed).loyaltyPoints,
             });
             created++;
           }

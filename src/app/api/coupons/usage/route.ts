@@ -11,7 +11,28 @@ export const dynamic = "force-dynamic";
  * burlar o limite criando outra conta), mas `couponRedemptions` guarda CPFs e
  * não pode ser legível por qualquer cliente. Então a contagem roda aqui, com o
  * Admin SDK, e só o número volta. Exige usuário autenticado (ID token).
+ *
+ * CPF consultado: qualquer CPF válido de 11 dígitos, de propósito. O checkout
+ * envia o CPF DIGITADO no formulário, que pode ser novo (1ª compra) ou diferente
+ * do perfil (o pedido atualiza o perfil depois), e o PDV do vendedor consulta o
+ * CPF do cliente do balcão. Restringir ao CPF do perfil quebraria esses fluxos.
+ * O risco é baixo: a resposta é só um número (usos daquele cupom por aquele
+ * CPF), nunca dados pessoais, e exige conhecer o código do cupom e o CPF. O
+ * limite real continua garantido no servidor na criação do pedido.
  */
+
+/** Doc ids de cupom: o que normalizeCouponCode produz (maiúsculas, sem espaços,
+ *  acentos permitidos — ex.: "VERÃO10"). Barra é proibida (separador de path no
+ *  Firestore), assim como "."/".." e ids reservados "__…__". */
+function isValidCouponId(id: unknown): id is string {
+  if (typeof id !== "string") return false;
+  if (id.length < 1 || id.length > 128) return false;
+  if (/[\s/\u0000-\u001f\u007f]/u.test(id)) return false;
+  if (id === "." || id === "..") return false;
+  if (/^__.*__$/.test(id)) return false;
+  return true;
+}
+
 export async function POST(request: NextRequest) {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -26,7 +47,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "JSON inválido" }, { status: 400 });
   }
   const { couponId, cpf } = (body ?? {}) as { couponId?: unknown; cpf?: unknown };
-  if (typeof couponId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(couponId)) {
+  if (!isValidCouponId(couponId)) {
     return NextResponse.json({ error: "couponId inválido" }, { status: 400 });
   }
   const cpfDigits = typeof cpf === "string" ? cpf.replace(/\D/g, "") : "";

@@ -15,8 +15,12 @@ export const dynamic = "force-dynamic";
  * (STORE_TIMEZONE) — o relógio do servidor roda em UTC. Protegida por
  * CRON_SECRET: o Vercel Cron envia `Authorization: Bearer <CRON_SECRET>`.
  *
- * Agendamento (vercel.json):
- *   { "crons": [{ "path": "/api/cron/orders-queue", "schedule": "a cada 15 minutos" }] }
+ * Agendamento (vercel.json): 1x por dia, 16:00 UTC (13:00 na loja) — o plano
+ * Hobby da Vercel só permite crons diários. Para não deixar pedidos presos na
+ * fila até o dia seguinte, a fila também é processada de forma oportunista
+ * (no máximo a cada 5 min) quando entra um pedido novo (/api/orders/create) e
+ * quando a equipe abre o painel (/api/orders/process-queue).
+ *   { "crons": [{ "path": "/api/cron/orders-queue", "schedule": "0 16 * * *" }] }
  */
 export async function POST(request: NextRequest) {
   return run(request);
@@ -28,7 +32,9 @@ export async function GET(request: NextRequest) {
 
 function authorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // sem segredo configurado, não bloqueia (dev/local)
+  // Sem CRON_SECRET a rota só fica acessível em desenvolvimento local; em
+  // produção a ausência do segredo é recusada (igual aos outros crons).
+  if (!secret) return process.env.NODE_ENV !== "production";
   const header = request.headers.get("authorization") ?? "";
   return header === `Bearer ${secret}`;
 }

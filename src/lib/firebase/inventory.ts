@@ -22,7 +22,9 @@ export async function addStockMovement(
   const additive: MovementType[] = ["in", "adjustment"];
   const delta = additive.includes(data.type) ? data.quantity : -data.quantity;
   // Variação específica → baixa no estoque da variação (e recomputa o agregado);
-  // senão, ajusta o estoque simples do produto.
+  // senão, ajusta o estoque simples do produto. Nenhum dos dois faz clamp em 0:
+  // baixa e estorno precisam ser simétricos (clamp + estorno integral criava
+  // estoque fantasma). Quem registra saída manual valida o saldo na tela.
   if (data.variationId) {
     await adjustVariationStock(data.productId, data.variationId, delta);
   } else {

@@ -1,11 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isMercadoPagoConfigured, createPixPayment } from "@/lib/payments/mercadopago";
+import { isMercadoPagoConfigured, createPixPayment, getPixPayment } from "@/lib/payments/mercadopago";
+import { syncMercadoPagoPayment } from "@/lib/payments/mercadopago.server";
 import { getOrderAdmin, setOrderProviderRef, verifyOrderPricingAdmin } from "@/lib/firebase/orders.server";
 import { resolveOrderPayment } from "@/lib/payments";
 import { logSystemError, recordMonitoredRequest } from "@/lib/observability.server";
 import { requestIdFrom } from "@/lib/requestId";
+import { isValidCpf } from "@/lib/cpf";
 
 export const runtime = "nodejs";
+
+/** Status do MP em que o QR ainda pode ser pago. */
+const LIVE_PIX = new Set(["pending", "in_process"]);
 
 /** URL pública base para notification_url: env explícita ou origem da requisição. */
 function resolveBaseUrl(request: NextRequest): string {
@@ -78,37 +83,81 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Este pedido não usa pagamento pelo Mercado Pago." }, { status: 409 });
   }
 
-  // O pedido é gravado pelo navegador: NÃO confiamos em `order.total`. Recalcula
-  // preços do catálogo, frete do bairro e cupom no servidor antes de cobrar —
-  // senão um cliente poderia gravar total R$ 0,01, pagar e o webhook liberaria.
-  try {
-    const pricing = await verifyOrderPricingAdmin(order);
-    if (!pricing.ok || !(pricing.expectedTotal > 0)) {
-      console.error("[mercadopago-create] valores do pedido não conferem", { orderId, problems: pricing.problems });
-      void logSystemError({
-        type: "payment",
-        message: "Pedido com valores divergentes — cobrança PIX recusada",
-        route: "/api/payments/mercadopago/create",
-        method: "POST",
-        statusCode: 409,
-        userId: typeof order.customerId === "string" ? order.customerId : undefined,
-        requestId,
-        metadata: { orderId, total: order.total, expectedTotal: pricing.expectedTotal, problems: pricing.problems.slice(0, 10) },
-      });
+  // Pedidos criados por /api/orders/create já têm o total calculado no servidor
+  // (`pricedBy: "server"`) — cobra esse valor. Recalcular com os preços de HOJE
+  // impedia pagar depois (em "Meus Pedidos") se um preço/frete/cupom mudasse.
+  // Pedidos antigos, gravados pelo navegador, continuam sendo conferidos: um
+  // cliente poderia ter gravado total R$ 0,01.
+  if (order.pricedBy !== "server") {
+    try {
+      const pricing = await verifyOrderPricingAdmin(order);
+      if (!pricing.ok || !(pricing.expectedTotal > 0)) {
+        console.error("[mercadopago-create] valores do pedido não conferem", { orderId, problems: pricing.problems });
+        void logSystemError({
+          type: "payment",
+          message: "Pedido com valores divergentes — cobrança PIX recusada",
+          route: "/api/payments/mercadopago/create",
+          method: "POST",
+          statusCode: 409,
+          userId: typeof order.customerId === "string" ? order.customerId : undefined,
+          requestId,
+          metadata: { orderId, total: order.total, expectedTotal: pricing.expectedTotal, problems: pricing.problems.slice(0, 10) },
+        });
+        return NextResponse.json(
+          { error: "Os valores do pedido não conferem com os preços atuais. Fale com a loja pelo WhatsApp." },
+          { status: 409 },
+        );
+      }
+    } catch (err) {
+      console.error("Erro ao conferir valores do pedido:", err);
+      return NextResponse.json({ error: "Falha ao conferir o pedido no servidor." }, { status: 500 });
+    }
+  }
+
+  if (!(Number(order.total) > 0)) {
+    return NextResponse.json(
+      { error: "Este pedido não tem valor a pagar. Fale com a loja pelo WhatsApp." },
+      { status: 409 },
+    );
+  }
+
+  // Já existe cobrança vigente → reexibe a MESMA (recarregar a página não pode
+  // gerar um segundo PIX válido, senão o cliente corre o risco de pagar duas vezes).
+  let previousDead = false;
+  if (currentPay.providerRef && currentPay.status === "pending") {
+    try {
+      const existing = await getPixPayment(currentPay.providerRef);
+      if (LIVE_PIX.has(existing.status) && existing.qrCode) {
+        return NextResponse.json({
+          ok: true,
+          paymentId: existing.id,
+          status: existing.status,
+          qrCode: existing.qrCode,
+          qrCodeBase64: existing.qrCodeBase64,
+          ticketUrl: existing.ticketUrl,
+        });
+      }
+      if (existing.status === "approved") {
+        await syncMercadoPagoPayment(String(existing.id)).catch(() => undefined);
+        return NextResponse.json({ error: "Este pedido já foi pago." }, { status: 409 });
+      }
+      // Expirou/foi recusada mas o webhook ainda não registrou → gera outra.
+      previousDead = true;
+    } catch (err) {
+      // Sem saber o estado da cobrança atual, NÃO cria outra (poderia duplicar).
+      console.error("[mercadopago-create] consulta da cobrança vigente", err);
       return NextResponse.json(
-        { error: "Os valores do pedido não conferem com os preços atuais. Fale com a loja pelo WhatsApp." },
-        { status: 409 },
+        { error: "Não foi possível carregar o PIX. Tente novamente em instantes." },
+        { status: 502 },
       );
     }
-  } catch (err) {
-    console.error("Erro ao conferir valores do pedido:", err);
-    return NextResponse.json({ error: "Falha ao conferir o pedido no servidor." }, { status: 500 });
   }
 
   // Cobrança anterior expirou/foi recusada → gera um PIX NOVO (chave de
   // idempotência diferente) e volta o status para "pending".
   const retrying =
-    !!currentPay.providerRef && (currentPay.status === "cancelled" || currentPay.status === "failed");
+    !!currentPay.providerRef &&
+    (previousDead || currentPay.status === "cancelled" || currentPay.status === "failed");
 
   // O MP exige um e-mail de pagador válido. Usa o informado pelo cliente quando
   // disponível; senão, deriva um placeholder com formato válido (PIX não envia
@@ -118,7 +167,10 @@ export async function POST(request: NextRequest) {
     clientEmail.includes("@") && clientEmail.length <= 254
       ? clientEmail
       : `pedido-${orderId.slice(-8).toLowerCase()}@shark-smokehouse.com.br`;
-  const payerCpf = String(body.payerCpf ?? "").replace(/\D/g, "") || undefined;
+  // CPF com dígito verificador errado faz o MP recusar a cobrança inteira — nesse
+  // caso cobra sem identificação (o PIX não exige CPF do pagador).
+  const cpfDigits = String(body.payerCpf ?? "").replace(/\D/g, "");
+  const payerCpf = isValidCpf(cpfDigits) ? cpfDigits : undefined;
   const [firstName, ...rest] = (order.customerName ?? "").trim().split(/\s+/);
 
   try {
