@@ -247,6 +247,6 @@ npm test
 
 **João Pedro Soares**
 
-- Portfolio: [my-profile-hazel-one.vercel.app](https://my-profile-hazel-one.vercel.app)
+- Portfolio: [jpsoaresfig.dev](https://jpsoaresfig.dev)
 - LinkedIn: [linkedin.com/in/joaopedrosoaresfigueiredo](https://www.linkedin.com/in/joaopedrosoaresfigueiredo)
 - Email: [jpbusinesss@hotmail.com](mailto:jpbusinesss@hotmail.com)
